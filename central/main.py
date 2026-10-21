@@ -13,6 +13,7 @@ from .database import Database, uid, utcnow
 from .security import Security, password_hash, verify_password, require_owned
 from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
+from .workspace import WorkspaceError
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -35,7 +36,13 @@ async def lifespan(app):
         await asyncio.gather(*pending, return_exceptions=True)
 
 
-app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
+app = FastAPI(title='Central de Trabalhadores IA', version='0.3.0', lifespan=lifespan)
+
+
+@app.exception_handler(WorkspaceError)
+async def workspace_exception(request:Request, exc:WorkspaceError):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=exc.status,content={'detail':str(exc)})
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 
 
@@ -266,6 +273,53 @@ def add_project(data:ProjectIn,user=Depends(current_user)):
     pid=uid()
     DB.execute('INSERT INTO projects VALUES(?,?,?,?,?)',(pid,user['id'],data.name,data.description,utcnow()))
     return require_owned(DB,'projects',pid,user['id'])
+
+
+@app.get('/api/projects/{pid}/workspace')
+def workspace_info(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.workspaces.info(user['id'],pid)
+
+
+@app.post('/api/projects/{pid}/workspace')
+def prepare_workspace(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.workspaces.initialize(user['id'],pid)
+
+
+@app.get('/api/projects/{pid}/workspace/file')
+def workspace_file(pid:str,path:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.workspaces.read(user['id'],pid,path)
+
+
+class ChangesIn(BaseModel):
+    files: list[dict] = Field(min_length=1,max_length=20)
+
+
+@app.post('/api/projects/{pid}/workspace/proposals')
+def propose_workspace_files(pid:str,data:ChangesIn,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.workspaces.stage(user['id'],pid,data.files,agent='Manual')
+
+
+@app.get('/api/projects/{pid}/workspace/proposals/{proposal_id}')
+def preview_proposal(pid:str,proposal_id:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.workspaces.proposal(user['id'],pid,proposal_id)
+
+
+class ProposalDecision(BaseModel):
+    approved: bool
+    confirmation: str = ''
+
+
+@app.post('/api/projects/{pid}/workspace/proposals/{proposal_id}/decision')
+def decide_proposal(pid:str,proposal_id:str,data:ProposalDecision,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    if data.approved and data.confirmation!='APLICAR':
+        raise HTTPException(422,'Confirme explicitamente a operação com APLICAR.')
+    return ENGINE.workspaces.decide(user['id'],pid,proposal_id,data.approved)
 
 
 class ConversationIn(BaseModel):
