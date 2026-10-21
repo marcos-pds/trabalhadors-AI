@@ -298,7 +298,7 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
  const attachments=S.attached.map(f=>`\n\nArquivo: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('');
  prompt+=attachments;input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
- try{const cid=await ensureConvo();appendMessage('user','Você',prompt);const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});S.selectedWorkflow='';S.currentRun=res.id;S.lastSeq=0;S.streams={};S.runSteps=[];$('#chat-cancel').hidden=false;$('#chat-send').disabled=true;const convo=S.conversations.find(c=>c.id===cid);if(convo&&convo.title==='Nova conversa'){convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title}watchRun(res.id)}catch(ex){toast(ex.message);$('#chat-send').disabled=false}}
+ try{const cid=await ensureConvo();appendMessage('user','Você',prompt);const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});S.selectedWorkflow='';S.currentRun=res.id;renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];$('#chat-cancel').hidden=false;$('#chat-send').disabled=true;const convo=S.conversations.find(c=>c.id===cid);if(convo&&convo.title==='Nova conversa'){convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title}watchRun(res.id)}catch(ex){toast(ex.message);$('#chat-send').disabled=false}}
 function disconnect(){S.source?.close();S.source=null}
 async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`);S.runSteps=run.steps||[];showSteps()}catch{};
  const src=new EventSource(`/api/runs/${rid}/events?after=${S.lastSeq}`);S.source=src;
@@ -328,7 +328,10 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='provider_recovered')appendEvent('✓ '+d.provider+': recuperado com sucesso.');
   if(msg.event==='provider_probe')appendEvent('↻ Verificando recuperação de '+d.provider+'...');
   if(msg.event==='run_failed'){appendEvent('Falha: '+d.error);finishRun(false)}
-  if(msg.event==='ui_skill_activated'){appendEvent('✓ Skill UI/UX Studio Pro ativada para este projeto a pedido do usuário.');}
+  if(msg.event==='ui_skill_activated'){
+   appendEvent('✓ Skill UI/UX Studio Pro ativada para este projeto a pedido do usuário.');
+   try{if(chatProjectId()===d.project_id){S.chatSkills=await api('/skills?project_id='+encodeURIComponent(d.project_id));renderChatSkills()}}catch{}
+  }
   if(msg.event==='workspace_prepared'){S.workspaceRunProject=d.project_id;appendEvent('📁 Pasta criada/autorizada: '+d.folder+(d.starter_files?' · '+d.starter_files+' arquivos iniciais gravados.':''))}
   if(msg.event==='workspace_files_created'){appendEvent('✓ Novos arquivos dos trabalhadores gravados automaticamente. Abra Arquivos para conferir.')}
   if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações em arquivos existentes exigem aprovação. Confira Projetos → Arquivos.')}
@@ -345,7 +348,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
 }
 function appendEvent(message){const root=$('#chat-transcript');if(!root)return;root.insertAdjacentHTML('beforeend',`<div class="chat-event">${esc(message)}</div>`);scrollChat()}
-async function finishRun(ok){disconnect();S.currentRun=null;const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
+async function finishRun(ok){disconnect();S.currentRun=null;renderChatSkills();const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
  // The final consolidated answer is persisted; use it as canonical conversation history.
  if(ok&&S.currentConvo){await showMessages(S.currentConvo)}
 }
