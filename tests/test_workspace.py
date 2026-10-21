@@ -13,6 +13,7 @@ from central.workspace import Workspaces
 def setup(c, tmp_path):
     register(c)
     ENGINE.workspaces = Workspaces(ENGINE.db,root=tmp_path/'root')
+    ENGINE.skills.workspaces = ENGINE.workspaces
     r=c.post('/api/projects',json={'name':'Loja Virtual','description':'Testes'},headers=HEADERS)
     assert r.status_code==200,r.text
     return r.json()['id']
