@@ -148,12 +148,28 @@ Os testes usam fakes apenas na suíte automatizada (zero chamadas a provedores e
 
 ## Pastas de projetos locais (PR: Estúdio de Arquivos)
 
+### Criar um projeto DIRETAMENTE pelo Chat IA
+
+Após configurar o caminho fixo no Windows, basta pedir no **Chat IA**:
+"Crie a estrutura inicial de uma loja virtual com frontend React e backend FastAPI".
+Ao identificar explicitamente uma solicitação de criação de projeto, a Central:
+- cria automaticamente o registro de Projeto e a pasta isolada em `C:\Projetos\Central-IA\...`, vinculando a conversa;
+- quando ambos **React** e **FastAPI** estiverem no pedido, cria automaticamente um **starter local funcional** (README, FastAPI de produtos mockados, React + Vite + TS, CSS e configs) mesmo se o modelo de IA retornar conteúdo truncado;
+- solicita aos trabalhadores manifestos JSON `central-files` completos e aceita JSON direto quando válido;
+- cria automaticamente **somente novos arquivos** gerados pelos trabalhadores com manifesto completo e validado; alterações/sobrescritas/exclusões continuam pendentes no painel Arquivos;
+- informa diretamente no Chat IA a pasta criada, novos arquivos e erros de geração (por exemplo JSON incompleto).
+
+**Atenção:** a criação automática do projeto é baseada em um pedido explícito (ex.: "crie projeto", "crie estrutura inicial", "desenvolva loja virtual"). Conversas explicativas comuns não recebem pastas automaticamente. O starter React+FastAPI é um template local de demonstração, não código produzido por um modelo; o chat multiagente pode acrescentar funcionalidades após gerar manifestos válidos.
+
+O limite de saída por chamada de IA para projetos aumenta de 1400 para 4096 tokens (quando suportado pelo provedor). Se a geração exceder esse limite, solicite arquivos em etapas menores. **Nunca interpretamos JSON truncado como arquivo completo, nem executamos código automaticamente.**
+
+
 A Central pode preparar uma subpasta privada para cada **Projeto** em `C:\Projetos\Central-IA` no Windows (sem permissões irrestritas a todo o disco). A raiz pode ser configurada **somente pelo administrador do processo** com a variável de ambiente `CENTRAL_WORKSPACE_ROOT`; isso também facilita testes em Linux. Reinicie o servidor após alterar a variável. Não selecione uma pasta sincronizada por terceiros ou compartilhada com usuários não confiáveis.
 
 1. Abra **Projetos → Criar projeto → Arquivos** (ou o menu **Arquivos**) e clique em **Criar pasta autorizada**. A Central cria `C:\Projetos\Central-IA\<nome>-<id>`; uma pasta já existente não é assumida automaticamente.
 2. Use **Novo arquivo**, **Abrir arquivo → Propor edição**, ou **Propor exclusão**. Todas as ações produzem **propostas**, sem alterar arquivos ainda.
-3. Revise o **diff textual** em **Alterações aguardando revisão**. Para gravar, digite `APLICAR` e clique em **Aplicar arquivos**. Rejeite a proposta se não concordar. Se o arquivo mudar após a prévia, a aplicação é recusada e exige nova proposta.
-4. Use **Trabalhar com agentes** para iniciar uma conversa **vinculada** ao projeto; no modo **Equipe**, especialistas podem trabalhar em paralelo e passar o resultado ao Revisor. Para gerar arquivos reais, solicite que entreguem os arquivos completos. O servidor extrai automaticamente blocos `central-files` válidos dos resultados concluídos, valida limites e prepara as propostas para sua revisão. **Nenhum arquivo é gravado por uma IA sem sua confirmação**.
+3. Para **edições manuais, substituições e exclusões**, revise o **diff textual** em **Alterações aguardando revisão**. Para gravar, digite `APLICAR` e clique em **Aplicar arquivos**. **Arquivos novos** produzidos por chat com manifesto completo são criados automaticamente dentro do projeto autorizado. Se o arquivo mudar após a prévia, a aplicação manual é recusada e exige nova proposta.
+4. Use **Trabalhar com agentes** para iniciar uma conversa **vinculada** ao projeto; no modo **Equipe**, especialistas podem trabalhar em paralelo e passar o resultado ao Revisor. Para gerar arquivos reais, solicite que entreguem os arquivos completos. O servidor extrai automaticamente blocos `central-files` válidos dos resultados concluídos, valida limites e prepara as propostas para sua revisão. **Arquivos novos e válidos são criados automaticamente; substituir ou excluir arquivos existentes exige sua aprovação explícita**.
 5. Consulte as propostas no painel **Arquivos** após cada execução. Nem todas as respostas de modelos são JSON correto: se não surgir proposta, solicite novamente que o agente produza um bloco `central-files` válido (JSON), ou crie a proposta manualmente.
 
 ### Segurança e limitações
