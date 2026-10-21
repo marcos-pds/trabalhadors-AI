@@ -195,18 +195,33 @@ class Engine:
             plan = [dict(id=n['id'], agent_id=n.get('agent_id'), name=n.get('name','Etapa'),
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
         else:
+            skill_active=bool(self.skills.guide(user_id,conversation_id,'frontend'))
             ui_plan = ui_execution_plan(
-                agents,prompt,mode,agent_ids,
-                skill_active=bool(self.skills.guide(user_id,conversation_id,'frontend')))
+                agents,prompt,mode,agent_ids,skill_active=skill_active)
             chosen = discover_agents(agents, prompt, mode, agent_ids)
             if not chosen: raise ValueError('Cadastre ou habilite pelo menos um trabalhador.')
             plan = ui_plan if ui_plan is not None else create_plan(chosen)
             if (ui_plan is None and self.skills.explicitly_requested(prompt) and
                 ui_implementation_request(prompt) and
                 (mode!='manual' or 'coorden' in prompt.casefold())):
-                raise ValueError('Fluxo de modernização UX/UI indisponível: '
-                                 'habilite os agentes Arquiteto, Designer e Frontend '
-                                 'e vincule esta conversa ao projeto Loja Virtual.')
+                linked=self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                                   (conversation_id,user_id))
+                causes=[]
+                if not linked or not linked['project_id']:
+                    causes.append('esta conversa não está vinculada a um projeto')
+                if not skill_active:
+                    causes.append('a Skill UI/UX Studio Pro não está ativa para o projeto desta conversa')
+                names={'architecture':'Arquiteto IA','design':'Designer IA','frontend':'Frontend IA'}
+                for role,label in names.items():
+                    entries=[a for a in agents if a['specialty']==role]
+                    if not entries:
+                        causes.append(label+' não está cadastrado')
+                    elif not any(a['enabled'] for a in entries):
+                        causes.append(label+' está desativado')
+                if not causes:
+                    causes.append('o modo atual ou a seleção manual não corresponde à coordenação solicitada')
+                raise ValueError('Fluxo UX/UI não iniciado: '+'; '.join(causes)+
+                                 '. Verifique Trabalhadore(s), o projeto e a Skill no Chat IA.')
             # For delegated team projects, the Architect receives downstream context
             # and may request only cataloged dependencies; human remains the authority.
             grant = self.skills.delegation(user_id, conversation_id)
