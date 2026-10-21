@@ -375,8 +375,11 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
        (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
     try:
+        workspace_prepared = ENGINE.workspaces.prepare_chat(user['id'],data.conversation_id,data.prompt)
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency)
+        if workspace_prepared:
+            ENGINE.emit(run_id,'workspace_prepared',workspace_prepared)
     except ValueError as exc: raise HTTPException(422,str(exc))
     return {'id':run_id}
 
