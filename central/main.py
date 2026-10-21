@@ -447,10 +447,8 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     if idempotency:
         existing=DB.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?',(user['id'],idempotency))
         if existing: return {'id':existing['id']}
-    now=utcnow()
-    DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
-    DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
-       (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
+    # Do not record the user's prompt until the run was accepted. Otherwise
+    # each 422 (e.g. disabled UI workers) adds another duplicate user bubble.
     try:
         workspace_prepared = ENGINE.workspaces.prepare_chat(user['id'],data.conversation_id,data.prompt)
         delegated = ENGINE.skills.instruction(user['id'],data.conversation_id,data.prompt)
@@ -465,6 +463,12 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
                                                    'ux-ui-studio-pro',True)
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency)
+        now=utcnow()
+        DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                   (uid(),convo['id'],user['id'],'user',None,data.prompt,now))
+        DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=? AND user_id=?',
+           (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],
+            convo['id'],user['id']))
         if workspace_prepared:
             ENGINE.emit(run_id,'workspace_prepared',workspace_prepared)
         if skill_activated:
