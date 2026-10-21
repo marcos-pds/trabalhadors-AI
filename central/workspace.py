@@ -369,6 +369,15 @@ class Workspaces:
             try:
                 files=self._extract_files(step['output'] or '')
                 if not files: continue
+                # The UX planning, design and final-review steps are advisory.
+                # Only the three assigned implementation workers may emit file
+                # manifests; otherwise a planner can silently create unrelated
+                # components while the core storefront remains unchanged.
+                if any(tag in (step['instructions'] or '') for tag in
+                       ('UI_STAGE_PLANNING','UI_STAGE_DESIGN','UI_STAGE_REVIEW')):
+                    raise WorkspaceError(
+                        'Esta etapa é de planejamento/revisão. Arquivos só podem ser produzidos '
+                        'pelas etapas Frontend de implementação atribuídas.')
                 if 'UI_STAGE_IMPLEMENT' in (step['instructions'] or ''):
                     intended=re.search(r'UMA alteração completa para ([\w./-]+)',step['instructions'])
                     expected=valid_relative(intended.group(1).rstrip('.')) if intended else None
