@@ -522,3 +522,46 @@ def test_chat_project_selector_protects_run_bound_to_draft(tmp_path):
         assert c.post(f'/api/conversations/{cid}/project',
                       json={'project_id':second},headers=HEADERS).status_code==409
         assert c.get('/api/conversations').json()[0]['project_id']==first
+
+
+
+def test_disabled_designer_explains_exact_blocker_without_duplicate_chat_bubbles(tmp_path):
+    """Regression for screenshot: UI selected, Skill active, but run silently rejected."""
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);prepare(c,project)
+        cid=conversation(c,project)
+        enabled=c.post(f'/api/projects/{project}/skills/ux-ui-studio-pro',
+                       json={'enabled':True},headers=HEADERS)
+        assert enabled.status_code==200,enabled.text
+        agents=c.get('/api/agents').json()
+        designer=next(a for a in agents if a['specialty']=='design')
+        ENGINE.db.execute('UPDATE agents SET enabled=0 WHERE id=?',(designer['id'],))
+        prompt=('Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
+                'O Arquiteto IA deve coordenar o Frontend IA e o Designer IA, '
+                'avaliar quais bibliotecas são necessárias e revisar as alterações.')
+        for attempt in range(3):
+            response=c.post('/api/runs',json={
+                'conversation_id':cid,'mode':'auto','prompt':prompt},headers=HEADERS)
+            assert response.status_code==422,response.text
+            assert 'Designer IA está desativado' in response.json()['detail']
+            assert c.get(f'/api/conversations/{cid}/messages').json()==[]
+            assert not [r for r in c.get('/api/runs').json() if r['conversation_id']==cid]
+        ENGINE.db.execute('UPDATE agents SET enabled=1 WHERE id=?',(designer['id'],))
+        from central.engine import ui_execution_plan
+        plan=ui_execution_plan(c.get('/api/agents').json(),prompt,'auto',[],True)
+        assert plan is not None and len(plan)==6
+
+
+def test_unbound_project_explains_skill_issue_without_chat_ghost_message(tmp_path):
+    with TestClient(app) as c:
+        from test_workspace import register
+        register(c)
+        response=c.post('/api/conversations',json={'title':'Sem projeto'},headers=HEADERS)
+        cid=response.json()['id']
+        prompt='Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro.'
+        result=c.post('/api/runs',json={
+            'conversation_id':cid,'mode':'auto','prompt':prompt},headers=HEADERS)
+        assert result.status_code==422,result.text
+        assert 'não está vinculada a um projeto' in result.json()['detail']
+        assert c.get(f'/api/conversations/{cid}/messages').json()==[]
+        assert not [r for r in c.get('/api/runs').json() if r['conversation_id']==cid]
