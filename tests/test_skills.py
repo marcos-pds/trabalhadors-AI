@@ -291,3 +291,59 @@ def test_ui_mode_without_skill_keeps_manual_architect_only(tmp_path):
         assert ui_execution_plan(agents,prompt,'manual',[architect['id']],False) is None
         assert ui_execution_plan(agents,'Faça apenas um plano de modernização UX/UI da loja',
                                  'manual',[architect['id']],True) is None
+
+
+def test_architect_markdown_npm_plan_is_normalized_without_shell_execution(tmp_path,monkeypatch):
+    """Plain npm commands are NEVER executed; only a validated second-turn manifest."""
+    class Planner:
+        def __init__(self):self.normalizations=0
+        async def stream(self,provider,key,model,system,messages):
+            if 'REPAIR_PACKAGE_MANIFEST' in system:
+                self.normalizations+=1
+                fence=chr(96)*3
+                yield fence+'central-packages\n{"manager":"npm","packages":["tailwindcss","@tailwindcss/vite","lucide-react"]}\n'+fence
+            elif 'UI_STAGE_PLANNING' in system:
+                yield 'Bibliotecas sugeridas: npm install tailwindcss @tailwindcss/vite lucide-react; '
+                yield 'não há manifesto estruturado.'
+            elif 'UI_STAGE_DESIGN' in system:
+                yield 'Layout premium e contraste acessível.'
+            elif 'UI_STAGE_IMPLEMENT' in system:
+                import re
+                path=re.search(r'UMA alteração completa para (\S+)\.',system)
+                assert path,system
+                target=path.group(1)
+                yield json.dumps({'files':[{'path':target,'content':'// arquivo modernizado\n'}]})
+            elif 'UI_STAGE_REVIEW' in system:
+                yield 'Os arquivos estão com a etapa de revisão concluída.'
+            elif 'ARQUITETO REVISOR AUTORIZADO' in system:
+                yield '{"decision":"approve","reason":"Revisado"}'
+            else:
+                raise AssertionError('Unexpected step')
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        fdir=folder/'frontend/src/components';fdir.mkdir(parents=True)
+        for name in ('frontend/src/App.tsx','frontend/src/index.css','frontend/src/components/ProductCard.tsx'):
+            (folder/name).write_text('// original\n')
+        c.post(f'/api/projects/{project}/skills/ux-ui-studio-pro',
+               json={'enabled':True},headers=HEADERS)
+        cid=conversation(c,project)
+        c.post(f'/api/conversations/{cid}/architect-delegation',
+               json={'enabled':True},headers=HEADERS)
+        calls=[]
+        def fake_install(self,uid,pid,manager,packages):
+            calls.append((manager,packages))
+            return {'ok':True,'manager':manager,'packages':packages,'exit_code':0,'output':'mock'}
+        monkeypatch.setattr(SkillsHub,'_install_sync',fake_install)
+        model=Planner();ENGINE.client=model
+        architect=next(a for a in c.get('/api/agents').json() if a['specialty']=='architecture')
+        r=c.post('/api/runs',json={'conversation_id':cid,'mode':'manual',
+             'agent_ids':[architect['id']],
+             'prompt':'Modernize o UX/UI da Loja Virtual. Arquiteto IA deve coordenar Frontend IA e Designer IA.'},
+             headers=HEADERS)
+        assert r.status_code==200,r.text
+        finished=wait_for(c,r.json()['id'],timeout=8)
+        assert finished['status']=='completed',finished.get('error')
+        assert model.normalizations==1
+        assert calls==[('npm',['tailwindcss','@tailwindcss/vite','lucide-react'])]
+        assert any('Instalação autorizada' in finished['output'] for x in [1])
+        assert 'npm install' not in finished['output']
