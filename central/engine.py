@@ -287,6 +287,18 @@ class Engine:
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
         system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt'])
         system += self.skills.guide(user,run['conversation_id'],agent['specialty'])
+        if agent['specialty']=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
+            from .skills import NPM, PIP
+            system += ('\nAUTONOMIA EXPLICITAMENTE DELEGADA NESTA CONVERSA: o executor poderá '
+                       'submeter alterações normais de código à revisão independente do Arquiteto. '
+                       'Você também pode solicitar instalação de dependências permitidas (se realmente necessárias) '
+                       'adicionando um bloco de instalação ao final: '+
+                       chr(96)*3+'central-packages\n'+
+                       '{"manager":"npm","packages":["lucide-react"]}\n'+chr(96)*3+
+                       '. Pacotes npm permitidos: '+', '.join(NPM)+
+                       '. Pacotes pip permitidos: '+', '.join(PIP)+
+                       '. O servidor irá checar a autorização atual, nomes e pasta. '
+                       'Nunca peça comandos livres, scripts npm ou execução da CLI shadcn.')
         providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
         providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
         if not providers:
