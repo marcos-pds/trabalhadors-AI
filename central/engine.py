@@ -82,6 +82,74 @@ def validate_flow(definition, agents):
     return nodes
 
 
+
+def ui_implementation_request(prompt):
+    """User explicitly wants a storefront UI implemented, not merely an UX explanation."""
+    lower=prompt.casefold()
+    return (bool(re.search(r'\b(moderniz\w*|redesenh\w*|refator\w*|reformul\w*|implemente\w*|melhore\w*)\b',lower))
+            and bool(re.search(r'(ux/ui|ui/ux|frontend|front-end|interface|visual|loja|e-commerce|vitrine)',lower))
+            and not bool(re.search(r'\b(como\s+(?:modernizar|melhorar)|apenas\s+(?:um\s+)?plano|somente\s+planej)',lower)))
+
+
+def ui_execution_plan(agents, prompt, mode, agent_ids, skill_active):
+    """Bounded phased implementation with real worker steps, not only an architect plan."""
+    if not skill_active or not ui_implementation_request(prompt):
+        return None
+    enabled=[a for a in agents if a['enabled']]
+    by_role={a['specialty']:a for a in enabled}
+    if not all(x in by_role for x in ('architecture','design','frontend')):
+        return None
+    chosen=[a for a in enabled if a['id'] in (agent_ids or [])]
+    delegated_architect=any(a['specialty']=='architecture' for a in chosen)
+    if mode=='manual' and not (delegated_architect and
+            re.search(r'coorden\w*.*(?:frontend|designer)',prompt,re.I|re.S)):
+        return None
+    steps=[]
+    def add(role,name,deps,instructions):
+        step={'id':uid(),'agent_id':by_role[role]['id'],'name':name,
+              'kind':'agent','deps':deps,'instructions':instructions}
+        steps.append(step)
+        return step['id']
+    intro=add('architecture','Arquiteto · Direção técnica',[],
+              'UI_STAGE_PLANNING. Coordene esta implementação real. Faça um plano conciso de '
+              'arquivos existentes, qualidade e bibliotecas do CATÁLOGO permitido. '
+              'Se autorizado a instalar, produza também central-packages válido '
+              'com até 4 pacotes necessários; NÃO liste comandos shell/npx. '
+              'Stack prioritária: Tailwind CSS 4, @tailwindcss/vite, Lucide React, Motion. '
+              'Não recomende Framer Motion legado, Heroicons nem diretivas Tailwind v3. '
+              'Preserve /api/products e não prometa carrinho persistente sem backend.')
+    design=add('design','Designer · Design system',[intro],
+               'UI_STAGE_DESIGN. Defina uma direção visual elegante e APLICÁVEL, com '
+               'hierarquia, tokens, responsividade, layout da vitrine e critérios WCAG AA. '
+               'Não apresente cronograma: entregue decisões diretas para implementação. '
+               'Trate o código existente como fonte de verdade.')
+    jobs=[
+        ('Frontend · Vitrine','frontend/src/App.tsx',
+         'Construa o layout premium com hero, busca local, categorias e grade responsiva. '
+         'Preserve fetch da API e error/loading. Importe ProductCard apenas com sua API real.'),
+        ('Frontend · Estilos','frontend/src/index.css',
+         'Implemente os estilos completos da vitrine: tokens, tipografia, breakpoints, '
+         'foco e animações com respeito a reduced-motion. Não introduza Tailwind '
+         'até ter instalação e configuração confirmadas. CSS normal é aceitável.'),
+        ('Frontend · Cartões','frontend/src/components/ProductCard.tsx',
+         'Implemente card moderno responsivo preservando as props e importações '
+         'existentes. Mantenha dados e preço em BRL. Não invente imagens.')
+    ]
+    frontend_steps=[]
+    for name,path,details in jobs:
+        frontend_steps.append(add('frontend',name,[design],
+           'UI_STAGE_IMPLEMENT. Gere exatamente UM manifesto central-files com '
+           'UMA alteração completa para '+path+'. '
+           'Priorize o arquivo existente '+path+' e NÃO escreva somente um plano. '
+           +details+' Qualquer sobrescrita seguirá revisão/aprovação.'))
+    add('architecture','Arquiteto · Revisão de integração',frontend_steps,
+        'UI_STAGE_REVIEW. Revise criticamente os artefatos de frontend entregues pelos '
+        'trabalhadores. Identifique incongruências de import/props e dependências. '
+        'Não recrie arquivos e não envie manifestos duplicados; a aprovação das '
+        'propostas de código é separada, auditada e depende da delegação do usuário.')
+    return steps
+
+
 class Engine:
     def __init__(self, db, security, client=None):
         self.db = db
@@ -122,20 +190,23 @@ class Engine:
             plan = [dict(id=n['id'], agent_id=n.get('agent_id'), name=n.get('name','Etapa'),
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
         else:
+            ui_plan = ui_execution_plan(
+                agents,prompt,mode,agent_ids,
+                skill_active=bool(self.skills.guide(user_id,conversation_id,'frontend')))
             chosen = discover_agents(agents, prompt, mode, agent_ids)
             if not chosen: raise ValueError('Cadastre ou habilite pelo menos um trabalhador.')
-            plan = create_plan(chosen)
+            plan = ui_plan if ui_plan is not None else create_plan(chosen)
             # For delegated team projects, the Architect receives downstream context
             # and may request only cataloged dependencies; human remains the authority.
             grant = self.skills.delegation(user_id, conversation_id)
-            if grant['enabled'] and mode == 'team' and not any(a['specialty']=='architecture' for a in chosen):
+            if ui_plan is None and grant['enabled'] and mode == 'team' and not any(a['specialty']=='architecture' for a in chosen):
                 architect = next((a for a in agents if a['specialty']=='architecture' and a['enabled']),None)
                 if architect:
                     plan.append({'id':uid(),'agent_id':architect['id'],'name':architect['name'],
                                  'kind':'agent','deps':[p['id'] for p in plan],
                                  'instructions':'Inspecione os resultados, revise a arquitetura e, somente se necessário, '
                                  'solicite instalação de dependências do catálogo usando central-packages.'})
-            if len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
+            if ui_plan is None and len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
                 reviewer = next((a for a in agents if a['specialty']=='review'), None)
                 if reviewer:
                     plan.append({'id':uid(),'agent_id':reviewer['id'],'name':reviewer['name'],
@@ -154,7 +225,7 @@ class Engine:
             self.db.execute('''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,instructions,status,created_at,updated_at)
              VALUES(?,?,?,?,?,?,?,?,?,?)''',
              (p['id'],run_id,p['agent_id'],p['kind'],p['name'],json.dumps(p['deps']),p['instructions'],'queued',now,now))
-        self.emit(run_id,'run_created',{'mode':mode,'plan':plan})
+        self.emit(run_id,'run_created',{'mode':mode,'plan':plan,'ui_implementation':bool(not flow and 'ui_plan' in locals() and ui_plan is not None)})
         self.schedule(run_id)
         return run_id
 
@@ -182,6 +253,11 @@ class Engine:
             changes = {'pending': [], 'auto_applied': [], 'errors': [], 'architect_applied': [], 'installed': []}
             try:
                 changes = self.workspaces.stage_run(run)
+                if any('UI_STAGE_IMPLEMENT' in (step.get('instructions') or '') for step in steps):
+                    coding = [step for step in steps if 'UI_STAGE_IMPLEMENT' in (step.get('instructions') or '')]
+                    produced = [s for s in coding if self.workspaces._extract_files(s.get('output') or '')]
+                    if not produced:
+                        changes['errors'].append('Etapas UX/UI não entregaram arquivos completos. Plano não equivale a implementação.')
                 changes['architect_applied'] = await self._delegated_review(run,changes['pending'])
                 changes['pending'] = [pid for pid in changes['pending'] if pid not in changes['architect_applied']]
                 if changes['architect_applied']:
@@ -208,7 +284,8 @@ class Engine:
                                 (run['conversation_id'],run['user_id']))
             if convo and convo['project_id'] and (
                 self.workspaces.wants_project(run['prompt']) or
-                changes['pending'] or changes['auto_applied'] or changes['architect_applied'] or changes['installed'] or changes['errors']):
+                changes['pending'] or changes['auto_applied'] or changes['architect_applied'] or changes['installed'] or changes['errors'] or
+                any('UI_STAGE_IMPLEMENT' in (p.get('instructions') or '') for p in json.loads(run['plan']))):
                 try:
                     workspace = self.workspaces.info(run['user_id'],convo['project_id'])
                     summary = ['## Resultado no Windows',
@@ -285,7 +362,7 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
-        system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt'])
+        system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt']+' '+(step['instructions'] or ''))
         system += self.skills.guide(user,run['conversation_id'],agent['specialty'])
         if agent['specialty']=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
             from .skills import NPM, PIP
@@ -471,11 +548,12 @@ class Engine:
         if run['budget_limit'] is not None or 'central-files' not in system:
             return output
         has_existing = '=== INÍCIO DO ARQUIVO EXISTENTE:' in system
+        is_ui_worker = 'UI_STAGE_IMPLEMENT' in (step['instructions'] or '')
         edit_intent = bool(re.search(
             r'\b(integre|integrar|edite|editar|altere|alterar|modifique|modificar|atualize|atualizar|corrija|corrigir|substitua|substituir)\b',
             run['prompt'].lower()))
-        repair_edit = has_existing and edit_intent
-        if not (self.workspaces.wants_project(run['prompt']) or repair_edit):
+        repair_edit = has_existing and (edit_intent or is_ui_worker)
+        if not (self.workspaces.wants_project(run['prompt']) or repair_edit or is_ui_worker):
             return output
         allowed = ('frontend', 'backend', 'code', 'design', 'architecture') if repair_edit else (
             'frontend', 'backend', 'code', 'design')
@@ -504,6 +582,7 @@ class Engine:
             'Responda EXCLUSIVAMENTE um objeto JSON sem fences, sem comentários e sem texto antes/depois: '
             '{"files":[{"path":"caminho/arquivo.ext","action":"write","content":"conteúdo completo escapado como JSON"}]}. '
             'A string content deve ser JSON válido com quebras de linha escapadas. '
+            'Etapa de implementação: ' + (step['instructions'] or '')[:1400] + '. '
             'Pedido original: ' + run['prompt'][:1000] + '.'
         )
         chunks = []
