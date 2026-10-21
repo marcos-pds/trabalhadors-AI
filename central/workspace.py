@@ -363,12 +363,18 @@ class Workspaces:
                            (project_id,run['user_id'])):
             return {'pending':[],'auto_applied':[],'errors':['A pasta do projeto não está preparada.']}
         staged=[];errors=[];used=set();total_files=0
-        steps=self.db.all("SELECT name,output FROM steps WHERE run_id=? AND status='completed' AND kind='agent'",(run['id'],))
+        steps=self.db.all("SELECT name,output,instructions FROM steps WHERE run_id=? AND status='completed' AND kind='agent'",(run['id'],))
         tasks=[]
         for step in steps:
             try:
                 files=self._extract_files(step['output'] or '')
                 if not files: continue
+                if 'UI_STAGE_IMPLEMENT' in (step['instructions'] or ''):
+                    intended=re.search(r'UMA alteração completa para ([\w./-]+)',step['instructions'])
+                    expected=valid_relative(intended.group(1).rstrip('.')) if intended else None
+                    if not expected or len(files)!=1 or not isinstance(files[0],dict) or (
+                        valid_relative(files[0].get('path')).casefold()!=expected.casefold()):
+                        raise WorkspaceError('Etapa UX/UI tentou entregar arquivos fora de sua responsabilidade.')
                 for item in files:
                     if not isinstance(item,dict): raise WorkspaceError('Estrutura de arquivo inválida.')
                     key=valid_relative(item.get('path')).lower()
@@ -392,12 +398,12 @@ class Workspaces:
                 result=self.stage(run['user_id'],project_id,files,run_id=run['id'],agent=name)
                 staged.append(result['id'])
         except WorkspaceError as exc:
-            return {'pending':staged,'auto_applied':[],'errors':[str(exc)]}
+            return {'pending':staged,'auto_applied':[],'errors':errors+[str(exc)]}
         previews=[self.proposal(run['user_id'],project_id,pid) for pid in staged]
         # If any worker proposes a destructive change, keep ALL proposals for explicit approval.
         if any(file['action']!='write' or file['replace'] or file['stale']
                for proposal in previews for file in proposal['files']):
-            return {'pending':staged,'auto_applied':[],'errors':[]}
+            return {'pending':staged,'auto_applied':[],'errors':errors}
         applied=[]
         # All files are new, and all proposals were validated. Recheck during decide.
         for pid in staged:
