@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -34,7 +35,7 @@ async def lifespan(app):
         await asyncio.gather(*pending, return_exceptions=True)
 
 
-app = FastAPI(title='Central de Trabalhadores IA', version='0.1.0', lifespan=lifespan)
+app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 
 
@@ -117,7 +118,10 @@ class ProviderIn(BaseModel):
 
 
 def public_provider(row):
-    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc'])}
+    health = ENGINE.health.detail(row['id'], row['model'])
+    if not row['enabled']:
+        health['state'] = 'disabled'
+    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc']), 'health':health}
 
 
 def check_provider(data):
@@ -164,17 +168,44 @@ def delete_provider(pid:str,user=Depends(current_user)):
     return {'ok':True}
 
 
+@app.get('/api/providers/{pid}/attempts')
+def provider_attempts(pid: str, user=Depends(current_user)):
+    provider = require_owned(DB, 'providers', pid, user['id'])
+    return ENGINE.health.attempts(pid, provider['model'], 30)
+
+
 @app.post('/api/providers/{pid}/test')
 async def test_provider(pid:str,user=Depends(current_user)):
-    p=require_owned(DB,'providers',pid,user['id'])
+    p = require_owned(DB,'providers',pid,user['id'])
+    allowed, half_open = ENGINE.health.acquire(pid, p['model'])
+    if not allowed:
+        detail = ENGINE.health.detail(pid, p['model'])
+        return {'ok':False,'category':'suspended',
+                'error':f"Modelo temporariamente suspenso. Aguarde {detail['remaining_seconds']} segundos."}
+    started = time.monotonic()
     try:
         chunks=[]
-        async for part in ENGINE.client.stream(p,SEC.decrypt(p['api_key_enc']),p['model'], 'Seja conciso.',[{'role':'user','content':'Responda somente OK.'}]):
+        async for part in ENGINE.client.stream(p,SEC.decrypt(p['api_key_enc']),p['model'],
+                                               'Seja conciso.',[{'role':'user','content':'Responda somente OK.'}]):
             chunks.append(part)
             if sum(map(len,chunks))>100: break
-        return {'ok':bool(''.join(chunks).strip()),'response':' '.join(chunks)[:110]}
+        answer=''.join(chunks).strip()
+        if not answer:
+            raise ProviderError('response','Resposta vazia.',True)
+        ENGINE.health.record(pid,p['model'],success=True,latency_ms=(time.monotonic()-started)*1000)
+        DB.execute('UPDATE providers SET last_error=NULL WHERE id=?',(pid,))
+        return {'ok':True,'response':answer[:110]}
     except ProviderError as e:
+        ENGINE.health.record(pid,p['model'],success=False,error=e,latency_ms=(time.monotonic()-started)*1000)
+        DB.execute('UPDATE providers SET last_error=? WHERE id=?',(str(e)[:220],pid))
         return {'ok':False,'category':e.category,'error':str(e)}
+    except asyncio.CancelledError:
+        if half_open: ENGINE.health.release_probe(pid,p['model'])
+        raise
+    except Exception:
+        failure=ProviderError('internal','Falha interna na validação.',False)
+        ENGINE.health.record(pid,p['model'],success=False,error=failure,latency_ms=(time.monotonic()-started)*1000)
+        return {'ok':False,'category':'internal','error':'Falha interna na validação.'}
 
 
 class AgentIn(BaseModel):
