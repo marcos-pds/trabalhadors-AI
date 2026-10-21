@@ -166,16 +166,16 @@ class Engine:
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
-            self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
-            self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
-                 (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
-            self.emit(run_id,'run_completed',{'output':output})
             try:
                 proposals = self.workspaces.stage_run(run)
                 if proposals:
                     self.emit(run_id,'workspace_proposals',{'proposal_ids':proposals})
             except Exception as exc:
                 self.emit(run_id,'workspace_stage_error',{'message':'Não foi possível preparar as alterações: '+str(exc)[:150]})
+            self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
+            self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                 (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
+            self.emit(run_id,'run_completed',{'output':output})
         except asyncio.CancelledError:
             new_status = 'queued' if self.shutting_down else 'cancelled'
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
