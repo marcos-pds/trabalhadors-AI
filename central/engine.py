@@ -2,9 +2,11 @@
 import asyncio
 import json
 import random
+import time
 from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
+from .health import ProviderHealth
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -86,7 +88,7 @@ class Engine:
         self.shutting_down = False
         self.sem = asyncio.Semaphore(5)
         self.agent_sems = {}
-        self.circuit = {}  # (provider_id, model) -> monotonic expiry
+        self.health = ProviderHealth(db)  # persistent across restarts
         self.approvals = defaultdict(asyncio.Event)
 
     def emit(self, run_id, kind, data):
@@ -205,8 +207,7 @@ class Engine:
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
         providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
-        if agent['provider_id']:
-            providers.sort(key=lambda p: p['id'] != agent['provider_id'])
+        providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
         if not providers:
             raise RuntimeError('Nenhum provedor configurado. Abra Provedores e adicione uma API válida.')
         failures = []
@@ -217,29 +218,41 @@ class Engine:
                     self.emit(run['id'],'step_reset',{'step_id':sid,'reason':'failover'})
                 model = agent['model'] if provider['id']==agent['provider_id'] and agent['model'] else provider['model']
                 if not model: continue
-                key = (provider['id'],model)
-                if self.circuit.get(key,0) > asyncio.get_running_loop().time(): continue
+                allowed, half_open = self.health.acquire(provider['id'], model)
+                if not allowed:
+                    failures.append(f"{provider['name']}/{model}: suspensão temporária")
+                    self.emit(run['id'], 'provider_skipped', {'step_id': sid, 'provider': provider['name'], 'model': model, 'reason': 'suspended'})
+                    continue
+                if half_open:
+                    self.emit(run['id'], 'provider_probe', {'step_id': sid, 'provider': provider['name'], 'model': model})
                 if run['budget_limit'] is not None:
                     # Require explicitly configured estimates to avoid silently bypassing user budget.
                     if provider['input_price'] is None or provider['output_price'] is None:
                         failures.append('Preço/token não configurado; provedor bloqueado pelo orçamento.')
+                        if half_open: self.health.release_probe(provider['id'], model)
                         continue
                     estimated = ((len(run['prompt'])/4)/1_000_000*provider['input_price'] + (1400/1_000_000)*provider['output_price'])
                     current = self.db.one('SELECT total_cost FROM runs WHERE id=?', (run['id'],))['total_cost']
                     if current+estimated > run['budget_limit']:
                         failures.append('Orçamento insuficiente para a estimativa da requisição.')
+                        if half_open: self.health.release_probe(provider['id'], model)
                         continue
                 for attempt in range(2):
                     self.db.execute('UPDATE steps SET attempts=attempts+1,provider_id=?,model=?,updated_at=? WHERE id=?',
                                     (provider['id'],model,utcnow(),sid))
                     self.emit(run['id'],'model_selected',{'step_id':sid,'provider':provider['name'],'model':model,'attempt':attempt+1})
                     parts = []
+                    started = time.monotonic()
                     try:
                         async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
                             parts.append(token)
                             self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
                         output = ''.join(parts)
                         if not output.strip(): raise ProviderError('response','Resposta vazia.',True)
+                        health_event = self.health.record(provider['id'], model, success=True,
+                            latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
+                        if health_event['recovered']:
+                            self.emit(run['id'], 'provider_recovered', {'step_id': sid, 'provider': provider['name'], 'model': model})
                         price = 0.0
                         if provider['input_price'] is not None and provider['output_price'] is not None:
                             # This is an estimate: streaming tokens usage varies by API. Not billed cost.
@@ -250,24 +263,35 @@ class Engine:
                         self.emit(run['id'],'step_status',{'id':sid,'name':agent['name'],'status':'completed','provider':provider['name'],'model':model})
                         return
                     except ProviderError as e:
+                        health_event = self.health.record(provider['id'], model, success=False, error=e,
+                            latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
+                        if health_event['opened']:
+                            self.emit(run['id'], 'provider_suspended', {'step_id':sid,'provider':provider['name'],
+                                'model':model,'category':e.category,'until':health_event['until']})
                         failures.append(f"{provider['name']}/{model}: {e.category}")
                         self.db.execute('UPDATE steps SET error=? WHERE id=?',(str(e),sid))
                         self.db.execute('UPDATE providers SET last_error=? WHERE id=?',(str(e),provider['id']))
                         self.emit(run['id'],'provider_error',{'step_id':sid,'provider':provider['name'],'category':e.category,'message':str(e)})
                         if e.category in ('authentication','credits'):
                             self.db.execute('UPDATE providers SET enabled=0 WHERE id=?',(provider['id'],))
-                        if not e.retryable:
+                        if not e.retryable or health_event['opened']:
                             break
                         # Streaming already emitted: do not replay partial text without a clear recovery event.
                         if attempt==0:
                             self.emit(run['id'],'step_reset',{'step_id':sid,'reason':'retry'})
                             await asyncio.sleep(0.25+random.random()*0.15)
-                        else: self.circuit[key] = asyncio.get_running_loop().time()+30
+                        # Persisted breaker decides future eligibility.
+                    except asyncio.CancelledError:
+                        if half_open: self.health.release_probe(provider['id'], model)
+                        raise
                     except Exception as e:
+                        failure = ProviderError('internal', 'Falha interna durante execução.', False)
+                        self.health.record(provider['id'],model,success=False,error=failure,
+                            latency_ms=(time.monotonic()-started)*1000,run_id=run['id'],step_id=sid)
                         failures.append(f"{provider['name']}/{model}: internal error")
-                        self.emit(run['id'],'provider_error',{'step_id':sid,'provider':provider['name'],'category':'internal','message':str(e)[:120]})
+                        self.emit(run['id'],'provider_error',{'step_id':sid,'provider':provider['name'],'category':'internal','message':'Falha interna durante execução.'})
                         break
-                self.emit(run['id'],'failover',{'step_id':sid,'failed_provider':provider['name'],'message':'Tentando próximo modelo compatível.'})
+                self.emit(run['id'],'failover',{'step_id':sid,'failed_provider':provider['name'],'message':'Tentando próximo provedor habilitado.'})
         self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? WHERE id=?",('; '.join(failures)[:400],utcnow(),sid))
         raise RuntimeError('Não foi possível concluir ' + agent['name'] + ': ' + '; '.join(failures)[:220])
 
