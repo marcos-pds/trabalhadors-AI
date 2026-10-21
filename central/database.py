@@ -70,6 +70,29 @@ CREATE TABLE IF NOT EXISTS workspace_proposals (
  created_at TEXT NOT NULL, applied_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_proposals ON workspace_proposals(user_id,project_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS project_skills (
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ skill_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+ updated_at TEXT NOT NULL, PRIMARY KEY(project_id,skill_id)
+);
+CREATE TABLE IF NOT EXISTS architect_delegations (
+ conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS architect_approval_log (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL,
+ conversation_id TEXT NOT NULL, proposal_id TEXT NOT NULL,
+ run_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT NOT NULL,
+ created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS architect_package_installs (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL,
+ run_id TEXT NOT NULL, manager TEXT NOT NULL, packages TEXT NOT NULL,
+ status TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL, finished_at TEXT
+);
 CREATE TABLE IF NOT EXISTS conversations (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  title TEXT NOT NULL, project_id TEXT REFERENCES projects(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
