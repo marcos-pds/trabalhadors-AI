@@ -382,6 +382,41 @@ def new_conversation(data:ConversationIn,user=Depends(current_user)):
     return require_owned(DB,'conversations',cid,user['id'])
 
 
+class ConversationProjectIn(BaseModel):
+    project_id: str | None = None
+
+
+@app.post('/api/conversations/{cid}/project')
+def change_conversation_project(cid:str,data:ConversationProjectIn,
+                                request:Request,user=Depends(current_user)):
+    """Bind a draft chat to a project. Existing history remains immutable.
+
+    Once a message or run exists, switch project by opening a NEW conversation.
+    This prevents old runs, file proposals or architect authority from crossing
+    project boundaries.
+    """
+    require_csrf(request)
+    if data.project_id:
+        require_owned(DB,'projects',data.project_id,user['id'])
+    with DB.lock:
+        convo=require_owned(DB,'conversations',cid,user['id'])
+        if data.project_id==convo['project_id']:
+            return convo
+        used=DB.one('''SELECT 1 AS used FROM messages
+                       WHERE conversation_id=? AND user_id=? LIMIT 1''',
+                    (cid,user['id']))
+        runs=DB.one('''SELECT 1 AS used FROM runs
+                       WHERE conversation_id=? AND user_id=? LIMIT 1''',
+                    (cid,user['id']))
+        if used or runs:
+            raise HTTPException(409,'Esta conversa já possui histórico. Crie uma nova conversa para trocar de projeto.')
+        DB.execute('DELETE FROM architect_delegations WHERE conversation_id=? AND user_id=?',
+                   (cid,user['id']))
+        DB.execute('UPDATE conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=?',
+                   (data.project_id,utcnow(),cid,user['id']))
+    return require_owned(DB,'conversations',cid,user['id'])
+
+
 @app.get('/api/conversations/{cid}/messages')
 def convo_messages(cid:str,user=Depends(current_user)):
     require_owned(DB,'conversations',cid,user['id'])
