@@ -1,10 +1,10 @@
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register'};
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
 const fmtDate=s=>s?new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
-const icon={dashboard:'◫',chat:'▣',agents:'◈',workflows:'⌁',projects:'▤',history:'◷',monitoring:'⌁',providers:'⬡',settings:'⚙'};
-const pages={dashboard:'Dashboard',chat:'Chat IA',agents:'Trabalhadores',workflows:'Fluxos',projects:'Projetos',history:'Histórico',monitoring:'Monitoramento',providers:'Provedores',settings:'Configurações'};
+const icon={dashboard:'◫',chat:'▣',agents:'◈',workflows:'⌁',projects:'▤',workspace:'▧',history:'◷',monitoring:'⌁',providers:'⬡',settings:'⚙'};
+const pages={dashboard:'Dashboard',chat:'Chat IA',agents:'Trabalhadores',workflows:'Fluxos',projects:'Projetos',workspace:'Arquivos',history:'Histórico',monitoring:'Monitoramento',providers:'Provedores',settings:'Configurações'};
 let toastTimer=0;
 function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;let root=$('.toasts');if(!root){root=document.createElement('div');root.className='toasts';document.body.append(root)}root.append(el);setTimeout(()=>el.remove(),5200)}
 async function api(path,method='GET',data,opts={}){
@@ -39,7 +39,7 @@ function authView(){
 }
 function shell(){
  applyTheme();
- $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
+ $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
  renderPage();
 }
 function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${icon[page]}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
@@ -56,6 +56,7 @@ async function renderPage(){let html='';const ct=$('#content');ct.className=S.pa
  if(S.page==='agents')html=agents();
  if(S.page==='workflows')html=workflows();
  if(S.page==='projects')html=projects();
+ if(S.page==='workspace'){await refreshWorkspace();html=workspaceView()}
  if(S.page==='history')html=history();
  if(S.page==='settings')html=settings();
  if(S.page==='chat')html=chat();
@@ -100,7 +101,58 @@ async function openHealthHistory(pid){
 function providers(){return `${heading('INTEGRAÇÕES','Provedores de inteligência artificial','Gerencie APIs, prioridades e disponibilidade medida das conexões.',`<button class="btn btn-primary" data-action="add-provider">＋ Conectar provedor</button>`)}<div class="hint">Estado "Ativo" significa habilitado. Os indicadores abaixo usam somente requisições reais. Suspensões temporárias não alteram suas credenciais e são retomadas com uma única chamada de recuperação após a espera.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Provedor</th><th>Modelo</th><th>Prioridade</th><th>Saúde</th><th class="right">Ações</th></tr></thead><tbody>${S.providers.map(p=>{const state=healthState(p);const h=p.health||{};return `<tr><td><strong>${esc(p.name)}</strong><small>${esc(p.kind)} · ${p.has_key?'Chave armazenada':'Sem chave'}</small></td><td>${esc(p.model)}</td><td>${p.priority}</td><td><span class="status ${state[1]}">${state[0]}</span><small>${healthNote(p)}${h.state==='suspended'?` · Retorno em ~${h.remaining_seconds}s`:''}</small></td><td><div class="action-group"><button class="btn btn-sm" data-action="test-provider" data-id="${p.id}">Testar</button><button class="btn btn-sm" data-action="health-history" data-id="${p.id}">Histórico</button><button class="btn btn-sm btn-quiet" data-action="edit-provider" data-id="${p.id}">Editar</button><button class="btn btn-sm btn-danger" data-action="delete-provider" data-id="${p.id}">Excluir</button></div></td></tr>`}).join('')||`<tr><td colspan="5"><div class="empty">Nenhum provedor cadastrado.</div></td></tr>`}</tbody></table></div>`}
 
 function agents(){return `${heading('EQUIPE IA','Seus trabalhadores inteligentes','Dez especialidades já estão preparadas. Personalize as instruções e selecione os modelos.',`<button class="btn btn-primary" data-action="add-agent">＋ Criar trabalhador</button>`)}<div class="cards">${S.agents.map(a=>`<article class="agent-card"><div class="card-top"><div class="avatar">${esc(a.avatar)}</div><span class="status ${a.enabled?'completed':'failed'}">${a.enabled?'Disponível':'Desativado'}</span></div><h3>${esc(a.name)}</h3><p>${esc(a.instructions.slice(0,116))}${a.instructions.length>116?'…':''}</p><div class="chips"><span class="chip">${esc(a.specialty)}</span><span class="chip">${esc(S.providers.find(p=>p.id===a.provider_id)?.name||'Modelo automático')}</span></div><div class="agent-actions"><span style="color:var(--muted);font-size:11px">${a.max_concurrency} tarefa(s)/agente*</span><button class="btn btn-sm" data-action="edit-agent" data-id="${a.id}">Configurar →</button></div></article>`).join('')}</div><p class="page-desc" style="margin-top:17px">* Os limites individuais estão salvos nas configurações; nesta versão, o executor aplica um limite global de concorrência.</p>`}
-function projects(){return `${heading('ORGANIZAÇÃO','Projetos','Agrupe conversas por iniciativa e mantenha o histórico acessível.',`<button class="btn btn-primary" data-action="add-project">＋ Criar projeto</button>`)}<div class="cards">${S.projects.map(p=>`<article class="agent-card"><div class="avatar">▤</div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Sem descrição.')}</p><div class="agent-actions"><span style="color:var(--muted);font-size:11px">${fmtDate(p.created_at)}</span><button class="btn btn-sm" data-action="project-chat" data-id="${p.id}">Nova conversa →</button></div></article>`).join('')||'<div class="panel empty"><div class="empty-icon">▤</div><strong>Nenhum projeto criado</strong>Comece criando um workspace para suas tarefas.</div>'}</div>`}
+async function refreshWorkspace(){
+ if(!S.workspaceProject)S.workspaceProject=S.projects[0]?.id||null;
+ if(!S.workspaceProject){S.workspaceInfo=null;return}
+ try{S.workspaceInfo=await api(`/projects/${S.workspaceProject}/workspace`)}
+ catch(ex){if(ex.message.includes('Prepare primeiro'))S.workspaceInfo={needsSetup:true};else S.workspaceInfo={error:ex.message}}
+}
+function workspaceView(){
+ const options=S.projects.map(p=>`<option value="${esc(p.id)}" ${S.workspaceProject===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+ const title=heading('ARQUIVOS LOCAIS','Estúdio de projetos','Criação e edição real no Windows com prévia e aprovação humana. Nenhum comando é executado automaticamente.',`<button class="btn btn-sm" data-action="workspace-refresh">↻ Atualizar</button>`);
+ if(!S.projects.length)return title+'<div class="hint">Primeiro crie um projeto na aba Projetos.</div>';
+ const select=`<div class="workspace-toolbar"><label for="ws-project">Projeto:</label><select class="field" id="ws-project">${options}</select><button class="btn btn-sm" data-action="workspace-chat">✦ Trabalhar com agentes</button></div>`;
+ const data=S.workspaceInfo||{};
+ if(data.needsSetup)return title+select+`<section class="panel panel-body"><h3>Autorizar pasta para este projeto</h3><p class="page-desc">Ao confirmar, a Central criará uma subpasta nova e exclusiva dentro de C:\\Projetos\\Central-IA. Não terá permissão para modificar arquivos fora da raiz.</p><button class="btn btn-primary" data-action="workspace-create">Criar pasta autorizada</button></section>`;
+ if(data.error)return title+select+`<div class="hint">${esc(data.error)}</div>`;
+ return title+select+`<div class="hint">Pasta autorizada: <code>${esc(data.folder||'')}</code>. Os agentes podem enviar trechos dos arquivos deste projeto ao provedor de IA escolhido. Nunca armazene segredos aqui. Alterações precisam de aprovação explícita e não executamos comandos automaticamente.</div><div class="workspace-columns"><section class="panel"><div class="panel-head"><h3>Explorador de arquivos</h3><button class="btn btn-sm btn-primary" data-action="workspace-new-file">＋ Arquivo</button></div><div class="ws-file-list">${(data.files||[]).map(f=>`<button class="ws-file" data-action="workspace-open-file" data-path="${esc(f.path)}"><span>◫</span><span>${esc(f.path)}</span><small>${f.bytes} B</small></button>`).join('')||'<div class="empty">Pasta vazia. Crie um arquivo manualmente ou peça aos agentes para gerar um projeto.</div>'}</div></section><section class="panel"><div class="panel-head"><h3>Alterações aguardando revisão</h3><span class="status running">${(data.proposals||[]).filter(x=>x.status==='pending').length} pendente(s)</span></div><div class="ws-proposals">${(data.proposals||[]).map(item=>`<div class="ws-proposal"><div><strong>${esc(item.agent||'Edição manual')}</strong><small>${esc(item.files.map(f=>(f.action==='delete'?'Excluir: ':'')+f.path).join(', '))}</small><small>${esc(item.status==='pending'?'Aguardando aprovação':item.status==='applied'?'Aplicada':'Rejeitada')}</small></div><button class="btn btn-sm ${item.status==='pending'?'btn-primary':''}" data-action="workspace-review" data-id="${esc(item.id)}">${item.status==='pending'?'Revisar':'Ver diff'}</button></div>`).join('')||'<div class="empty">Nenhuma proposta. No chat vinculado ao projeto, peça para os agentes gerarem arquivos.</div>'}</div></section></div>`;
+}
+async function workspaceNewFile(path='',existing=''){
+ const editing=!!path;
+ const body=`${field('path','Caminho relativo',path,'text',`required ${editing?'readonly':''} placeholder="src/App.jsx"`)}<div class="form-row"><label class="form-label">Conteúdo completo (UTF-8)</label><textarea name="content" rows="12" class="field ws-editor" required maxlength="160000">${esc(existing)}</textarea></div><p class="page-desc">Salvar cria uma PROPOSTA, não grava o arquivo. A gravação exige aprovação posterior.</p>`;
+ modal(editing?'Propor edição':'Propor novo arquivo','O arquivo só será gravado após você revisar o diff e aprovar.',body,async f=>{
+  await api(`/projects/${S.workspaceProject}/workspace/proposals`,'POST',{files:[{path:f.get('path'),content:f.get('content'),action:'write'}]});
+  await renderPage();toast('Proposta criada. Revise-a antes de aplicar.');
+ },'Preparar proposta');
+}
+async function workspaceOpenFile(path){
+ const file=await api(`/projects/${S.workspaceProject}/workspace/file?path=${encodeURIComponent(path)}`);
+ const form=modal('Arquivo: '+path,'Visualização de texto. Você pode propor uma alteração ou exclusão, ambas exigirão aprovação.',
+  `<div class="form-row"><textarea readonly rows="15" class="field ws-editor">${esc(file.content)}</textarea></div><button type="button" class="btn btn-danger" id="ws-delete">Propor exclusão</button>`,async()=>{workspaceNewFile(path,file.content)},'Propor edição');
+ form.querySelector('#ws-delete').onclick=async()=>{
+  if(!confirm('Preparar uma proposta de exclusão para '+path+'? Nenhum arquivo será excluído agora.'))return;
+  try{await api(`/projects/${S.workspaceProject}/workspace/proposals`,'POST',{files:[{path,action:'delete'}]});form.remove();await renderPage();toast('Exclusão proposta: aguarda aprovação.')}catch(e){toast(e.message)}
+ };
+}
+async function workspaceReview(id){
+ const pid=S.workspaceProject;
+ const preview=await api(`/projects/${pid}/workspace/proposals/${id}`);
+ const pending=preview.status==='pending',danger=preview.files.some(x=>x.replace||x.action==='delete');
+ const body=`<div class="ws-diff-list">${preview.files.map(f=>`<div class="ws-diff"><strong>${esc(f.path)}</strong><small>${f.action==='delete'?'Excluir arquivo':f.replace?'Substituir arquivo existente':'Criar novo arquivo'} ${f.stale?'<span class="ws-conflict">⚠ Modificado desde a proposta</span>':''}</small><pre>${esc(f.diff)}</pre></div>`).join('')}</div>${pending?`<p class="hint">${danger?'Atenção: esta proposta substitui ou remove arquivos existentes.':'Esta proposta cria novos arquivos.'} Compare o conteúdo antes de continuar.</p>${field('confirmation','Digite APLICAR para gravar os arquivos','','text','required autocomplete="off"')}`:''}`;
+ const back=modal('Revisar alterações','O diff exibe o conteúdo que será modificado no seu Windows.',body,async f=>{
+   if(!pending)return;
+   if(f.get('confirmation')!=='APLICAR')throw new Error('Digite APLICAR exatamente para confirmar.');
+   await api(`/projects/${pid}/workspace/proposals/${id}/decision`,'POST',{approved:true,confirmation:'APLICAR'});
+   await renderPage();toast('Alterações aplicadas com aprovação.');
+ },pending?'Aplicar arquivos':'Fechar');
+ if(pending){
+  const actions=back.querySelector('.modal-actions');
+  const reject=document.createElement('button');reject.type='button';reject.className='btn btn-danger';reject.textContent='Rejeitar proposta';
+  reject.onclick=async()=>{try{await api(`/projects/${pid}/workspace/proposals/${id}/decision`,'POST',{approved:false});back.remove();await renderPage();toast('Proposta rejeitada.')}catch(ex){toast(ex.message)}};
+  actions.prepend(reject);
+ }
+}
+function projects(){return `${heading('ORGANIZAÇÃO','Projetos','Agrupe conversas por iniciativa e mantenha o histórico acessível.',`<button class="btn btn-primary" data-action="add-project">＋ Criar projeto</button>`)}<div class="cards">${S.projects.map(p=>`<article class="agent-card"><div class="avatar">▤</div><h3>${esc(p.name)}</h3><p>${esc(p.description||'Sem descrição.')}</p><div class="agent-actions"><span style="color:var(--muted);font-size:11px">${fmtDate(p.created_at)}</span><button class="btn btn-sm" data-action="project-chat" data-id="${p.id}">Nova conversa →</button><button class="btn btn-sm btn-primary" data-action="project-files" data-id="${p.id}">▧ Arquivos →</button></div></article>`).join('')||'<div class="panel empty"><div class="empty-icon">▤</div><strong>Nenhum projeto criado</strong>Comece criando um workspace para suas tarefas.</div>'}</div>`}
 function history(){return `${heading('REGISTROS','Histórico de execuções','Consulte resultados, erros e horários das tarefas persistidas.',`<button class="btn" data-action="refresh">↻ Atualizar</button>`)}<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarefa</th><th>Data</th><th>Status</th><th>Custo estimado*</th><th class="right">Ações</th></tr></thead><tbody>${S.runs.map(r=>`<tr><td><strong>${esc(r.prompt.slice(0,85))}</strong><small>ID ${esc(r.id.slice(0,8))}</small></td><td>${fmtDate(r.created_at)}</td><td><span class="status ${r.status}">${labelStatus(r.status)}</span></td><td>US$ ${Number(r.total_cost).toFixed(5)}</td><td class="right">${['failed','cancelled'].includes(r.status)?`<button class="btn btn-sm btn-primary" data-action="resume-run" data-id="${r.id}">↻ Retomar</button>`:''}<button class="btn btn-sm" data-action="open-run" data-id="${r.id}" data-convo="${r.conversation_id}">Abrir chat →</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">Nenhuma tarefa registrada ainda.</td></tr>'}</tbody></table></div><p class="page-desc" style="margin-top:15px">* Estimativas locais, apenas quando o preço por token é informado. Não são valores oficiais de cobrança.</p>`}
 function settings(){return `${heading('PREFERÊNCIAS','Configurações','Personalize a aparência e gerencie a sessão.')}
  <div class="grid2"><section class="panel"><div class="panel-head"><h3>Aparência</h3></div><div class="panel-body"><p class="page-desc" style="margin-bottom:15px">Alterne entre os temas da interface.</p><button class="btn" data-action="theme">◐ Mudar para tema ${S.theme==='dark'?'claro':'escuro'}</button></div></section><section class="panel"><div class="panel-head"><h3>Sua conta</h3></div><div class="panel-body"><p>${esc(S.me.email)}</p><p class="page-desc" style="margin-bottom:15px">Os dados ficam na instância em execução. Faça backup da pasta data/, incluindo a chave de criptografia.</p><button class="btn btn-danger" data-action="logout">Sair da conta</button></div></section></div>`}
@@ -148,7 +200,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='provider_recovered')appendEvent('✓ '+d.provider+': recuperado com sucesso.');
   if(msg.event==='provider_probe')appendEvent('↻ Verificando recuperação de '+d.provider+'...');
   if(msg.event==='run_failed'){appendEvent('Falha: '+d.error);finishRun(false)}
-  if(msg.event==='run_completed'){finishRun(true)}
+  if(msg.event==='run_completed'){appendEvent('Execução concluída. Em Projetos → Arquivos, revise as alterações propostas antes de aplicá-las.');finishRun(true)}
   if(msg.event==='run_status'&&d.status==='cancelled'){appendEvent('Execução cancelada.');finishRun(false)}
  };
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
@@ -208,6 +260,13 @@ async function handleAction(action,id,el){
  if(action==='add-agent')addAgent();if(action==='edit-agent')addAgent(id);
  if(action==='add-project')addProject();
  if(action==='project-chat'){S.projectForNext=id;S.currentConvo=null;goto('chat')}
+ if(action==='project-files'){S.workspaceProject=id;goto('workspace')}
+ if(action==='workspace-refresh'){await renderPage()}
+ if(action==='workspace-create'){await api(`/projects/${S.workspaceProject}/workspace`,'POST');await renderPage();toast('Pasta do projeto criada.')}
+ if(action==='workspace-chat'){S.projectForNext=S.workspaceProject;S.currentConvo=null;goto('chat');toast('Chat vinculado ao projeto. Peça aos agentes para criar arquivos e depois revise as propostas.')}
+ if(action==='workspace-new-file')await workspaceNewFile();
+ if(action==='workspace-open-file')await workspaceOpenFile(el.dataset.path);
+ if(action==='workspace-review')await workspaceReview(id);
  if(action==='add-workflow')flowEditor();if(action==='edit-workflow')flowEditor(id);
  if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
  if(action==='new-chat'){disconnect();S.currentRun=null;S.currentConvo=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
@@ -223,3 +282,5 @@ document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[
  if(node.dataset.action)handleAction(node.dataset.action,node.dataset.id,node).catch(ex=>toast(ex.message))
 });
 (async()=>{applyTheme();try{S.me=await api('/me');await loadAll();shell()}catch{authView()}})();
+
+document.addEventListener('change',e=>{if(e.target.id==='ws-project'){S.workspaceProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}});
