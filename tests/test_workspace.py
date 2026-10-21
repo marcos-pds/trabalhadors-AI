@@ -254,3 +254,31 @@ def test_budget_limited_project_does_not_make_unplanned_retry(tmp_path):
         assert run.status_code==200
         assert wait_for(c,run.json()['id'])['status']=='completed'
         assert fake.calls==1
+
+
+def test_truncated_planner_does_not_block_valid_frontend_worker(tmp_path):
+    """A bad architect JSON cannot cause the frontend worker's valid file to be lost."""
+    class Mixed:
+        async def stream(self, provider, key, model, system, messages):
+            if system.startswith('Planeje soluções técnicas'):
+                yield '{"files":[{"path":"backend/broken.py","content":"incompleto'
+            elif system.startswith('Implemente frontend'):
+                yield '{"files":[{"path":"frontend/src/components/SaleTag.tsx",'
+                yield '"content":"export default function SaleTag(){ return <b>Oferta</b> }"}]}'
+            else:
+                yield 'Revisão concluída.'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        ENGINE.client=Mixed()
+        agents=c.get('/api/agents').json()
+        selected=[a['id'] for a in agents if a['specialty'] in ('architecture','frontend')]
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()
+        run=c.post('/api/runs',json={
+            'conversation_id':convo['id'],'mode':'team','agent_ids':selected,
+            'prompt':'Crie um projeto React com um componente novo.'},headers=HEADERS)
+        assert run.status_code==200,run.text
+        done=wait_for(c,run.json()['id'])
+        assert done['status']=='completed',done.get('error')
+        assert (folder/'frontend/src/components/SaleTag.tsx').is_file()
+        assert not (folder/'backend/broken.py').exists()
+        assert 'JSON dos arquivos veio incompleto' in done['output']
