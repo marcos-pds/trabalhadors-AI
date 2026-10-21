@@ -322,6 +322,48 @@ def decide_proposal(pid:str,proposal_id:str,data:ProposalDecision,user=Depends(c
     return ENGINE.workspaces.decide(user['id'],pid,proposal_id,data.approved)
 
 
+
+@app.get('/api/skills')
+def skills_catalog(project_id:str|None=None,user=Depends(current_user)):
+    if project_id: require_owned(DB,'projects',project_id,user['id'])
+    return ENGINE.skills.catalog(user['id'],project_id)
+
+
+class SkillToggle(BaseModel):
+    enabled: bool
+
+
+@app.post('/api/projects/{pid}/skills/{skill_id}')
+def set_project_skill(pid:str,skill_id:str,data:SkillToggle,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.skills.enable(user['id'],pid,skill_id,data.enabled)
+
+
+@app.get('/api/projects/{pid}/package-installs')
+def project_package_installs(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.skills.installs(user['id'],pid)
+
+
+@app.get('/api/conversations/{cid}/architect-delegation')
+def architect_delegation(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    return ENGINE.skills.delegation(user['id'],cid)
+
+
+class ArchitectDelegationIn(BaseModel):
+    enabled: bool
+
+
+@app.post('/api/conversations/{cid}/architect-delegation')
+def change_architect_delegation(cid:str,data:ArchitectDelegationIn,
+                                request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return ENGINE.skills.set_delegation(user['id'],cid,data.enabled)
+
+
 class ConversationIn(BaseModel):
     title:str = Field(default='Nova conversa',max_length=140)
     project_id:str | None = None
@@ -376,10 +418,13 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
        (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
     try:
         workspace_prepared = ENGINE.workspaces.prepare_chat(user['id'],data.conversation_id,data.prompt)
+        delegated = ENGINE.skills.instruction(user['id'],data.conversation_id,data.prompt)
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency)
         if workspace_prepared:
             ENGINE.emit(run_id,'workspace_prepared',workspace_prepared)
+        if delegated is not None:
+            ENGINE.emit(run_id,'architect_delegation_changed',delegated)
     except ValueError as exc: raise HTTPException(422,str(exc))
     return {'id':run_id}
 
