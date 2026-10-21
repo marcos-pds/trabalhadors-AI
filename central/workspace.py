@@ -380,8 +380,8 @@ class Workspaces:
                 tasks.append((step['name'],files))
             except WorkspaceError as exc:
                 errors.append(step['name']+': '+str(exc))
-        if errors:
-            return {'pending':[],'auto_applied':[],'errors':errors}
+        # Invalid/truncated output of a planning or review agent must not discard
+        # independently valid file deliveries from coding workers.
         if not tasks:
             if self.wants_project(run['prompt']):
                 errors.append('Nenhum arquivo estruturado completo foi entregue pelos trabalhadores.')
