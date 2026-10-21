@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS projects (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_workspaces (
+ project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ relative_path TEXT NOT NULL, created_at TEXT NOT NULL,
+ UNIQUE(user_id,relative_path)
+);
+CREATE TABLE IF NOT EXISTS workspace_proposals (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+ agent TEXT, status TEXT NOT NULL, manifest TEXT NOT NULL,
+ created_at TEXT NOT NULL, applied_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_proposals ON workspace_proposals(user_id,project_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS conversations (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  title TEXT NOT NULL, project_id TEXT REFERENCES projects(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
