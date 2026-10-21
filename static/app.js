@@ -183,6 +183,7 @@ async function enterChat(){
  if(S.currentConvo){
    try{S.delegation=await api('/conversations/'+S.currentConvo+'/architect-delegation')}catch{S.delegation=null}
    await showMessages(S.currentConvo)
+   const authBtn=$('#architect-permission');if(authBtn)authBtn.textContent=S.delegation?.enabled?'✓ Arquiteto autorizado':'Arquiteto: autorizar';
  }else {S.delegation=null;showWelcome()}
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
