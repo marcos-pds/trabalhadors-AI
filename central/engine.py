@@ -7,6 +7,7 @@ from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
+from .workspace import Workspaces
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -89,6 +90,7 @@ class Engine:
         self.sem = asyncio.Semaphore(5)
         self.agent_sems = {}
         self.health = ProviderHealth(db)  # persistent across restarts
+        self.workspaces = Workspaces(db)
         self.approvals = defaultdict(asyncio.Event)
 
     def emit(self, run_id, kind, data):
@@ -168,6 +170,12 @@ class Engine:
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
             self.emit(run_id,'run_completed',{'output':output})
+            try:
+                proposals = self.workspaces.stage_run(run)
+                if proposals:
+                    self.emit(run_id,'workspace_proposals',{'proposal_ids':proposals})
+            except Exception as exc:
+                self.emit(run_id,'workspace_stage_error',{'message':'Não foi possível preparar as alterações: '+str(exc)[:150]})
         except asyncio.CancelledError:
             new_status = 'queued' if self.shutting_down else 'cancelled'
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
@@ -206,6 +214,7 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
+        system += self.workspaces.prompt(user,run['conversation_id'])
         providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
         providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
         if not providers:
