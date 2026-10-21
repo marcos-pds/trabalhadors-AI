@@ -351,3 +351,49 @@ def test_context_basename_lookup_and_oversize_no_partial_leak(tmp_path):
         prompt=ENGINE.workspaces.prompt(user,convo,request='Modifique App.tsx')
         assert 'arquivo grande demais para contexto completo' in prompt
         assert 'x'*300 not in prompt
+
+
+def test_architect_asks_for_app_file_then_repairs_from_workspace_context(tmp_path):
+    """The exact reported problem: architect requests a file it already has; retry stages edit."""
+    import json
+
+    class RequestsFile:
+        def __init__(self): self.calls=0
+        async def stream(self, provider, key, model, system, messages):
+            self.calls+=1
+            assert '=== INÍCIO DO ARQUIVO EXISTENTE: frontend/src/App.tsx ===' in system
+            assert 'old App content' in system
+            if self.calls==1:
+                yield 'Para continuar, envie o conteúdo de frontend/src/App.tsx.'
+            else:
+                assert 'NÃO peça que ele envie o arquivo' in messages[0]['content']
+                assert 'old App content' in system
+                yield json.dumps({'files':[{'path':'frontend/src/App.tsx',
+                     'content':'export default function App(){return <main>Cartão integrado</main>}'}]})
+
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        file=folder/'frontend/src/App.tsx';file.parent.mkdir(parents=True,exist_ok=True)
+        file.write_text('export default function App(){return <main>old App content</main>}')
+        add_provider(c,'fake',1)
+        fake=RequestsFile();ENGINE.client=fake
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()
+        architect=next(a for a in c.get('/api/agents').json() if a['specialty']=='architecture')
+        run=c.post('/api/runs',json={'conversation_id':convo['id'],'mode':'manual',
+            'agent_ids':[architect['id']],
+            'prompt':'Integre o componente ProductCard ao arquivo frontend/src/App.tsx. '
+                     'Não sobrescreva sem aprovação.'},headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed'
+        assert fake.calls==2
+        assert file.read_text().endswith('old App content</main>}')
+        pending=[item for item in c.get(f'/api/projects/{project}/workspace').json()['proposals']
+                 if item['status']=='pending']
+        assert len(pending)==1
+        assert pending[0]['files'][0]['path']=='frontend/src/App.tsx'
+        assert pending[0]['files'][0]['replace'] is True
+        assert decide(c,project,pending[0]['id'],confirmation='').status_code==422
+        assert file.read_text().endswith('old App content</main>}')
+        assert decide(c,project,pending[0]['id']).status_code==200
+        assert 'Cartão integrado' in file.read_text()
