@@ -31,3 +31,18 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 .status.running{background:#40321f;color:#f7cc7d}
 .provider-health-table small{line-height:1.65}
 @media(max-width:720px){.provider-health-table{min-width:700px}.health-section .panel-head{flex-wrap:wrap}}
+
+
+/* Workspace seguro: explorador, propostas e diffs */
+.workspace-toolbar{display:flex;align-items:center;gap:12px;margin:0 0 18px;flex-wrap:wrap}
+.workspace-toolbar .field{max-width:340px;min-width:170px}
+.workspace-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:18px;margin-top:22px}
+.ws-file-list,.ws-proposals{padding:10px;max-height:65vh;overflow-y:auto;min-height:180px}
+.ws-file{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:transparent;color:var(--text);padding:11px 9px;border-radius:8px}
+.ws-file:hover{background:var(--card)}.ws-file span:nth-child(2){overflow-wrap:anywhere;flex:1;font-family:ui-monospace,monospace;font-size:12px}
+.ws-file small{color:var(--muted)}.ws-proposal{display:flex;justify-content:space-between;align-items:center;gap:13px;border-bottom:1px solid var(--line);padding:14px 8px}
+.ws-proposal div{min-width:0;flex:1}.ws-proposal strong,.ws-proposal small{display:block}.ws-proposal small{color:var(--muted);overflow-wrap:anywhere;margin-top:5px;font-size:11px}
+.ws-editor{width:100%;font:12px/1.6 ui-monospace,Consolas,monospace;tab-size:2;white-space:pre;resize:vertical}
+.ws-diff-list{max-height:45vh;overflow:auto}.ws-diff{margin-bottom:14px}.ws-diff strong,.ws-diff small{display:block}.ws-diff small{color:var(--muted);margin:5px 0}.ws-diff pre{font:11px/1.5 ui-monospace,Consolas,monospace;white-space:pre;overflow:auto;max-height:270px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
+.ws-conflict{color:#ffbe73}
+@media(max-width:950px){.workspace-columns{grid-template-columns:1fr}.workspace-toolbar{align-items:stretch}}

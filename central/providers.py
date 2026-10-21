@@ -56,7 +56,7 @@ class ProviderClient:
         if kind == 'anthropic':
             url = base + '/messages'
             headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01'}
-            payload = {'model': model, 'max_tokens': 1400, 'stream': True,
+            payload = {'model': model, 'max_tokens': min(max(int(provider.get('_max_tokens',1400)),256),4096), 'stream': True,
                        'system': system, 'messages': messages}
         elif kind == 'gemini':
             url = base + '/models/' + quote(model, safe='') + ':streamGenerateContent?alt=sse'
@@ -64,13 +64,13 @@ class ProviderClient:
             contents = [{'role': 'model' if m['role']=='assistant' else 'user',
                          'parts': [{'text': m['content']}]} for m in messages]
             payload = {'systemInstruction': {'parts': [{'text': system}]}, 'contents': contents,
-                       'generationConfig': {'maxOutputTokens': 1400}}
+                       'generationConfig': {'maxOutputTokens': min(max(int(provider.get('_max_tokens',1400)),256),4096)}}
         else:
             url = base + '/chat/completions'
             headers = {'Content-Type': 'application/json'}
             if api_key: headers['Authorization'] = f'Bearer {api_key}'
             payload = {'model': model, 'messages': [{'role': 'system', 'content': system}] + messages,
-                       'stream': True, 'max_tokens': 1400}
+                       'stream': True, 'max_tokens': min(max(int(provider.get('_max_tokens',1400)),256),4096)}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=12)) as client:
                 async with client.stream('POST', url, json=payload, headers=headers) as response:

@@ -2,11 +2,13 @@
 import asyncio
 import json
 import random
+import re
 import time
 from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
+from .workspace import Workspaces, WorkspaceError
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -89,6 +91,7 @@ class Engine:
         self.sem = asyncio.Semaphore(5)
         self.agent_sems = {}
         self.health = ProviderHealth(db)  # persistent across restarts
+        self.workspaces = Workspaces(db)
         self.approvals = defaultdict(asyncio.Event)
 
     def emit(self, run_id, kind, data):
@@ -101,7 +104,7 @@ class Engine:
         task.add_done_callback(lambda _: self.running.pop(run_id, None) if self.running.get(run_id) is task else None)
 
     def resume_pending(self):
-        # This is safe for text-only generation; no external write tools are enabled.
+        # Pending jobs can generate file proposals; only new files in authorized workspaces auto-apply.
         for row in self.db.all("SELECT id FROM runs WHERE status IN ('queued','running','awaiting_approval')"):
             self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (row['id'],))
             self.schedule(row['id'])
@@ -164,6 +167,54 @@ class Engine:
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
+            changes = {'pending': [], 'auto_applied': [], 'errors': []}
+            try:
+                changes = self.workspaces.stage_run(run)
+                if changes['auto_applied']:
+                    self.emit(run_id,'workspace_files_created',
+                              {'count':len(changes['auto_applied']),'proposal_ids':changes['auto_applied']})
+                if changes['pending']:
+                    self.emit(run_id,'workspace_proposals',{'proposal_ids':changes['pending']})
+                for warning in changes['errors']:
+                    self.emit(run_id,'workspace_stage_error',{'message':warning[:180]})
+            except Exception as exc:
+                changes['errors'].append('Não foi possível preparar as alterações: '+str(exc)[:150])
+                self.emit(run_id,'workspace_stage_error',{'message':changes['errors'][-1]})
+            # Keep the model's full text in completed step records for inspection,
+            # but present only verified disk state in the project's final chat reply.
+            convo = self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                                (run['conversation_id'],run['user_id']))
+            if convo and convo['project_id'] and (
+                self.workspaces.wants_project(run['prompt']) or
+                changes['pending'] or changes['auto_applied'] or changes['errors']):
+                try:
+                    workspace = self.workspaces.info(run['user_id'],convo['project_id'])
+                    summary = ['## Resultado no Windows',
+                               '**Pasta local:** `' + workspace['folder'] + '`',
+                               '**Arquivos existentes:** ' + str(len(workspace['files']))]
+                    applied = []
+                    pending = []
+                    for prop_id in changes['auto_applied'] + changes['pending']:
+                        entry = self.db.one('SELECT manifest FROM workspace_proposals WHERE id=? AND user_id=?',
+                                            (prop_id,run['user_id']))
+                        if not entry: continue
+                        names = [item['path'] for item in json.loads(entry['manifest'])]
+                        if prop_id in changes['auto_applied']: applied.extend(names)
+                        else: pending.extend(names)
+                    if applied:
+                        summary += ['**Novos arquivos criados automaticamente:**'] + ['- `'+p+'`' for p in applied]
+                    if pending:
+                        summary += ['**Aguardando revisão e aprovação:**'] + ['- `'+p+'`' for p in pending]
+                    if not applied and workspace['files']:
+                        summary.append('Os arquivos acima já existentes foram preservados. Nenhum arquivo gerado pela IA foi aplicado nesta execução.')
+                    if changes['errors']:
+                        summary += ['**Avisos de geração:**'] + ['- '+x for x in changes['errors']]
+                    summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
+                    summary.append('A saída técnica completa de cada agente continua registrada nas etapas da execução.')
+                    output = '\n\n'.join(summary)
+                except Exception:
+                    output = ('Não foi possível consultar a pasta local ao concluir o projeto. '
+                              'Consulte **Projetos → Arquivos** e o histórico da execução.')
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
@@ -206,6 +257,7 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
+        system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt'])
         providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
         providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
         if not providers:
@@ -244,7 +296,10 @@ class Engine:
                     parts = []
                     started = time.monotonic()
                     try:
-                        async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
+                        request_provider = dict(provider)
+                        if 'central-files' in system:
+                            request_provider['_max_tokens'] = 4096
+                        async for token in self.client.stream(request_provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
                             parts.append(token)
                             self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
                         output = ''.join(parts)
@@ -253,6 +308,7 @@ class Engine:
                             latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
                         if health_event['recovered']:
                             self.emit(run['id'], 'provider_recovered', {'step_id': sid, 'provider': provider['name'], 'model': model})
+                        output = await self._repair_workspace_output(run, step, agent, provider, model, system, output)
                         price = 0.0
                         if provider['input_price'] is not None and provider['output_price'] is not None:
                             # This is an estimate: streaming tokens usage varies by API. Not billed cost.
@@ -294,6 +350,98 @@ class Engine:
                 self.emit(run['id'],'failover',{'step_id':sid,'failed_provider':provider['name'],'message':'Tentando próximo provedor habilitado.'})
         self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? WHERE id=?",('; '.join(failures)[:400],utcnow(),sid))
         raise RuntimeError('Não foi possível concluir ' + agent['name'] + ': ' + '; '.join(failures)[:220])
+
+
+    async def _repair_workspace_output(self, run, step, agent, provider, model, system, output):
+        """One bounded follow-up call for a coding worker that omitted a valid file manifest.
+
+        The corrected answer replaces the malformed answer in the stored step. Nothing here writes to disk;
+        stage_run will validate all manifests before accepting any changes.
+        Explicit budget-limited runs never use this additional call.
+        """
+        if run['budget_limit'] is not None or 'central-files' not in system:
+            return output
+        has_existing = '=== INÍCIO DO ARQUIVO EXISTENTE:' in system
+        edit_intent = bool(re.search(
+            r'\b(integre|integrar|edite|editar|altere|alterar|modifique|modificar|atualize|atualizar|corrija|corrigir|substitua|substituir)\b',
+            run['prompt'].lower()))
+        repair_edit = has_existing and edit_intent
+        if not (self.workspaces.wants_project(run['prompt']) or repair_edit):
+            return output
+        allowed = ('frontend', 'backend', 'code', 'design', 'architecture') if repair_edit else (
+            'frontend', 'backend', 'code', 'design')
+        if agent['specialty'] not in allowed:
+            return output
+        try:
+            if self.workspaces._extract_files(output):
+                return output
+        except WorkspaceError:
+            pass
+        self.emit(run['id'], 'workspace_retry_started', {'step_id': step['id'], 'agent': agent['name']})
+        known = self.workspaces.prompt(run['user_id'], run['conversation_id'],request=run['prompt'])
+        instruction = (
+            'Gere a versão COMPLETA de UM arquivo EXISTENTE citado pelo usuário, de preferência '
+            'aquele que ele pediu para alterar. O conteúdo atual do arquivo já está nas instruções '
+            'do sistema. NÃO peça que ele envie o arquivo. A Central mostrará um diff e exigirá '
+            'aprovação antes de substituir. Não proponha exclusões. '
+            if repair_edit else
+            'Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
+            'na sua especialidade (' + agent['specialty'] + '). '
+            'Não modifique arquivos existentes sem necessidade. ')
+        ask = (
+            'ENTREGA TÉCNICA OBRIGATÓRIA. Sua primeira resposta não trouxe arquivos completos. '
+            'Não repita a explicação. '+instruction+
+            'Não inclua segredos. Use somente caminhos relativos dentro da pasta do projeto. '
+            'Responda EXCLUSIVAMENTE um objeto JSON sem fences, sem comentários e sem texto antes/depois: '
+            '{"files":[{"path":"caminho/arquivo.ext","action":"write","content":"conteúdo completo escapado como JSON"}]}. '
+            'A string content deve ser JSON válido com quebras de linha escapadas. '
+            'Pedido original: ' + run['prompt'][:1000] + '.'
+        )
+        chunks = []
+        started = time.monotonic()
+        try:
+            request_provider = dict(provider)
+            request_provider['_max_tokens'] = 3072
+            self.db.execute('UPDATE steps SET attempts=attempts+1 WHERE id=?', (step['id'],))
+            async for chunk in self.client.stream(
+                request_provider, self.security.decrypt(provider['api_key_enc']), model,
+                agent['instructions'] + '\n' + known, [{'role': 'user', 'content': ask}]):
+                chunks.append(chunk)
+                if sum(map(len, chunks)) > 45_000:
+                    break
+            followup = ''.join(chunks)
+            self.health.record(provider['id'], model, success=bool(followup.strip()),
+                error=None if followup.strip() else ProviderError('response', 'Resposta vazia.', True),
+                latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=step['id'])
+            try:
+                files = self.workspaces._extract_files(followup)
+                if not files or len(files) > 2:
+                    raise WorkspaceError('A resposta corrigida não contém até 2 arquivos válidos.')
+                existing_names = set(re.findall(r'=== INÍCIO DO ARQUIVO EXISTENTE: (.+?) ===', known))
+                for file in files:
+                    if not isinstance(file, dict) or file.get('action', 'write') != 'write':
+                        raise WorkspaceError('O reparo deve produzir apenas arquivos de texto.')
+                    if repair_edit and file.get('path') not in existing_names:
+                        raise WorkspaceError('A edição deve referenciar um arquivo existente fornecido no contexto.')
+                self.emit(run['id'], 'workspace_retry_succeeded',
+                          {'step_id': step['id'], 'agent': agent['name']})
+                return followup
+            except WorkspaceError as exc:
+                self.emit(run['id'], 'workspace_retry_failed',
+                          {'step_id': step['id'], 'agent': agent['name'], 'message': str(exc)[:160]})
+                return output
+        except asyncio.CancelledError:
+            raise
+        except ProviderError as exc:
+            self.health.record(provider['id'], model, success=False, error=exc,
+                latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=step['id'])
+            self.emit(run['id'], 'workspace_retry_failed',
+                      {'step_id': step['id'], 'agent': agent['name'], 'message': exc.category})
+            return output
+        except Exception:
+            self.emit(run['id'], 'workspace_retry_failed',
+                      {'step_id': step['id'], 'agent': agent['name'], 'message': 'Falha ao gerar arquivo.'})
+            return output
 
     def resume_run(self, run_id):
         run = self.db.one('SELECT status FROM runs WHERE id=?', (run_id,))
