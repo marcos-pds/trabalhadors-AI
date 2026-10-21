@@ -207,6 +207,9 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='workspace_prepared'){S.workspaceRunProject=d.project_id;appendEvent('📁 Pasta criada/autorizada: '+d.folder+(d.starter_files?' · '+d.starter_files+' arquivos iniciais gravados.':''))}
   if(msg.event==='workspace_files_created'){appendEvent('✓ Novos arquivos dos trabalhadores gravados automaticamente. Abra Arquivos para conferir.')}
   if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações em arquivos existentes exigem aprovação. Confira Projetos → Arquivos.')}
+  if(msg.event==='workspace_retry_started'){appendEvent('↻ '+d.agent+': tentando entregar um arquivo completo em formato estruturado...')}
+  if(msg.event==='workspace_retry_succeeded'){appendEvent('✓ '+d.agent+': arquivo estruturado validado. Aguardando gravação segura.')}
+  if(msg.event==='workspace_retry_failed'){appendEvent('⚠ '+d.agent+': nova tentativa sem arquivo válido ('+d.message+').')}
   if(msg.event==='workspace_stage_error'){appendEvent('⚠ Arquivos não aplicados: '+d.message)}
   if(msg.event==='run_completed'){await loadAll();appendEvent('Tarefa concluída. Confira os arquivos reais em Projetos → Arquivos.');await finishRun(true)}
   if(msg.event==='run_status'&&d.status==='cancelled'){appendEvent('Execução cancelada.');finishRun(false)}
