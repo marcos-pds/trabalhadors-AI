@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from test_app import HEADERS, register, add_provider, wait_for  # sets isolated CENTRAL_DATA_DIR first
 from central.main import app, ENGINE
 from central.workspace import Workspaces
-from test_app import HEADERS, register, add_provider, wait_for
 
 
 def setup(c, tmp_path):
