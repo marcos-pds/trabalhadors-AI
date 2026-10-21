@@ -55,6 +55,16 @@ class SkillsHub:
           (user_id,project_id,skill_id,int(enabled),utcnow()))
         return {'id':skill_id,'enabled':enabled}
 
+    @staticmethod
+    def explicitly_requested(prompt):
+        """Only affirmative, user-authored requests to USE this named local skill."""
+        text=prompt.casefold()
+        if re.search(r'\b(n[aã]o|sem)\s+(?:utilizar|usar|ativar)\b',text):
+            return False
+        return bool(re.search(
+            r'\b(?:utilize|utilizando|utilizar|use|usar|ative|ativar)\b'
+            r'.{0,55}\bskill\s+ui\s*/\s*ux\s+studio\s+pro\b',text,re.S))
+
     def guide(self,user_id,conversation_id,specialty):
         if specialty not in ('frontend','design','architecture','code','review'):return ''
         r=self.db.one('''SELECT s.enabled FROM project_skills s JOIN conversations c
