@@ -23,3 +23,11 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 .chat-center{min-height:0;overflow:hidden}
 .chat-toolbar,.chat-compose{flex-shrink:0}
 .chat-transcript{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+
+/* Saúde observada de provedores */
+.health-section{margin-top:22px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.health-footnote{padding:14px 18px 20px;font-size:11px}
+.provider-health-table td{vertical-align:middle}
+.status.running{background:#40321f;color:#f7cc7d}
+.provider-health-table small{line-height:1.65}
+@media(max-width:720px){.provider-health-table{min-width:700px}.health-section .panel-head{flex-wrap:wrap}}
