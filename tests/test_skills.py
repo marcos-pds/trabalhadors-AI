@@ -185,3 +185,22 @@ def test_no_delegation_means_no_package_actions(tmp_path,monkeypatch):
         result=__import__('asyncio').run(ENGINE.skills.install_for_run(
           {'user_id':c.get('/api/me').json()['id'],'conversation_id':cid,'id':'dummy-run'}))
         assert result==[]
+
+
+def test_installer_refuses_redirected_npm_lockfile(tmp_path,monkeypatch):
+    from central.workspace import WorkspaceError
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        front=folder/'frontend';front.mkdir()
+        (front/'package.json').write_text('{"name":"safe-ui"}')
+        outside=tmp_path/'outside-lock.json';outside.write_text('{"unsafe":true}')
+        try:
+            (front/'package-lock.json').symlink_to(outside)
+        except (OSError,NotImplementedError):
+            pytest.skip('Sistema não permite criar symlinks no teste.')
+        def never(*args,**kwargs):
+            raise AssertionError('No subprocess should be invoked with a linked lockfile')
+        monkeypatch.setattr('subprocess.run',never)
+        with pytest.raises(WorkspaceError):
+            ENGINE.skills._install_sync(c.get('/api/me').json()['id'],project,'npm',['lucide-react'])
+        assert outside.read_text()=='{"unsafe":true}'
