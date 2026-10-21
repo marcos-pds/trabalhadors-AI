@@ -354,7 +354,7 @@ class Engine:
     async def _repair_workspace_output(self, run, step, agent, provider, model, system, output):
         """One bounded follow-up call for a coding worker that omitted a valid file manifest.
 
-        The first response stays intact in the step output. Nothing here writes to disk;
+        The corrected answer replaces the malformed answer in the stored step. Nothing here writes to disk;
         stage_run will validate all manifests before accepting any changes.
         Explicit budget-limited runs never use this additional call.
         """
@@ -388,7 +388,7 @@ class Engine:
             self.db.execute('UPDATE steps SET attempts=attempts+1 WHERE id=?', (step['id'],))
             async for chunk in self.client.stream(
                 request_provider, self.security.decrypt(provider['api_key_enc']), model,
-                agent['instructions'] + '\\n' + known, [{'role': 'user', 'content': ask}]):
+                agent['instructions'] + '\n' + known, [{'role': 'user', 'content': ask}]):
                 chunks.append(chunk)
                 if sum(map(len, chunks)) > 45_000:
                     break
@@ -405,7 +405,7 @@ class Engine:
                         raise WorkspaceError('O reparo deve produzir somente um arquivo de texto novo.')
                 self.emit(run['id'], 'workspace_retry_succeeded',
                           {'step_id': step['id'], 'agent': agent['name']})
-                return output + '\\n\\n' + followup
+                return followup
             except WorkspaceError as exc:
                 self.emit(run['id'], 'workspace_retry_failed',
                           {'step_id': step['id'], 'agent': agent['name'], 'message': str(exc)[:160]})
