@@ -2,6 +2,7 @@
 import asyncio
 import json
 import random
+import re
 import time
 from collections import defaultdict
 from .database import uid, utcnow
@@ -358,9 +359,18 @@ class Engine:
         stage_run will validate all manifests before accepting any changes.
         Explicit budget-limited runs never use this additional call.
         """
-        if run['budget_limit'] is not None or agent['specialty'] not in ('frontend', 'backend', 'code', 'design'):
+        if run['budget_limit'] is not None or 'central-files' not in system:
             return output
-        if not self.workspaces.wants_project(run['prompt']) or 'central-files' not in system:
+        has_existing = '=== INÍCIO DO ARQUIVO EXISTENTE:' in system
+        edit_intent = bool(re.search(
+            r'\b(integre|integrar|edite|editar|altere|alterar|modifique|modificar|atualize|atualizar|corrija|corrigir|substitua|substituir)\b',
+            run['prompt'].lower()))
+        repair_edit = has_existing and edit_intent
+        if not (self.workspaces.wants_project(run['prompt']) or repair_edit):
+            return output
+        allowed = ('frontend', 'backend', 'code', 'design', 'architecture') if repair_edit else (
+            'frontend', 'backend', 'code', 'design')
+        if agent['specialty'] not in allowed:
             return output
         try:
             if self.workspaces._extract_files(output):
@@ -369,12 +379,19 @@ class Engine:
             pass
         self.emit(run['id'], 'workspace_retry_started', {'step_id': step['id'], 'agent': agent['name']})
         known = self.workspaces.prompt(run['user_id'], run['conversation_id'],request=run['prompt'])
+        instruction = (
+            'Gere a versão COMPLETA de UM arquivo EXISTENTE citado pelo usuário, de preferência '
+            'aquele que ele pediu para alterar. O conteúdo atual do arquivo já está nas instruções '
+            'do sistema. NÃO peça que ele envie o arquivo. A Central mostrará um diff e exigirá '
+            'aprovação antes de substituir. Não proponha exclusões. '
+            if repair_edit else
+            'Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
+            'na sua especialidade (' + agent['specialty'] + '). '
+            'Não modifique arquivos existentes sem necessidade. ')
         ask = (
             'ENTREGA TÉCNICA OBRIGATÓRIA. Sua primeira resposta não trouxe arquivos completos. '
-            'Não repita a explicação. Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
-            'na sua especialidade (' + agent['specialty'] + '). '
-            'Não modifique arquivos existentes sem necessidade e nunca inclua segredos. '
-            'Use somente caminhos relativos dentro da pasta do projeto. '
+            'Não repita a explicação. '+instruction+
+            'Não inclua segredos. Use somente caminhos relativos dentro da pasta do projeto. '
             'Responda EXCLUSIVAMENTE um objeto JSON sem fences, sem comentários e sem texto antes/depois: '
             '{"files":[{"path":"caminho/arquivo.ext","action":"write","content":"conteúdo completo escapado como JSON"}]}. '
             'A string content deve ser JSON válido com quebras de linha escapadas. '
@@ -400,9 +417,12 @@ class Engine:
                 files = self.workspaces._extract_files(followup)
                 if not files or len(files) > 2:
                     raise WorkspaceError('A resposta corrigida não contém até 2 arquivos válidos.')
+                existing_names = set(re.findall(r'=== INÍCIO DO ARQUIVO EXISTENTE: (.+?) ===', known))
                 for file in files:
                     if not isinstance(file, dict) or file.get('action', 'write') != 'write':
-                        raise WorkspaceError('O reparo deve produzir somente um arquivo de texto novo.')
+                        raise WorkspaceError('O reparo deve produzir apenas arquivos de texto.')
+                    if repair_edit and file.get('path') not in existing_names:
+                        raise WorkspaceError('A edição deve referenciar um arquivo existente fornecido no contexto.')
                 self.emit(run['id'], 'workspace_retry_succeeded',
                           {'step_id': step['id'], 'agent': agent['name']})
                 return followup
