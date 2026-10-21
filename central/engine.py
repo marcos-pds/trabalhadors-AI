@@ -7,7 +7,7 @@ from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
-from .workspace import Workspaces
+from .workspace import Workspaces, WorkspaceError
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -307,6 +307,7 @@ class Engine:
                             latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
                         if health_event['recovered']:
                             self.emit(run['id'], 'provider_recovered', {'step_id': sid, 'provider': provider['name'], 'model': model})
+                        output = await self._repair_workspace_output(run, step, agent, provider, model, system, output)
                         price = 0.0
                         if provider['input_price'] is not None and provider['output_price'] is not None:
                             # This is an estimate: streaming tokens usage varies by API. Not billed cost.
@@ -348,6 +349,79 @@ class Engine:
                 self.emit(run['id'],'failover',{'step_id':sid,'failed_provider':provider['name'],'message':'Tentando próximo provedor habilitado.'})
         self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? WHERE id=?",('; '.join(failures)[:400],utcnow(),sid))
         raise RuntimeError('Não foi possível concluir ' + agent['name'] + ': ' + '; '.join(failures)[:220])
+
+
+    async def _repair_workspace_output(self, run, step, agent, provider, model, system, output):
+        """One bounded follow-up call for a coding worker that omitted a valid file manifest.
+
+        The first response stays intact in the step output. Nothing here writes to disk;
+        stage_run will validate all manifests before accepting any changes.
+        Explicit budget-limited runs never use this additional call.
+        """
+        if run['budget_limit'] is not None or agent['specialty'] not in ('frontend', 'backend', 'code', 'design'):
+            return output
+        if not self.workspaces.wants_project(run['prompt']) or 'central-files' not in system:
+            return output
+        try:
+            if self.workspaces._extract_files(output):
+                return output
+        except WorkspaceError:
+            pass
+        self.emit(run['id'], 'workspace_retry_started', {'step_id': step['id'], 'agent': agent['name']})
+        known = self.workspaces.prompt(run['user_id'], run['conversation_id'])
+        ask = (
+            'ENTREGA TÉCNICA OBRIGATÓRIA. Sua primeira resposta não trouxe arquivos completos. '
+            'Não repita a explicação. Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
+            'na sua especialidade (' + agent['specialty'] + '). '
+            'Não modifique arquivos existentes sem necessidade e nunca inclua segredos. '
+            'Use somente caminhos relativos dentro da pasta do projeto. '
+            'Responda EXCLUSIVAMENTE um objeto JSON sem fences, sem comentários e sem texto antes/depois: '
+            '{"files":[{"path":"caminho/arquivo.ext","action":"write","content":"conteúdo completo escapado como JSON"}]}. '
+            'A string content deve ser JSON válido com quebras de linha escapadas. '
+            'Pedido original: ' + run['prompt'][:1000] + '.'
+        )
+        chunks = []
+        started = time.monotonic()
+        try:
+            request_provider = dict(provider)
+            request_provider['_max_tokens'] = 3072
+            self.db.execute('UPDATE steps SET attempts=attempts+1 WHERE id=?', (step['id'],))
+            async for chunk in self.client.stream(
+                request_provider, self.security.decrypt(provider['api_key_enc']), model,
+                agent['instructions'] + '\\n' + known, [{'role': 'user', 'content': ask}]):
+                chunks.append(chunk)
+                if sum(map(len, chunks)) > 45_000:
+                    break
+            followup = ''.join(chunks)
+            self.health.record(provider['id'], model, success=bool(followup.strip()),
+                error=None if followup.strip() else ProviderError('response', 'Resposta vazia.', True),
+                latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=step['id'])
+            try:
+                files = self.workspaces._extract_files(followup)
+                if not files or len(files) > 2:
+                    raise WorkspaceError('A resposta corrigida não contém até 2 arquivos válidos.')
+                for file in files:
+                    if not isinstance(file, dict) or file.get('action', 'write') != 'write':
+                        raise WorkspaceError('O reparo deve produzir somente um arquivo de texto novo.')
+                self.emit(run['id'], 'workspace_retry_succeeded',
+                          {'step_id': step['id'], 'agent': agent['name']})
+                return output + '\\n\\n' + followup
+            except WorkspaceError as exc:
+                self.emit(run['id'], 'workspace_retry_failed',
+                          {'step_id': step['id'], 'agent': agent['name'], 'message': str(exc)[:160]})
+                return output
+        except asyncio.CancelledError:
+            raise
+        except ProviderError as exc:
+            self.health.record(provider['id'], model, success=False, error=exc,
+                latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=step['id'])
+            self.emit(run['id'], 'workspace_retry_failed',
+                      {'step_id': step['id'], 'agent': agent['name'], 'message': exc.category})
+            return output
+        except Exception:
+            self.emit(run['id'], 'workspace_retry_failed',
+                      {'step_id': step['id'], 'agent': agent['name'], 'message': 'Falha ao gerar arquivo.'})
+            return output
 
     def resume_run(self, run_id):
         run = self.db.one('SELECT status FROM runs WHERE id=?', (run_id,))
