@@ -293,25 +293,29 @@ class Engine:
                                '**Arquivos existentes:** ' + str(len(workspace['files']))]
                     applied = []
                     pending = []
-                    for prop_id in changes['auto_applied'] + changes['pending']:
+                    approved_by_architect = []
+                    for prop_id in changes['auto_applied'] + changes['pending'] + changes['architect_applied']:
                         entry = self.db.one('SELECT manifest FROM workspace_proposals WHERE id=? AND user_id=?',
                                             (prop_id,run['user_id']))
                         if not entry: continue
                         names = [item['path'] for item in json.loads(entry['manifest'])]
                         if prop_id in changes['auto_applied']: applied.extend(names)
+                        elif prop_id in changes['architect_applied']: approved_by_architect.extend(names)
                         else: pending.extend(names)
                     if applied:
                         summary += ['**Novos arquivos criados automaticamente:**'] + ['- `'+p+'`' for p in applied]
                     if pending:
                         summary += ['**Aguardando revisão e aprovação:**'] + ['- `'+p+'`' for p in pending]
-                    if changes['architect_applied']:
-                        summary.append('**Alterações aprovadas automaticamente pelo Arquiteto autorizado:** '+str(len(changes['architect_applied'])))
+                    if approved_by_architect:
+                        summary += ['**Alterações aprovadas e aplicadas pelo Arquiteto autorizado:**'] + ['- `'+p+'`' for p in approved_by_architect]
                     for install in changes['installed']:
                         summary.append('**Instalação autorizada:** '+install.get('manager','?')+
                                        ' ('+', '.join(install.get('packages') or [])+'): '+
                                        ('concluída' if install.get('ok') else 'falhou: '+install.get('error','Verifique o histórico.')))
-                    if not applied and workspace['files']:
+                    if not applied and not approved_by_architect and workspace['files']:
                         summary.append('Os arquivos acima já existentes foram preservados. Nenhum arquivo gerado pela IA foi aplicado nesta execução.')
+                    if any('UI_STAGE_IMPLEMENT' in (p.get('instructions') or '') for p in json.loads(run['plan'])) and not changes['installed']:
+                        summary.append('**Dependências:** nenhuma instalação registrada nesta execução.')
                     if changes['errors']:
                         summary += ['**Avisos de geração:**'] + ['- '+x for x in changes['errors']]
                     summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
