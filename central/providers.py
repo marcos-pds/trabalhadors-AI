@@ -17,19 +17,20 @@ DEFAULT_ENDPOINTS = {
 
 
 class ProviderError(Exception):
-    def __init__(self, category, message, retryable=False):
+    def __init__(self, category, message, retryable=False, http_status=None):
         super().__init__(message)
         self.category = category
         self.retryable = retryable
+        self.http_status = http_status
 
 
 def classify_http(code, response):
     text = response[:220].replace('\n', ' ')
-    if code in (401, 403): return ProviderError('authentication', f'Autenticação/permissão (HTTP {code}).', False)
-    if code == 402 or ('insufficient_quota' in response.lower()): return ProviderError('credits', 'Créditos insuficientes.', False)
-    if code == 429: return ProviderError('rate_limit', 'Limite de requisições do provedor.', True)
-    if code >= 500: return ProviderError('unavailable', f'Provedor indisponível (HTTP {code}).', True)
-    return ProviderError('request', f'Erro HTTP {code}: {text}', False)
+    if code in (401, 403): return ProviderError('authentication', f'Autenticação/permissão (HTTP {code}).', False, code)
+    if code == 402 or ('insufficient_quota' in response.lower()): return ProviderError('credits', 'Créditos insuficientes.', False, code)
+    if code == 429: return ProviderError('rate_limit', 'Limite de requisições do provedor.', True, code)
+    if code >= 500: return ProviderError('unavailable', f'Provedor indisponível (HTTP {code}).', True, code)
+    return ProviderError('request', f'Erro HTTP {code}: {text}', False, code)
 
 
 def parse_sse(lines):
