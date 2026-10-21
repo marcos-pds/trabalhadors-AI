@@ -347,3 +347,28 @@ def test_architect_markdown_npm_plan_is_normalized_without_shell_execution(tmp_p
         assert calls==[('npm',['tailwindcss','@tailwindcss/vite','lucide-react'])]
         assert any('Instalação autorizada' in finished['output'] for x in [1])
         assert 'npm install' not in finished['output']
+
+
+def test_ui_worker_cannot_write_an_unassigned_file(tmp_path):
+    """A component task cannot modify another project file even if the model proposes it."""
+    from central.database import uid, utcnow
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        owner=c.get('/api/me').json()['id']
+        cid=conversation(c,project)
+        runid=uid();stepid=uid();now=utcnow()
+        ENGINE.db.execute('''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
+                 created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)''',
+            (runid,owner,cid,'Modernize o UX/UI','completed','team','[]','[]',now,now))
+        frontend=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        ENGINE.db.execute('''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,instructions,
+                  status,output,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
+            (stepid,runid,frontend['id'],'agent','Frontend · Vitrine','[]',
+             'UI_STAGE_IMPLEMENT. Gere UMA alteração completa para frontend/src/App.tsx. '
+             'Proponha apenas este arquivo.','completed',
+             '{"files":[{"path":"frontend/src/index.css","content":"body{color:red}"}]}',now,now))
+        result=ENGINE.workspaces.stage_run({'id':runid,'conversation_id':cid,'user_id':owner,
+                                           'prompt':'Modernize o UX/UI'})
+        assert result['auto_applied']==[] and result['pending']==[]
+        assert any('fora de sua responsabilidade' in err for err in result['errors'])
+        assert not (folder/'frontend/src/index.css').exists()
