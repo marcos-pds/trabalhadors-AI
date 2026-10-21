@@ -103,7 +103,7 @@ class Engine:
         task.add_done_callback(lambda _: self.running.pop(run_id, None) if self.running.get(run_id) is task else None)
 
     def resume_pending(self):
-        # This is safe for text-only generation; no external write tools are enabled.
+        # Pending jobs can generate file proposals; only new files in authorized workspaces auto-apply.
         for row in self.db.all("SELECT id FROM runs WHERE status IN ('queued','running','awaiting_approval')"):
             self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (row['id'],))
             self.schedule(row['id'])
@@ -167,9 +167,14 @@ class Engine:
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
             try:
-                proposals = self.workspaces.stage_run(run)
-                if proposals:
-                    self.emit(run_id,'workspace_proposals',{'proposal_ids':proposals})
+                changes = self.workspaces.stage_run(run)
+                if changes['auto_applied']:
+                    self.emit(run_id,'workspace_files_created',
+                              {'count':len(changes['auto_applied']),'proposal_ids':changes['auto_applied']})
+                if changes['pending']:
+                    self.emit(run_id,'workspace_proposals',{'proposal_ids':changes['pending']})
+                for warning in changes['errors']:
+                    self.emit(run_id,'workspace_stage_error',{'message':warning[:180]})
             except Exception as exc:
                 self.emit(run_id,'workspace_stage_error',{'message':'Não foi possível preparar as alterações: '+str(exc)[:150]})
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
@@ -253,7 +258,10 @@ class Engine:
                     parts = []
                     started = time.monotonic()
                     try:
-                        async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
+                        request_provider = dict(provider)
+                        if 'central-files' in system:
+                            request_provider['_max_tokens'] = 4096
+                        async for token in self.client.stream(request_provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
                             parts.append(token)
                             self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
                         output = ''.join(parts)
