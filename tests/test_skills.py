@@ -372,3 +372,62 @@ def test_ui_worker_cannot_write_an_unassigned_file(tmp_path):
         assert result['auto_applied']==[] and result['pending']==[]
         assert any('fora de sua responsabilidade' in err for err in result['errors'])
         assert not (folder/'frontend/src/index.css').exists()
+
+
+
+def test_explicit_skill_ux_request_ignores_stale_manual_frontend_selection(tmp_path):
+    """User requests Architect-coordinated storefront redesign: always plan 6 stages."""
+    class UIWorkers:
+        async def stream(self,provider,key,model,system,messages):
+            if 'UI_STAGE_PLANNING' in system:
+                # An architect may propose unrelated components, but not stage them.
+                yield '{"files":[{"path":"frontend/src/components/NavBar.tsx","content":"unrelated"}]}'
+            elif 'UI_STAGE_DESIGN' in system:
+                yield 'Direção visual aprovada: contraste, espaços, responsividade.'
+            elif 'UI_STAGE_IMPLEMENT' in system:
+                import re
+                target=re.search(r'UMA alteração completa para ([\w./-]+)\.',system)
+                assert target,system[:900]
+                path=target.group(1)
+                yield json.dumps({'files':[{'path':path,'content':'/* modernization: '+path+' */\n'}]})
+            elif 'UI_STAGE_REVIEW' in system:
+                yield 'Revisão de integração: comparar os diffs antes de aprovar.'
+            else:raise AssertionError('Etapa desconhecida '+system[:100])
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        files=('frontend/src/App.tsx','frontend/src/index.css',
+               'frontend/src/components/ProductCard.tsx')
+        for path in files:
+            target=folder/path
+            target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_text('original: '+path)
+        cid=conversation(c,project)
+        selected=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        ENGINE.client=UIWorkers()
+        prompt=('Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
+                'O Arquiteto IA deve coordenar o Frontend IA e o Designer IA, avaliar bibliotecas '
+                'do catálogo e revisar alterações, com visual premium e responsivo.')
+        r=c.post('/api/runs',json={'conversation_id':cid,'mode':'manual',
+             'agent_ids':[selected['id']],'prompt':prompt},headers=HEADERS)
+        assert r.status_code==200,r.text
+        done=wait_for(c,r.json()['id'],timeout=9)
+        assert done['status']=='completed',done.get('error')
+        names=[step['name'] for step in done['steps']]
+        assert len(names)==6,names
+        assert names[0].startswith('Arquiteto')
+        assert 'Designer' in names[1]
+        assert len([name for name in names if name.startswith('Frontend')])==3
+        assert c.get('/api/skills',params={'project_id':project}).json()[0]['enabled']
+        assert not (folder/'frontend/src/components/NavBar.tsx').exists()
+        for path in files:assert (folder/path).read_text()=='original: '+path
+        proposals=c.get(f'/api/projects/{project}/workspace').json()['proposals']
+        pending=[p for p in proposals if p['status']=='pending']
+        assert len(pending)==3,pending
+        assert all(p['files'][0]['replace'] for p in pending)
+        assert 'Aguardando revisão e aprovação' in done['output']
+        assert 'planejamento/revisão' in done['output']
+        events=ENGINE.db.all('SELECT event,payload FROM events WHERE run_id=?',(r.json()['id'],))
+        import json as jsonlib
+        assert any(e['event']=='ui_skill_activated' for e in events)
+        assert any(e['event']=='run_created' and jsonlib.loads(e['payload']).get('ui_implementation')
+                   for e in events)
