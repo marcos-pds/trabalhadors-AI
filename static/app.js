@@ -216,7 +216,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
    if(el){el.querySelector('.msg-body').innerHTML=markdown(S.streams[d.step_id].text);scrollChat()}
   }
   if(msg.event==='step_reset'){if(S.streams[d.step_id]){S.streams[d.step_id].text='';const el=$(`[data-step="${CSS.escape(d.step_id)}"] .msg-body`);if(el)el.innerHTML='<span style="color:var(--muted)">↻ Retentativa do modelo...</span>'}}
-  if(msg.event==='run_created'){S.runSteps=d.plan.map(p=>({id:p.id,name:p.name,status:'queued',kind:p.kind}));showSteps()}
+  if(msg.event==='run_created'){S.runSteps=d.plan.map(p=>({id:p.id,name:p.name,status:'queued',kind:p.kind}));showSteps();if(d.ui_implementation)appendEvent('🎨 Fluxo UX/UI Studio Pro ativado: Arquiteto, Designer e três tarefas de Frontend, com revisão final.')}
   if(msg.event==='step_status'){const s=S.runSteps.find(s=>s.id===d.id);if(s)Object.assign(s,d);showSteps()}
   if(msg.event==='model_selected'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.model=d.model;s.provider=d.provider;showSteps()}}
   if(msg.event==='approval_requested'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.status='awaiting_approval';showSteps()}}
@@ -226,6 +226,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='provider_recovered')appendEvent('✓ '+d.provider+': recuperado com sucesso.');
   if(msg.event==='provider_probe')appendEvent('↻ Verificando recuperação de '+d.provider+'...');
   if(msg.event==='run_failed'){appendEvent('Falha: '+d.error);finishRun(false)}
+  if(msg.event==='ui_skill_activated'){appendEvent('✓ Skill UI/UX Studio Pro ativada para este projeto a pedido do usuário.');}
   if(msg.event==='workspace_prepared'){S.workspaceRunProject=d.project_id;appendEvent('📁 Pasta criada/autorizada: '+d.folder+(d.starter_files?' · '+d.starter_files+' arquivos iniciais gravados.':''))}
   if(msg.event==='workspace_files_created'){appendEvent('✓ Novos arquivos dos trabalhadores gravados automaticamente. Abra Arquivos para conferir.')}
   if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações em arquivos existentes exigem aprovação. Confira Projetos → Arquivos.')}
