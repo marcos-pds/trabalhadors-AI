@@ -158,6 +158,11 @@ def test_chat_request_creates_real_react_fastapi_project(tmp_path):
         events=ENGINE.db.all('SELECT event,payload FROM events WHERE run_id=?',(result.json()['id'],))
         assert any(e['event']=='workspace_prepared' for e in events)
         assert any(e['event']=='workspace_stage_error' for e in events)  # model provided no files
+        output=c.get(f"/api/runs/{result.json()['id']}").json()['output']
+        assert 'Resultado no Windows' in output
+        assert str(folder) in output
+        assert 'Arquivos existentes' in output
+        assert 'A estrutura inicial está pronta.' not in output
 
 
 def test_incomplete_agent_json_does_not_write_fragments(tmp_path):
@@ -176,6 +181,10 @@ def test_incomplete_agent_json_does_not_write_fragments(tmp_path):
         assert not (folder/'src/test.py').exists()
         events=ENGINE.db.all('SELECT event FROM events WHERE run_id=?',(result.json()['id'],))
         assert any(e['event']=='workspace_stage_error' for e in events)
+        output=c.get(f"/api/runs/{result.json()['id']}").json()['output']
+        assert 'Avisos de geração' in output
+        assert 'JSON dos arquivos veio incompleto' in output
+        assert 'sem fim' not in output
 
 
 def test_multi_file_preflight_prevents_partial_write(tmp_path):
