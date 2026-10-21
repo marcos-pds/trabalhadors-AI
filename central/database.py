@@ -32,6 +32,20 @@ CREATE TABLE IF NOT EXISTS providers (
  input_price REAL, output_price REAL, last_error TEXT, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_provider_user ON providers(user_id);
+CREATE TABLE IF NOT EXISTS provider_health (
+ provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+ model TEXT NOT NULL, consecutive_failures INTEGER NOT NULL DEFAULT 0,
+ open_count INTEGER NOT NULL DEFAULT 0, suspended_until REAL, probe_started_at REAL,
+ last_error_category TEXT, last_http_status INTEGER, last_checked_at TEXT,
+ PRIMARY KEY(provider_id,model)
+);
+CREATE TABLE IF NOT EXISTS provider_attempts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+ model TEXT NOT NULL, success INTEGER NOT NULL, category TEXT, http_status INTEGER,
+ latency_ms INTEGER NOT NULL, run_id TEXT, step_id TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_attempts ON provider_attempts(provider_id,model,id DESC);
 CREATE TABLE IF NOT EXISTS agents (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  name TEXT NOT NULL, specialty TEXT NOT NULL, instructions TEXT NOT NULL,
