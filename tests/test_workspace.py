@@ -282,3 +282,72 @@ def test_truncated_planner_does_not_block_valid_frontend_worker(tmp_path):
         assert (folder/'frontend/src/components/SaleTag.tsx').is_file()
         assert not (folder/'backend/broken.py').exists()
         assert 'JSON dos arquivos veio incompleto' in done['output']
+
+
+def test_referenced_existing_file_is_read_fully_without_asking_user(tmp_path):
+    """Editing a cited App.tsx must have full authorized file context and create only a pending diff."""
+    import json
+    from central.workspace import Workspaces
+    class ContextAwareFrontend:
+        calls=0
+        async def stream(self, provider, key, model, system, messages):
+            self.calls+=1
+            assert '=== INÍCIO DO ARQUIVO EXISTENTE: frontend/src/App.tsx ===' in system
+            assert '=== FIM DO ARQUIVO: frontend/src/App.tsx ===' in system
+            assert 'CURRENT_APP_FULL_CONTEXT_END' in system
+            assert 'existing ProductCard' in system
+            assert 'INTERNAL_NOT_REQUESTED' not in system
+            assert 'Não peça ao usuário que copie' in system
+            yield json.dumps({'files':[{'path':'frontend/src/App.tsx',
+                          'content':'import ProductCard from "./components/ProductCard";\\nexport default function App(){return <ProductCard />; }\\n'}]})
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        appfile=folder/'frontend/src/App.tsx'
+        appfile.parent.mkdir(parents=True,exist_ok=True)
+        original='// existing source\\n' + ('export const n = 1;\\n' * 125) + '// CURRENT_APP_FULL_CONTEXT_END\\n'
+        assert len(original)>1800
+        appfile.write_text(original)
+        component=folder/'frontend/src/components/ProductCard.tsx'
+        component.parent.mkdir(parents=True,exist_ok=True)
+        component.write_text('// existing ProductCard\\nexport default function ProductCard(){return <div />;}\\n')
+        (folder/'private-other.txt').write_text('INTERNAL_NOT_REQUESTED')
+        add_provider(c,'fake',1)
+        fake=ContextAwareFrontend()
+        ENGINE.client=fake
+        convo=c.post('/api/conversations',json={'title':'Loja','project_id':project},headers=HEADERS).json()
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        run=c.post('/api/runs',json={'conversation_id':convo['id'],
+          'prompt':'Integre frontend/src/components/ProductCard.tsx ao frontend/src/App.tsx sem alterar outros arquivos.',
+          'mode':'manual','agent_ids':[agent['id']]},headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed'
+        assert fake.calls==1
+        assert appfile.read_text()==original
+        info=c.get(f'/api/projects/{project}/workspace').json()
+        pending=[x for x in info['proposals'] if x['status']=='pending']
+        assert len(pending)==1
+        preview=c.get(f"/api/projects/{project}/workspace/proposals/{pending[0]['id']}").json()
+        assert preview['files'][0]['replace'] is True
+        assert 'import ProductCard' in preview['files'][0]['diff']
+        assert decide(c,project,pending[0]['id'],confirmation='').status_code==422
+        assert decide(c,project,pending[0]['id']).status_code==200
+        assert 'import ProductCard' in appfile.read_text()
+
+
+def test_context_basename_lookup_and_oversize_no_partial_leak(tmp_path):
+    with TestClient(app) as c:
+        p=setup(c,tmp_path);folder=prepare(c,p)
+        path=folder/'frontend/src/App.tsx';path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('// visible App source\\n')
+        hidden=folder/'backend/secret-data.py';hidden.parent.mkdir(parents=True,exist_ok=True)
+        hidden.write_text('SECRET_SHOULD_NOT_SEND')
+        user=c.get('/api/me').json()['id']
+        convo=c.post('/api/conversations',json={'project_id':p},headers=HEADERS).json()['id']
+        prompt=ENGINE.workspaces.prompt(user,convo,request='Modifique App.tsx')
+        assert '// visible App source' in prompt
+        assert 'SECRET_SHOULD_NOT_SEND' not in prompt
+        path.write_text('x'*13_000)
+        prompt=ENGINE.workspaces.prompt(user,convo,request='Modifique App.tsx')
+        assert 'arquivo grande demais para contexto completo' in prompt
+        assert 'x'*300 not in prompt
