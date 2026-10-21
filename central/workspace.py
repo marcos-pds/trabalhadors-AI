@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from .database import uid, utcnow
+from .scaffolds import react_fastapi_files
 
 MAX_FILE = 160_000
 MAX_FILES = 20
@@ -124,6 +125,48 @@ class Workspaces:
             self.db.execute('INSERT INTO project_workspaces(project_id,user_id,relative_path,created_at) VALUES(?,?,?,?)',
                             (project_id,user_id,relative,utcnow()))
             return self.info(user_id,project_id)
+
+
+    @staticmethod
+    def wants_project(prompt):
+        """An explicit build request, not a request for advice about building."""
+        text = prompt.lower()
+        return (bool(re.search(r'\b(crie|criar|monte|desenvolva|gere|inicie|implemente)\b', text))
+                and bool(re.search(r'\b(projeto|loja virtual|estrutura inicial|aplicativo|website|site)\b', text))
+                and not bool(re.search(r'\b(como|explique|tutorial|ensine)\s+(criar|fazer|montar)\b', text)))
+
+    def prepare_chat(self,user_id,conversation_id,prompt):
+        """Explicit chat creation request authorizes a *new* project beneath the fixed root."""
+        if not self.wants_project(prompt):
+            return None
+        with self.lock:
+            convo=self.db.one('SELECT * FROM conversations WHERE id=? AND user_id=?',(conversation_id,user_id))
+            if not convo: raise WorkspaceError('Conversa não encontrada.',404)
+            if convo['project_id']:
+                project_id=convo['project_id']
+                existing=self.db.one('SELECT project_id FROM project_workspaces WHERE project_id=? AND user_id=?',
+                                     (project_id,user_id))
+                info=self.info(user_id,project_id) if existing else self.initialize(user_id,project_id)
+            else:
+                name='Loja Virtual' if 'loja virtual' in prompt.lower() else 'Projeto IA'
+                project_id=uid()
+                self.db.execute('INSERT INTO projects VALUES(?,?,?,?,?)',
+                                (project_id,user_id,name,'Criado a partir de uma solicitação no Chat IA.',utcnow()))
+                try:
+                    info=self.initialize(user_id,project_id)
+                except Exception:
+                    self.db.execute('DELETE FROM projects WHERE id=? AND user_id=?',(project_id,user_id))
+                    raise
+                self.db.execute('UPDATE conversations SET project_id=? WHERE id=? AND user_id=?',
+                                (project_id,conversation_id,user_id))
+            seeded=0
+            if 'react' in prompt.lower() and 'fastapi' in prompt.lower() and not info['files']:
+                changes=react_fastapi_files(
+                    self.db.one('SELECT name FROM projects WHERE id=?',(project_id,))['name'])
+                proposal=self.stage(user_id,project_id,changes,agent='Modelo inicial (template local)')
+                self.decide(user_id,project_id,proposal['id'],True)
+                seeded=len(changes)
+            return {'project_id':project_id,'folder':info['folder'],'starter_files':seeded}
 
     def info(self, user_id, project_id):
         folder = self._folder(user_id,project_id)
@@ -281,27 +324,91 @@ class Workspaces:
             self.db.execute("UPDATE workspace_proposals SET status='applied',applied_at=? WHERE id=?",(utcnow(),proposal_id))
             return {'status':'applied','files':len(applied)}
 
-    def stage_run(self,run):
-        """Collect model-authored manifests from real completed workers; never apply."""
-        convo=self.db.one('SELECT project_id FROM conversations WHERE id=?',(run['conversation_id'],))
-        if not convo or not convo['project_id']:
-            return []
-        associated=self.db.one('SELECT project_id FROM project_workspaces WHERE project_id=? AND user_id=?',
-                               (convo['project_id'],run['user_id']))
-        if not associated: return []
-        staged=[]
-        steps=self.db.all("SELECT name,output FROM steps WHERE run_id=? AND status='completed' AND kind='agent'",(run['id'],))
-        for step in steps:
-            for matched in BLOCKS.findall(step['output'] or '')[:1]:
+    @staticmethod
+    def _extract_files(text):
+        """Only accept complete JSON manifests; never infer source files from prose."""
+        manifests=BLOCKS.findall(text)
+        if not manifests:
+            # Models often return plain JSON or a generic json fence despite instructions.
+            decoder=json.JSONDecoder()
+            for hit in re.finditer(r'\{\s*"files"\s*:', text):
                 try:
-                    data=json.loads(matched)
-                    files=data.get('files') if isinstance(data,dict) else None
-                    if files:
-                        result=self.stage(run['user_id'],convo['project_id'],files,run_id=run['id'],agent=step['name'])
-                        staged.append(result['id'])
-                except (ValueError,TypeError,KeyError):
+                    document,unused=decoder.raw_decode(text[hit.start():])
+                except json.JSONDecodeError:
                     continue
-        return staged
+                if isinstance(document,dict) and isinstance(document.get('files'),list):
+                    manifests.append(json.dumps(document,ensure_ascii=False))
+        if not manifests:
+            if 'central-files' in text.lower() or re.search(r'\{\s*"files"\s*:',text):
+                raise WorkspaceError('O JSON dos arquivos veio incompleto/inválido. Solicite arquivos menores, em blocos completos.')
+            return []
+        if len(manifests)>1:
+            raise WorkspaceError('Envie um manifesto por resposta do trabalhador.')
+        try:
+            data=json.loads(manifests[0])
+        except json.JSONDecodeError:
+            raise WorkspaceError('Manifesto JSON inválido; nenhum arquivo foi aplicado.')
+        if not isinstance(data,dict) or not isinstance(data.get('files'),list):
+            raise WorkspaceError('Manifesto deve conter uma lista "files".')
+        return data['files']
+
+    def stage_run(self,run):
+        """Stage model output. Auto-apply ONLY fully valid, previously absent files."""
+        convo=self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                          (run['conversation_id'],run['user_id']))
+        if not convo or not convo['project_id']:
+            return {'pending':[],'auto_applied':[],'errors':[]}
+        project_id=convo['project_id']
+        if not self.db.one('SELECT project_id FROM project_workspaces WHERE project_id=? AND user_id=?',
+                           (project_id,run['user_id'])):
+            return {'pending':[],'auto_applied':[],'errors':['A pasta do projeto não está preparada.']}
+        staged=[];errors=[];used=set();total_files=0
+        steps=self.db.all("SELECT name,output FROM steps WHERE run_id=? AND status='completed' AND kind='agent'",(run['id'],))
+        tasks=[]
+        for step in steps:
+            try:
+                files=self._extract_files(step['output'] or '')
+                if not files: continue
+                for item in files:
+                    if not isinstance(item,dict): raise WorkspaceError('Estrutura de arquivo inválida.')
+                    key=valid_relative(item.get('path')).lower()
+                    if key in used: raise WorkspaceError('Dois trabalhadores propuseram o mesmo arquivo: '+key)
+                    used.add(key)
+                total_files+=len(files)
+                if total_files>MAX_FILES:
+                    raise WorkspaceError('Mais de 20 arquivos gerados; divida o projeto em etapas.')
+                tasks.append((step['name'],files))
+            except WorkspaceError as exc:
+                errors.append(step['name']+': '+str(exc))
+        if errors:
+            return {'pending':[],'auto_applied':[],'errors':errors}
+        if not tasks:
+            if self.wants_project(run['prompt']):
+                errors.append('Nenhum arquivo estruturado completo foi entregue pelos trabalhadores.')
+            return {'pending':[],'auto_applied':[],'errors':errors}
+        # Validate all candidates BEFORE any disk write, across all workers.
+        try:
+            for name,files in tasks:
+                result=self.stage(run['user_id'],project_id,files,run_id=run['id'],agent=name)
+                staged.append(result['id'])
+        except WorkspaceError as exc:
+            return {'pending':staged,'auto_applied':[],'errors':[str(exc)]}
+        previews=[self.proposal(run['user_id'],project_id,pid) for pid in staged]
+        # If any worker proposes a destructive change, keep ALL proposals for explicit approval.
+        if any(file['action']!='write' or file['replace'] or file['stale']
+               for proposal in previews for file in proposal['files']):
+            return {'pending':staged,'auto_applied':[],'errors':[]}
+        applied=[]
+        # All files are new, and all proposals were validated. Recheck during decide.
+        for pid in staged:
+            try:
+                self.decide(run['user_id'],project_id,pid,True)
+                applied.append(pid)
+            except (WorkspaceError,OSError) as exc:
+                errors.append('Erro ao gravar arquivos. Verifique o explorador: '+str(exc))
+                break
+        return {'pending':[p for p in staged if p not in applied],
+                'auto_applied':applied,'errors':errors}
 
     def prompt(self,user_id,conversation_id):
         convo=self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',(conversation_id,user_id))
@@ -321,9 +428,12 @@ class Workspaces:
                 except WorkspaceError: pass
         return ('\nVocê está trabalhando no projeto local autorizado. Arquivos atuais: '+names+
             '\nContexto de arquivos (pode ser enviado ao provedor do agente): '+''.join(snippets)[:7000]+
-            '\nSe sua tarefa exige criar ou editar arquivos, finalize a resposta com um bloco EXATO:'+
+            '\nSe sua tarefa exige criar ou editar arquivos, produza no máximo 3 arquivos completos nesta etapa. '
+            'Priorize arquivos da sua especialidade, não descreva código sem produzir os arquivos. '
+            'Finalize a resposta com UM bloco EXATO:'+
             '\n```central-files\n{"files":[{"path":"src/arquivo.py","content":"conteúdo completo do arquivo"}]}\n```'+
             '\nEntregue caminhos relativos, JSON válido e conteúdo COMPLETO; não use markdown dentro do JSON. '
             'Não inclua segredos. Nunca tente executar comandos, alterar arquivos fora do projeto ou dizer que já gravou arquivos. '
-            'As propostas serão mostradas ao usuário e somente aplicadas após aprovação. '
+            'Arquivos novos completos e válidos são criados automaticamente na pasta autorizada. '
+            'Substituições e exclusões sempre exigem aprovação. '
             'Se estiver fazendo revisão ou planejamento sem alterar arquivos, não inclua o bloco.')
