@@ -135,6 +135,13 @@ class SkillsHub:
                 raise WorkspaceError('package.json ausente/inseguro.')
             if not isinstance(json.loads(manifest.read_text(encoding='utf-8')),dict):
                 raise WorkspaceError('package.json inválido.')
+            # npm writes lockfiles and node_modules; none may redirect outside the root.
+            for item in (manifest,target/'package-lock.json',target/'node_modules',
+                         target/'npm-shrinkwrap.json',target/'.npmrc'):
+                if is_link_or_junction(item):
+                    raise WorkspaceError('npm encontrou arquivo ou diretório vinculado a outra pasta.',403)
+                if item.is_file() and item.stat().st_nlink>1:
+                    raise WorkspaceError('Arquivos com hardlink não podem ser alterados pelo npm.',403)
             exe=shutil.which('npm.cmd' if os.name=='nt' else 'npm')
             if not exe:raise WorkspaceError('npm não encontrado no PATH.',503)
             cmd=[exe,'install','--ignore-scripts','--no-audit','--no-fund',
