@@ -196,3 +196,61 @@ def test_multi_file_preflight_prevents_partial_write(tmp_path):
         (folder/'existing.txt').write_text('external')
         assert decide(c,p,s.json()['id']).status_code==409
         assert not (folder/'new.txt').exists()
+
+
+def test_coding_worker_repairs_missing_manifest_and_writes_real_file(tmp_path):
+    """A worker that describes code must be prompted once for a complete JSON file."""
+    class NeedsRepair:
+        def __init__(self):
+            self.calls = []
+        async def stream(self, provider, key, model, system, messages):
+            self.calls.append({'tokens':provider.get('_max_tokens'),'prompt':messages[0]['content']})
+            if len(self.calls)==1:
+                yield 'Explicação do frontend, mas sem nenhum arquivo JSON.'
+            else:
+                assert 'UM ÚNICO arquivo NOVO' in messages[0]['content']
+                yield '{"files":[{"path":"frontend/src/components/ProductBadge.tsx",'
+                yield '"content":"export default function ProductBadge() { return <span>Novo</span>; }\\n"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        add_provider(c,'fake',1)
+        fake=NeedsRepair(); ENGINE.client=fake
+        convo=c.post('/api/conversations',
+                     json={'title':'Frontend','project_id':project},headers=HEADERS).json()
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        run=c.post('/api/runs',json={
+            'conversation_id':convo['id'],'mode':'manual','agent_ids':[agent['id']],
+            'prompt':'Crie a estrutura inicial do projeto frontend React com componentes.'},headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed'
+        assert len(fake.calls)==2
+        assert fake.calls[0]['tokens']==4096
+        assert fake.calls[1]['tokens']==3072
+        assert (folder/'frontend/src/components/ProductBadge.tsx').is_file()
+        assert (folder/'frontend/src/components/ProductBadge.tsx').read_text().startswith('export default')
+        stored=c.get(f"/api/runs/{run.json()['id']}").json()['steps'][0]['output']
+        assert 'Explicação do frontend' not in stored
+        assert '"files"' in stored
+        events=ENGINE.db.all('SELECT event FROM events WHERE run_id=?',(run.json()['id'],))
+        assert any(event['event']=='workspace_retry_started' for event in events)
+        assert any(event['event']=='workspace_retry_succeeded' for event in events)
+
+
+def test_budget_limited_project_does_not_make_unplanned_retry(tmp_path):
+    class ExplainerOnly:
+        def __init__(self): self.calls=0
+        async def stream(self,provider,key,model,system,messages):
+            self.calls+=1
+            yield 'Explicação sem manifesto'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);prepare(c,project);add_provider(c,'fake',1)
+        fake=ExplainerOnly();ENGINE.client=fake
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        run=c.post('/api/runs',json={'conversation_id':convo['id'],'mode':'manual',
+            'agent_ids':[agent['id']],'budget_limit':1.0,
+            'prompt':'Crie a estrutura inicial do projeto frontend React.'},headers=HEADERS)
+        assert run.status_code==200
+        assert wait_for(c,run.json()['id'])['status']=='completed'
+        assert fake.calls==1
