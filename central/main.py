@@ -419,10 +419,22 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     try:
         workspace_prepared = ENGINE.workspaces.prepare_chat(user['id'],data.conversation_id,data.prompt)
         delegated = ENGINE.skills.instruction(user['id'],data.conversation_id,data.prompt)
+        # An explicit request to USE the named local Skill activates its instructions
+        # for this project. This never grants Architect permissions or runs packages.
+        skill_activated = None
+        linked = DB.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                        (data.conversation_id,user['id']))
+        if (flow is None and linked and linked['project_id'] and
+            ENGINE.skills.explicitly_requested(data.prompt)):
+            skill_activated = ENGINE.skills.enable(user['id'],linked['project_id'],
+                                                   'ux-ui-studio-pro',True)
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency)
         if workspace_prepared:
             ENGINE.emit(run_id,'workspace_prepared',workspace_prepared)
+        if skill_activated:
+            ENGINE.emit(run_id,'ui_skill_activated',{'project_id':linked['project_id'],
+                                                    'skill_id':skill_activated['id']})
         if delegated is not None:
             ENGINE.emit(run_id,'architect_delegation_changed',delegated)
     except ValueError as exc: raise HTTPException(422,str(exc))
