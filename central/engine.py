@@ -212,8 +212,9 @@ class Engine:
                 if not skill_active:
                     causes.append('a Skill UI/UX Studio Pro não está ativa para o projeto desta conversa')
                 names={'architecture':'Arquiteto IA','design':'Designer IA','frontend':'Frontend IA'}
+                all_agents=self.db.all('SELECT specialty,enabled FROM agents WHERE user_id=?',(user_id,))
                 for role,label in names.items():
-                    entries=[a for a in agents if a['specialty']==role]
+                    entries=[a for a in all_agents if a['specialty']==role]
                     if not entries:
                         causes.append(label+' não está cadastrado')
                     elif not any(a['enabled'] for a in entries):
