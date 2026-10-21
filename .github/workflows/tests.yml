@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/local-project-workspaces
 jobs:
   tests:
     runs-on: ubuntu-latest
