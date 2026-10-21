@@ -297,8 +297,32 @@ async function ensureConvo(){if(S.currentConvo)return S.currentConvo;const c=awa
 async function sendMessage(){const input=$('#chat-input');let prompt=input?.value.trim();if(!prompt)return;
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
  const attachments=S.attached.map(f=>`\n\nArquivo: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('');
- prompt+=attachments;input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
- try{const cid=await ensureConvo();appendMessage('user','Você',prompt);const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});S.selectedWorkflow='';S.currentRun=res.id;renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];$('#chat-cancel').hidden=false;$('#chat-send').disabled=true;const convo=S.conversations.find(c=>c.id===cid);if(convo&&convo.title==='Nova conversa'){convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title}watchRun(res.id)}catch(ex){toast(ex.message);$('#chat-send').disabled=false}}
+ prompt+=attachments;
+ const send=$('#chat-send');if(send)send.disabled=true;
+ try{
+   const cid=await ensureConvo();
+   const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};
+   const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});
+   // Only show a user bubble after the server accepted the run.
+   appendMessage('user','Você',prompt);
+   if(input)input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
+   S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;
+   S.selectedWorkflow='';S.currentRun=res.id;renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];
+   $('#chat-cancel').hidden=false;if(send)send.disabled=true;
+   const convo=S.conversations.find(c=>c.id===cid);
+   if(convo&&convo.title==='Nova conversa'){
+     convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;
+     const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title
+   }
+   watchRun(res.id);
+ }catch(ex){
+   // Preserve typed prompt and attachments for editing/resubmission.
+   toast(ex.message);if(send)send.disabled=false;
+   if(/Fluxo UX\/UI não iniciado|Trabalhadores/.test(ex.message)){
+     appendEvent('⚠ '+ex.message+' Abra a aba Trabalhadores para corrigir o agente mencionado.');
+   }
+ }
+}
 function disconnect(){S.source?.close();S.source=null}
 async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`);S.runSteps=run.steps||[];showSteps()}catch{};
  const src=new EventSource(`/api/runs/${rid}/events?after=${S.lastSeq}`);S.source=src;
