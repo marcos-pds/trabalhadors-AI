@@ -204,3 +204,90 @@ def test_installer_refuses_redirected_npm_lockfile(tmp_path,monkeypatch):
         with pytest.raises(WorkspaceError):
             ENGINE.skills._install_sync(c.get('/api/me').json()['id'],project,'npm',['lucide-react'])
         assert outside.read_text()=='{"unsafe":true}'
+
+
+def test_modernization_with_manual_architect_creates_real_worker_tasks_and_approved_files(tmp_path, monkeypatch):
+    """Regression: user asks Architect to coordinate UX/UI, must not stop at a text plan."""
+    from central.engine import ui_execution_plan
+    class Workers:
+        def __init__(self):self.workers=[]
+        async def stream(self, provider, key, model, system, messages):
+            self.workers.append(system)
+            if 'ARQUITETO REVISOR AUTORIZADO' in system:
+                yield json.dumps({'decision':'approve','reason':'Diff seguro e escopo compatível.'})
+            elif 'UI_STAGE_PLANNING' in system:
+                fence=chr(96)*3
+                yield ('Direção técnica: preservar o FastAPI e modernizar componentes.\\n'
+                       +fence+'central-packages\n{"manager":"npm","packages":["lucide-react"]}\n'+fence)
+            elif 'UI_STAGE_DESIGN' in system:
+                yield 'Paleta premium, grid responsivo, foco visível, reduced-motion.'
+            elif 'UI_STAGE_IMPLEMENT' in system:
+                if 'Frontend · Vitrine' in system: raise AssertionError('Unexpected step name in system')
+                if 'UMA alteração completa para frontend/src/App.tsx' in system:
+                    yield json.dumps({'files':[{'path':'frontend/src/App.tsx',
+                      'content':'import { getProducts } from "./api";\nimport ProductCard from "./components/ProductCard";\nexport default function App(){return <main><h1>Loja Premium</h1><ProductCard /></main>}\n'}]})
+                elif 'UMA alteração completa para frontend/src/index.css' in system:
+                    yield json.dumps({'files':[{'path':'frontend/src/index.css',
+                      'content':':root{color:#151e32;background:#f7f5f1} main{max-width:1200px;margin:auto}' }]})
+                elif 'UMA alteração completa para frontend/src/components/ProductCard.tsx' in system:
+                    yield json.dumps({'files':[{'path':'frontend/src/components/ProductCard.tsx',
+                      'content':'export default function ProductCard(){return <article>Vitrine</article>}' }]})
+                else: raise AssertionError('No file task instructions')
+            elif 'UI_STAGE_REVIEW' in system:
+                yield 'Checklist aprovado, o servidor deve verificar os diffs.'
+            else:
+                raise AssertionError('Unexpected agent instructions: '+system[:120])
+    with TestClient(app) as c:
+        p=setup(c,tmp_path);folder=prepare(c,p);add_provider(c,'fake',1)
+        frontend=folder/'frontend/src';frontend.mkdir(parents=True,exist_ok=True)
+        (frontend/'components').mkdir()
+        (frontend/'App.tsx').write_text('export default function App(){return <p>Antiga loja</p>}')
+        (frontend/'index.css').write_text('body{background:white}')
+        (frontend/'components/ProductCard.tsx').write_text('export default function ProductCard(){return <div>Produto</div>}')
+        backend=folder/'backend';backend.mkdir()
+        (backend/'main.py').write_text("print('backend preservado')")
+        c.post(f'/api/projects/{p}/skills/ux-ui-studio-pro',
+              json={'enabled':True},headers=HEADERS)
+        cid=conversation(c,p)
+        c.post(f'/api/conversations/{cid}/architect-delegation',
+               json={'enabled':True},headers=HEADERS)
+        installations=[]
+        def install(self,user,project,manager,packages):
+            installations.append((manager,packages))
+            return {'ok':True,'manager':manager,'packages':packages,'exit_code':0,'output':'mock'}
+        monkeypatch.setattr(SkillsHub,'_install_sync',install)
+        workers=Workers();ENGINE.client=workers
+        architect=next(a for a in c.get('/api/agents').json() if a['specialty']=='architecture')
+        prompt=('Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
+                'O Arquiteto IA deve coordenar o Frontend IA e o Designer IA, '
+                'avaliar bibliotecas necessárias, preparar instalações autorizadas e revisar alterações. '
+                'Quero layout responsivo, cards premium, ícones e animações discretas.')
+        response=c.post('/api/runs',json={'conversation_id':cid,'mode':'manual',
+            'agent_ids':[architect['id']],'prompt':prompt},headers=HEADERS)
+        assert response.status_code==200,response.text
+        run=wait_for(c,response.json()['id'],timeout=8)
+        assert run['status']=='completed',run.get('error')
+        specialties=[step['name'] for step in run['steps']]
+        assert len(run['steps'])==6
+        assert any('Designer' in name for name in specialties)
+        assert len([n for n in specialties if n.startswith('Frontend')])==3
+        assert 'Loja Premium' in (frontend/'App.tsx').read_text()
+        assert 'background:#f7f5f1' in (frontend/'index.css').read_text()
+        assert 'Vitrine' in (frontend/'components/ProductCard.tsx').read_text()
+        assert (backend/'main.py').read_text()=="print('backend preservado')"
+        assert installations==[('npm',['lucide-react'])]
+        assert c.get(f'/api/projects/{p}/package-installs').json()[0]['status']=='completed'
+        assert len(ENGINE.db.all('SELECT * FROM architect_approval_log WHERE run_id=?',(run['id'],)))==3
+        assert 'Arquiteto autorizado' in run['output']
+
+
+def test_ui_mode_without_skill_keeps_manual_architect_only(tmp_path):
+    from central.engine import ui_execution_plan
+    with TestClient(app) as c:
+        p=setup(c,tmp_path);prepare(c,p)
+        architect=next(a for a in c.get('/api/agents').json() if a['specialty']=='architecture')
+        agents=c.get('/api/agents').json()
+        prompt='Modernize o UX/UI da Loja Virtual. Arquiteto deve coordenar Frontend e Designer.'
+        assert ui_execution_plan(agents,prompt,'manual',[architect['id']],False) is None
+        assert ui_execution_plan(agents,'Faça apenas um plano de modernização UX/UI da loja',
+                                 'manual',[architect['id']],True) is None
