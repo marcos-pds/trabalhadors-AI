@@ -1,4 +1,4 @@
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null};
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -175,16 +175,118 @@ function history(){return `${heading('REGISTROS','Histórico de execuções','Co
 function settings(){return `${heading('PREFERÊNCIAS','Configurações','Personalize a aparência e gerencie a sessão.')}
  <div class="grid2"><section class="panel"><div class="panel-head"><h3>Aparência</h3></div><div class="panel-body"><p class="page-desc" style="margin-bottom:15px">Alterne entre os temas da interface.</p><button class="btn" data-action="theme">◐ Mudar para tema ${S.theme==='dark'?'claro':'escuro'}</button></div></section><section class="panel"><div class="panel-head"><h3>Sua conta</h3></div><div class="panel-body"><p>${esc(S.me.email)}</p><p class="page-desc" style="margin-bottom:15px">Os dados ficam na instância em execução. Faça backup da pasta data/, incluindo a chave de criptografia.</p><button class="btn btn-danger" data-action="logout">Sair da conta</button></div></section></div>`}
 function workflows(){return `${heading('AUTOMAÇÃO','Fluxos de trabalho','Monte grafos de agentes e aprovações. Execução serial ou paralela conforme as dependências.',`<button class="btn btn-primary" data-action="add-workflow">＋ Criar fluxo</button>`)}<div class="hint">Motor funcional: blocos de agente e aprovação humana, dependências, paralelismo e checkpoints. Condições avançadas, ferramentas externas e ações irreversíveis ainda não são executadas.</div><section class="panel"><div class="panel-head"><h3>Fluxos disponíveis</h3><small>${S.workflows.length} salvo(s)</small></div>${S.workflows.map(w=>`<div class="workflow-card"><div><strong>⌁ ${esc(w.name)}</strong><p>${esc(w.description||'Sem descrição')} · ${w.definition.nodes.length} blocos · v${w.version}</p></div><div class="action-group"><button class="btn btn-sm" data-action="edit-workflow" data-id="${w.id}">Editar</button><button class="btn btn-sm btn-primary" data-action="use-workflow" data-id="${w.id}">Usar no chat →</button></div></div>`).join('')||'<div class="empty"><div class="empty-icon">⌁</div><strong>Crie seu primeiro fluxo</strong>Conecte trabalhadores e adicione etapas de aprovação.</div>'}</section>`}
-function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><button class="btn btn-sm" data-action="architect-delegation" id="architect-permission" title="Permissão apenas nesta conversa e projeto">Arquiteto: autorizar</button><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><textarea id="chat-input" rows="2" placeholder="Descreva a tarefa que deseja executar..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>As tarefas usam suas próprias chaves de API e podem gerar cobranças dos provedores.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+
+function chatProjectId(){
+ return S.currentConvo
+  ? S.conversations.find(c=>c.id===S.currentConvo)?.project_id||null
+  : S.projectForNext||null;
+}
+function chatContextBar(){
+ const pid=chatProjectId();
+ const options=S.projects.map(p=>
+  '<option value="'+esc(p.id)+'" '+(pid===p.id?'selected':'')+'>'+esc(p.name)+'</option>').join('');
+ return '<div class="chat-context-bar" aria-label="Contexto da conversa">'
+  +'<div class="chat-context-field"><label for="chat-project">▤ Projeto</label>'
+  +'<select class="field" id="chat-project" aria-label="Projeto desta conversa">'
+  +'<option value="">Sem projeto</option>'+options+'</select></div>'
+  +'<div class="chat-context-field chat-context-skills"><span class="chat-context-label">✦ Skills do projeto</span>'
+  +'<div id="chat-skill-list" class="chat-skill-list" aria-live="polite">'
+  +(pid?'Carregando Skills…':'Selecione um projeto para usar Skills.')+'</div></div>'
+  +'<span class="chat-context-note">Skills são compartilhadas por projeto. Trocar de projeto após iniciar o chat abre uma conversa nova e preserva o histórico.</span>'
+  +'</div>';
+}
+function renderChatSkills(){
+ const el=$('#chat-skill-list');if(!el)return;
+ const pid=chatProjectId();
+ if(!pid){el.innerHTML='<span class="chat-context-empty">Nenhum projeto selecionado</span>';return}
+ if(!S.chatSkills.length){el.innerHTML='<span class="chat-context-empty">Nenhuma Skill disponível</span>';return}
+ el.innerHTML=S.chatSkills.map(skill=>
+    '<label class="chat-skill-chip '+(skill.enabled?'active':'')+'" title="'+esc(skill.description)+'">'
+    +'<input type="checkbox" class="chat-skill-toggle" data-skill-id="'+esc(skill.id)+'" '
+    +(skill.enabled?'checked ':'')+(S.currentRun?'disabled ':'')+'/>'
+    +'<span>'+esc(skill.name)+'</span><small>'+(skill.enabled?'Ativa':'Inativa')+'</small></label>'
+ ).join('');
+}
+async function refreshChatContext(){
+ const cid=S.currentConvo,pid=chatProjectId();
+ if(!pid){S.chatSkills=[];S.delegation=null;renderChatSkills();return}
+ const requests=[api('/skills?project_id='+encodeURIComponent(pid))];
+ if(cid)requests.push(api('/conversations/'+encodeURIComponent(cid)+'/architect-delegation'));
+ const result=await Promise.all(requests);
+ if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==cid)return;
+ S.chatSkills=result[0];S.delegation=cid?result[1]:null;
+ renderChatSkills();
+ const btn=$('#architect-permission');if(btn)btn.textContent=S.delegation?.enabled?
+   '✓ Arquiteto autorizado':'Arquiteto: autorizar';
+}
+async function selectChatProject(projectId){
+ const old=chatProjectId();
+ const select=$('#chat-project');
+ if(projectId===old)return;
+ if(S.currentRun){
+   if(select)select.value=old||'';
+   toast('Conclua ou cancele a execução antes de trocar de projeto.');
+   return;
+ }
+ // Draft text is not part of the existing chat history.
+ const draft=$('#chat-input')?.value||'';
+ try{
+   if(!S.currentConvo){
+     S.projectForNext=projectId;
+   }else{
+     const cid=S.currentConvo;
+     const messages=await api('/conversations/'+encodeURIComponent(cid)+'/messages');
+     const hasRuns=S.runs.some(r=>r.conversation_id===cid);
+     if(messages.length||hasRuns){
+       if(!confirm('Esta conversa tem histórico. Criar uma NOVA conversa para o projeto escolhido? O histórico e a autorização do Arquiteto da conversa anterior permanecerão separados.')){
+         if(select)select.value=old||'';
+         return;
+       }
+       const created=await api('/conversations','POST',
+         {title:'Nova conversa',project_id:projectId});
+       S.conversations.unshift(created);
+       S.currentConvo=created.id;
+     }else{
+       const updated=await api('/conversations/'+encodeURIComponent(cid)+'/project',
+                          'POST',{project_id:projectId});
+       const c=S.conversations.find(c=>c.id===cid);if(c)Object.assign(c,updated);
+     }
+     S.projectForNext=null;
+   }
+   S.delegation=null;S.chatSkills=[];S.lastSeq=0;S.runSteps=[];S.streams={};
+   disconnect();
+   await renderPage();
+   const input=$('#chat-input');if(input){input.value=draft;input.focus()}
+   toast(projectId?'Projeto selecionado para a conversa.':'Conversa sem projeto selecionado.');
+ }catch(error){
+   if(select)select.value=old||'';
+   toast(error.message);
+ }
+}
+async function toggleChatSkill(skillId,enabled){
+ if(S.currentRun){toast('Não altere Skills durante uma execução.');renderChatSkills();return}
+ const pid=chatProjectId();if(!pid){toast('Selecione um projeto primeiro.');return}
+ const skill=S.chatSkills.find(s=>s.id===skillId);
+ if(!skill)return;
+ try{
+   const result=await api('/projects/'+encodeURIComponent(pid)+'/skills/'+encodeURIComponent(skillId),
+                     'POST',{enabled});
+   skill.enabled=Boolean(result.enabled);
+   renderChatSkills();
+   toast(skill.name+(skill.enabled?' ativada':' desativada')+' para este projeto.');
+ }catch(error){renderChatSkills();toast(error.message)}
+}
+
+function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><button class="btn btn-sm" data-action="architect-delegation" id="architect-permission" title="Permissão apenas nesta conversa e projeto">Arquiteto: autorizar</button><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><textarea id="chat-input" rows="2" placeholder="Descreva a tarefa que deseja executar..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>As tarefas usam suas próprias chaves de API e podem gerar cobranças dos provedores.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
 async function enterChat(){
  $('#chat-mode').onchange=e=>{S.mode=e.target.value;if(S.mode!=='manual'){S.selectedAgent='';$('#chat-agent').value=''}};$('#chat-agent').onchange=e=>{S.selectedAgent=e.target.value;S.mode=e.target.value?'manual':'auto';$('#chat-mode').value=S.mode};
+ $('#chat-project').onchange=e=>selectChatProject(e.target.value||null);
+ $('#chat-skill-list').onchange=e=>{const box=e.target.closest('.chat-skill-toggle');if(box)toggleChatSkill(box.dataset.skillId,box.checked)};
  $('#chat-send').onclick=sendMessage;$('#chat-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}};
  $('#file-upload').onchange=async e=>{const f=e.target.files[0];if(!f)return;const body=new FormData();body.append('file',f);try{const result=await api('/uploads/text','POST',body);S.attached.push(result);$('#attached-label').textContent=result.name+(result.truncated?' (trecho inicial)':'');toast('Anexo carregado: '+result.name)}catch(ex){toast(ex.message)}};
- if(S.currentConvo){
-   try{S.delegation=await api('/conversations/'+S.currentConvo+'/architect-delegation')}catch{S.delegation=null}
-   await showMessages(S.currentConvo)
-   const authBtn=$('#architect-permission');if(authBtn)authBtn.textContent=S.delegation?.enabled?'✓ Arquiteto autorizado':'Arquiteto: autorizar';
- }else {S.delegation=null;showWelcome()}
+ try{await refreshChatContext()}catch(ex){S.chatSkills=[];renderChatSkills();toast(ex.message)}
+ if(S.currentConvo)await showMessages(S.currentConvo);
+ else showWelcome();
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
 async function showMessages(cid){const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
@@ -296,7 +398,7 @@ async function handleAction(action,id,el){
  if(action==='delete-provider'){if(!confirm('Excluir este provedor? As credenciais serão apagadas.'))return;await api(`/providers/${id}`,'DELETE');await loadAll();renderPage()}
  if(action==='add-agent')addAgent();if(action==='edit-agent')addAgent(id);
  if(action==='add-project')addProject();
- if(action==='project-chat'){S.projectForNext=id;S.currentConvo=null;goto('chat')}
+ if(action==='project-chat'){S.projectForNext=id;S.currentConvo=null;S.delegation=null;goto('chat')}
  if(action==='project-files'){S.workspaceProject=id;goto('workspace')}
  if(action==='workspace-refresh'){await renderPage()}
  if(action==='toggle-skill'){
@@ -304,7 +406,8 @@ async function handleAction(action,id,el){
    await renderPage();toast('Skill atualizada neste projeto.');
  }
  if(action==='architect-delegation'){
-   if(!S.currentConvo){toast('Abra uma conversa vinculada a um projeto.');return}
+   if(!S.currentConvo && chatProjectId())await ensureConvo();
+   if(!S.currentConvo || !chatProjectId()){toast('Selecione primeiro um projeto nesta conversa.');return}
    const enabled=!(S.delegation?.enabled);
    if(enabled&&!confirm('Conceder ao Arquiteto IA, NESTA conversa, autorização para aprovar mudanças comuns de código e instalar somente pacotes permitidos via npm/pip? Instalar software de terceiros envolve riscos. Exclusões, arquivos sensíveis, scripts e comandos livres continuam bloqueados.'))return;
    S.delegation=await api('/conversations/'+S.currentConvo+'/architect-delegation','POST',{enabled});
@@ -312,14 +415,14 @@ async function handleAction(action,id,el){
    toast(enabled?'Autonomia registrada nesta conversa.':'Autonomia revogada.');
  }
  if(action==='workspace-create'){await api(`/projects/${S.workspaceProject}/workspace`,'POST');await renderPage();toast('Pasta do projeto criada.')}
- if(action==='workspace-chat'){S.projectForNext=S.workspaceProject;S.currentConvo=null;goto('chat');toast('Chat vinculado ao projeto. Peça aos agentes para criar arquivos e depois revise as propostas.')}
+ if(action==='workspace-chat'){S.projectForNext=S.workspaceProject;S.currentConvo=null;S.delegation=null;goto('chat');toast('Chat vinculado ao projeto. Peça aos agentes para criar arquivos e depois revise as propostas.')}
  if(action==='workspace-new-file')await workspaceNewFile();
  if(action==='workspace-open-file')await workspaceOpenFile(el.dataset.path);
  if(action==='workspace-review')await workspaceReview(id);
  if(action==='add-workflow')flowEditor();if(action==='edit-workflow')flowEditor(id);
- if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
- if(action==='new-chat'){disconnect();S.currentRun=null;S.currentConvo=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
- if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.runSteps=[];S.lastSeq=0;goto('chat')}
+ if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;S.projectForNext=null;S.delegation=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
+ if(action==='new-chat'){S.projectForNext=chatProjectId();disconnect();S.currentRun=null;S.currentConvo=null;S.delegation=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
+ if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.projectForNext=null;S.delegation=null;S.runSteps=[];S.lastSeq=0;goto('chat')}
  if(action==='open-run'){disconnect();S.currentConvo=el.dataset.convo;S.currentRun=null;goto('chat');const r=await api(`/runs/${id}`);if(['running','queued','awaiting_approval'].includes(r.status)){S.currentRun=id;watchRun(id);$('#chat-send').disabled=true;$('#chat-cancel').hidden=false}}
  if(action==='resume-run'){await api(`/runs/${id}/resume`,'POST');await loadAll();renderPage();toast('Execução retomada a partir dos checkpoints concluídos.')}
  if(action==='approve'||action==='reject'){if(!S.currentRun)return;await api(`/runs/${S.currentRun}/steps/${id}/approval`,'POST',{approved:action==='approve'});toast(action==='approve'?'Etapa aprovada.':'Etapa rejeitada.')}
