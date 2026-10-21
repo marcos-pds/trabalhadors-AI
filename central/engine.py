@@ -221,7 +221,7 @@ class Engine:
                 if not causes:
                     causes.append('o modo atual ou a seleção manual não corresponde à coordenação solicitada')
                 raise ValueError('Fluxo UX/UI não iniciado: '+'; '.join(causes)+
-                                 '. Verifique Trabalhadore(s), o projeto e a Skill no Chat IA.')
+                                 '. Verifique Trabalhadores, o projeto e a Skill no Chat IA.')
             # For delegated team projects, the Architect receives downstream context
             # and may request only cataloged dependencies; human remains the authority.
             grant = self.skills.delegation(user_id, conversation_id)
