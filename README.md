@@ -180,3 +180,35 @@ A Central pode preparar uma subpasta privada para cada **Projeto** em `C:\Projet
 - Visualização é um **diff textual**, não execução de HTML nem um navegador incorporado. **Não existe execução de shell, instalação de dependências, deploy, Git automático ou renderização do projeto** nesta fase. Isso requer ferramentas e autorizações separadas.
 - A aplicação de um conjunto de arquivos faz uma pré-checagem de versões e tenta recuperar alterações anteriores em caso de erro. Sistemas de arquivos não são transacionais: faça backup/Git antes de aprovar mudanças importantes. A Central não permite escolher uma pasta arbitrária por mensagem, apenas subpastas autorizadas.
 - Os provedores atuais possuem um limite de saída em tokens; projetos grandes devem ser desenvolvidos em etapas. A qualidade dos arquivos é responsabilidade dos agentes e da revisão humana, não garantida por esta integração.
+
+
+## Skills UX/UI e delegação controlada ao Arquiteto IA
+
+A aba **Skills UX/UI** permite ativar por projeto o guia interno **UI/UX Studio Pro**. Ele enriquece o contexto dos trabalhadores Frontend, Designer, Programador, Arquiteto e Revisor com práticas de UX, acessibilidade, design system, Tailwind 4, shadcn/ui, Lucide, Motion e testes visuais. É uma **skill local de instruções**, não um cliente MCP externo nem um instalador automático de shadcn/ui; não existem comandos arbitrários nem screenshots de Playwright nesta fase.
+
+### Delegar autoridade via chat ou botão
+
+Abra uma conversa **vinculada a um projeto com pasta preparada** e use o botão **Arquiteto: autorizar**, confirmando a permissão; ou envie, como uma mensagem isolada e literal, o seguinte comando:
+
+    Autorizo o Arquiteto IA a aprovar alterações e instalar pacotes permitidos neste projeto.
+
+A autorização fica persistida **somente naquela conversa/projeto**; outras conversas não herdam os poderes. Para revogar, clique novamente no botão ou envie:
+
+    Revogo a autonomia do Arquiteto IA.
+
+O backend interpreta somente essas declarações explícitas **do usuário autenticado**, não instruções embutidas em arquivos ou respostas de modelos.
+
+Com a autorização ativa, as propostas de alteração de arquivos **comuns de código** criadas pelos agentes podem ser revisadas em uma chamada independente ao Arquiteto IA. Ele recebe o diff e deve responder JSON com decisão e justificativa. Se aprovar, o servidor compara a versão original, grava e registra o motivo da decisão no SQLite. Na dúvida, erro, ausência de provedor, diff grande, exclusão, arquivo de configuração sensível ou autorização revogada, **a proposta continua aguardando sua aprovação**.
+
+### Instalação autorizada de bibliotecas
+
+O Arquiteto pode solicitar pacotes **apenas de um catálogo estático** através do bloco de texto estruturado central-packages (JSON completo). Suporte atual: npm no diretório frontend (Tailwind CSS, Lucide, Motion, Radix, clsx, Playwright como biblioteca) e pip no virtualenv backend (httpx, pytest, SQLAlchemy, Pydantic, python-multipart). Limite de cinco pacotes por bloco e uma transação por execução.
+
+- **npm**: comando interno com argumentos fixos, diretório fixo, registry oficial, sem shell, audit nem lifecycle scripts (--ignore-scripts). Instalação altera package.json/package-lock.json; é uma alteração autorizada especificamente pelo usuário ao delegar pacotes.
+- **pip**: requer um virtualenv backend/.venv existente, instala apenas pacotes wheel do PyPI oficial, sem entrada interativa e sem shell.
+- Instalar dependências **envolve riscos** mesmo sem scripts, pode consumir rede/disco e instalar código de terceiros. Faça backup ou crie commits Git antes. No ambiente de produção, prefira versões travadas e revisões de dependências.
+- O Arquiteto **não pode executar npm run, pip install de nome arbitrário, npx shadcn, comandos PowerShell, scripts pós-instalação, exclusões automáticas ou acessar fora do projeto**.
+- O histórico das instalações fica na aba **Skills UX/UI**; as decisões de aprovação do Arquiteto ficam registradas na tabela architect_approval_log.
+- A delegação é válida na conversa, não globalmente. Revogue a qualquer momento; uma instalação já em andamento não é cancelada automaticamente ao revogar.
+
+Os agentes continuam necessitando de provedores reais conectados. A revisão automática não substitui testes no navegador ou inspeção humana de alterações importantes.
