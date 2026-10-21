@@ -256,7 +256,7 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
-        system += self.workspaces.prompt(user,run['conversation_id'])
+        system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt'])
         providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
         providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
         if not providers:
@@ -368,7 +368,7 @@ class Engine:
         except WorkspaceError:
             pass
         self.emit(run['id'], 'workspace_retry_started', {'step_id': step['id'], 'agent': agent['name']})
-        known = self.workspaces.prompt(run['user_id'], run['conversation_id'])
+        known = self.workspaces.prompt(run['user_id'], run['conversation_id'],request=run['prompt'])
         ask = (
             'ENTREGA TÉCNICA OBRIGATÓRIA. Sua primeira resposta não trouxe arquivos completos. '
             'Não repita a explicação. Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
