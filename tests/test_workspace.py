@@ -93,28 +93,89 @@ def test_symlinks_user_isolation_and_request_protection(tmp_path):
         assert not (outside/'x.txt').exists()
 
 
-def test_model_run_stages_files_without_writing(tmp_path):
+def test_model_run_auto_creates_only_new_files(tmp_path):
     class ProjectFake:
         async def stream(self,provider,key,model,system,messages):
             assert 'central-files' in system
-            assert 'Arquivos atuais:' in system
-            yield '''Arquivo proposto:\n```central-files\n{"files":[{"path":"backend/main.py","content":"print('ola')\\n"}]}\n```'''
+            assert provider.get('_max_tokens') == 4096
+            yield '''Arquivo proposto:
+```central-files
+{"files":[{"path":"backend/extra.py","content":"print('ola')\\n"}]}
+```'''
     with TestClient(app) as c:
         project=setup(c,tmp_path);folder=prepare(c,project)
         add_provider(c,'fake',1)
         ENGINE.client=ProjectFake()
-        conversation=c.post('/api/conversations',json={'title':'Projeto','project_id':project},headers=HEADERS)
-        assert conversation.status_code==200
-        run=c.post('/api/runs',json={'conversation_id':conversation.json()['id'],
-                   'mode':'team','prompt':'Crie backend API e frontend React'},headers=HEADERS)
+        convo=c.post('/api/conversations',json={'title':'Projeto','project_id':project},headers=HEADERS)
+        assert convo.status_code==200
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='backend')
+        payload={'conversation_id':convo.json()['id'],'mode':'manual','agent_ids':[agent['id']],
+                 'prompt':'Crie a estrutura de um projeto com backend'}
+        run=c.post('/api/runs',json=payload,headers=HEADERS)
         assert run.status_code==200
         assert wait_for(c,run.json()['id'])['status']=='completed'
+        assert (folder/'backend/extra.py').read_text()=="print('ola')\n"
         info=c.get(f'/api/projects/{project}/workspace').json()
-        pending=[x for x in info['proposals'] if x['status']=='pending']
-        assert pending,'Executores devem preparar as alterações do modelo'
-        assert not (folder/'backend/main.py').exists()
-        assert decide(c,project,pending[0]['id']).status_code==200
-        assert (folder/'backend/main.py').read_text()=="print('ola')\n"
+        assert len([x for x in info['proposals'] if x['status']=='applied'])==1
+        events=ENGINE.db.all('SELECT event FROM events WHERE run_id=?',(run.json()['id'],))
+        assert any(event['event']=='workspace_files_created' for event in events)
+        # A second run must not overwrite the first file automatically.
+        run=c.post('/api/runs',json=payload,headers=HEADERS)
+        assert wait_for(c,run.json()['id'])['status']=='completed'
+        assert (folder/'backend/extra.py').read_text()=="print('ola')\n"
+        info=c.get(f'/api/projects/{project}/workspace').json()
+        assert len([x for x in info['proposals'] if x['status']=='pending'])==1
+
+
+def test_chat_request_creates_real_react_fastapi_project(tmp_path):
+    class SummaryOnly:
+        async def stream(self,provider,key,model,system,messages):
+            yield 'A estrutura inicial está pronta.'
+    with TestClient(app) as c:
+        setup(c,tmp_path);add_provider(c,'fake',1)
+        ENGINE.client=SummaryOnly()
+        convo=c.post('/api/conversations',json={'title':'Nova conversa'},headers=HEADERS).json()
+        result=c.post('/api/runs',json={
+            'conversation_id':convo['id'],'prompt':
+            'Crie a estrutura inicial de uma loja virtual com frontend React e backend FastAPI.',
+            'mode':'manual'
+        },headers=HEADERS)
+        assert result.status_code==200,result.text
+        assert wait_for(c,result.json()['id'])['status']=='completed'
+        current=c.get('/api/conversations').json()
+        saved=next(item for item in current if item['id']==convo['id'])
+        project=saved['project_id']
+        info=c.get(f'/api/projects/{project}/workspace').json()
+        folder=Path(info['folder'])
+        assert folder.parent==tmp_path/'root'
+        assert len(info['files'])>=10
+        assert (folder/'backend/main.py').exists()
+        assert (folder/'frontend/src/App.tsx').exists()
+        assert (folder/'frontend/package.json').exists()
+        assert (folder/'README.md').exists()
+        assert all(x['status']=='applied' for x in info['proposals'])
+        assert not (folder/'frontend/node_modules').exists()
+        events=ENGINE.db.all('SELECT event,payload FROM events WHERE run_id=?',(result.json()['id'],))
+        assert any(e['event']=='workspace_prepared' for e in events)
+        assert any(e['event']=='workspace_stage_error' for e in events)  # model provided no files
+
+
+def test_incomplete_agent_json_does_not_write_fragments(tmp_path):
+    class Truncated:
+        async def stream(self,provider,key,model,system,messages):
+            yield '''Arquivo proposto: ```central-files
+{"files":[{"path":"src/test.py","content":"print('sem fim)'''
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        add_provider(c,'fake',1);ENGINE.client=Truncated()
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()
+        result=c.post('/api/runs',json={'conversation_id':convo['id'],
+              'prompt':'Crie a estrutura inicial de um projeto Python',
+              'mode':'manual'},headers=HEADERS)
+        assert wait_for(c,result.json()['id'])['status']=='completed'
+        assert not (folder/'src/test.py').exists()
+        events=ENGINE.db.all('SELECT event FROM events WHERE run_id=?',(result.json()['id'],))
+        assert any(e['event']=='workspace_stage_error' for e in events)
 
 
 def test_multi_file_preflight_prevents_partial_write(tmp_path):
