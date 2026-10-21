@@ -166,6 +166,7 @@ class Engine:
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
+            changes = {'pending': [], 'auto_applied': [], 'errors': []}
             try:
                 changes = self.workspaces.stage_run(run)
                 if changes['auto_applied']:
@@ -176,7 +177,43 @@ class Engine:
                 for warning in changes['errors']:
                     self.emit(run_id,'workspace_stage_error',{'message':warning[:180]})
             except Exception as exc:
-                self.emit(run_id,'workspace_stage_error',{'message':'Não foi possível preparar as alterações: '+str(exc)[:150]})
+                changes['errors'].append('Não foi possível preparar as alterações: '+str(exc)[:150])
+                self.emit(run_id,'workspace_stage_error',{'message':changes['errors'][-1]})
+            # Keep the model's full text in completed step records for inspection,
+            # but present only verified disk state in the project's final chat reply.
+            convo = self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                                (run['conversation_id'],run['user_id']))
+            if convo and convo['project_id'] and (
+                self.workspaces.wants_project(run['prompt']) or
+                changes['pending'] or changes['auto_applied'] or changes['errors']):
+                try:
+                    workspace = self.workspaces.info(run['user_id'],convo['project_id'])
+                    summary = ['## Resultado no Windows',
+                               '**Pasta local:** `' + workspace['folder'] + '`',
+                               '**Arquivos existentes:** ' + str(len(workspace['files']))]
+                    applied = []
+                    pending = []
+                    for prop_id in changes['auto_applied'] + changes['pending']:
+                        entry = self.db.one('SELECT manifest FROM workspace_proposals WHERE id=? AND user_id=?',
+                                            (prop_id,run['user_id']))
+                        if not entry: continue
+                        names = [item['path'] for item in json.loads(entry['manifest'])]
+                        if prop_id in changes['auto_applied']: applied.extend(names)
+                        else: pending.extend(names)
+                    if applied:
+                        summary += ['**Novos arquivos criados automaticamente:**'] + ['- `'+p+'`' for p in applied]
+                    if pending:
+                        summary += ['**Aguardando revisão e aprovação:**'] + ['- `'+p+'`' for p in pending]
+                    if not applied and workspace['files']:
+                        summary.append('Os arquivos acima já existentes foram preservados. Nenhum arquivo gerado pela IA foi aplicado nesta execução.')
+                    if changes['errors']:
+                        summary += ['**Avisos de geração:**'] + ['- '+x for x in changes['errors']]
+                    summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
+                    summary.append('A saída técnica completa de cada agente continua registrada nas etapas da execução.')
+                    output = '\n\n'.join(summary)
+                except Exception:
+                    output = ('Não foi possível consultar a pasta local ao concluir o projeto. '
+                              'Consulte **Projetos → Arquivos** e o histórico da execução.')
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
