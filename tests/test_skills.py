@@ -431,3 +431,94 @@ def test_explicit_skill_ux_request_ignores_stale_manual_frontend_selection(tmp_p
         assert any(e['event']=='ui_skill_activated' for e in events)
         assert any(e['event']=='run_created' and jsonlib.loads(e['payload']).get('ui_implementation')
                    for e in events)
+
+
+def test_chat_project_selector_rebinds_only_empty_drafts_and_revokes_authority(tmp_path):
+    """Switching a draft project must clear old architect authority and use new skill scope."""
+    with TestClient(app) as c:
+        first=setup(c,tmp_path);prepare(c,first)
+        second_response=c.post('/api/projects',json={'name':'Outro Projeto',
+                              'description':'Separado'},headers=HEADERS)
+        assert second_response.status_code==200,second_response.text
+        second=second_response.json()['id']
+        cid=conversation(c,first)
+        activate=c.post(f'/api/projects/{first}/skills/ux-ui-studio-pro',
+                        json={'enabled':True},headers=HEADERS)
+        assert activate.status_code==200
+        assert c.post(f'/api/conversations/{cid}/architect-delegation',
+                      json={'enabled':True},headers=HEADERS).json()['enabled']
+        owner=c.get('/api/me').json()['id']
+        assert 'SKILL UI/UX STUDIO PRO' in ENGINE.skills.guide(owner,cid,'frontend')
+        assert c.post(f'/api/conversations/{cid}/project',
+                      json={'project_id':second}).status_code==403
+        switched=c.post(f'/api/conversations/{cid}/project',
+                        json={'project_id':second},headers=HEADERS)
+        assert switched.status_code==200,switched.text
+        assert switched.json()['project_id']==second
+        assert c.get(f'/api/conversations/{cid}/architect-delegation').json()['enabled'] is False
+        assert ENGINE.skills.guide(owner,cid,'frontend')==''
+        assert c.get('/api/skills',params={'project_id':first}).json()[0]['enabled']
+        assert not c.get('/api/skills',params={'project_id':second}).json()[0]['enabled']
+        enabled=c.post(f'/api/projects/{second}/skills/ux-ui-studio-pro',
+                       json={'enabled':True},headers=HEADERS)
+        assert enabled.status_code==200
+        assert 'SKILL UI/UX STUDIO PRO' in ENGINE.skills.guide(owner,cid,'frontend')
+        unbound=c.post(f'/api/conversations/{cid}/project',
+                       json={'project_id':None},headers=HEADERS)
+        assert unbound.status_code==200
+        assert unbound.json()['project_id'] is None
+        assert ENGINE.skills.guide(owner,cid,'frontend')==''
+
+
+def test_chat_project_selector_never_moves_an_existing_conversation_history(tmp_path):
+    with TestClient(app) as c:
+        first=setup(c,tmp_path);prepare(c,first)
+        second=c.post('/api/projects',json={'name':'Segundo','description':''},
+                      headers=HEADERS).json()['id']
+        cid=conversation(c,first)
+        owner=c.get('/api/me').json()['id']
+        from central.database import uid, utcnow
+        ENGINE.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                          (uid(),cid,owner,'user',None,'Pedido feito no primeiro projeto',utcnow()))
+        response=c.post(f'/api/conversations/{cid}/project',
+                        json={'project_id':second},headers=HEADERS)
+        assert response.status_code==409
+        assert 'nova conversa' in response.json()['detail'].lower()
+        assert c.get('/api/conversations').json()[0]['project_id']==first
+        assert c.get(f'/api/conversations/{cid}/messages').json()[0]['content']=='Pedido feito no primeiro projeto'
+        # A new conversation, as used by the UI, can safely select the other project.
+        fresh=conversation(c,second)
+        assert c.get('/api/conversations').json()[0]['id']==fresh
+
+
+def test_chat_project_selector_respects_owner_and_does_not_grant_skills(tmp_path):
+    from test_workspace import register
+    with TestClient(app) as c1,TestClient(app) as c2:
+        first=setup(c1,tmp_path);prepare(c1,first)
+        second=c1.post('/api/projects',json={'name':'Outros','description':''},
+                       headers=HEADERS).json()['id']
+        own_chat=conversation(c1,first)
+        register(c2)
+        other=c2.post('/api/projects',json={'name':'Alheio','description':''},
+                      headers=HEADERS).json()['id']
+        assert c1.post(f'/api/conversations/{own_chat}/project',
+                       json={'project_id':other},headers=HEADERS).status_code==404
+        assert c2.post(f'/api/conversations/{own_chat}/project',
+                       json={'project_id':second},headers=HEADERS).status_code==404
+        assert c1.get(f'/api/conversations/{own_chat}/architect-delegation').json()['enabled'] is False
+
+
+def test_chat_project_selector_protects_run_bound_to_draft(tmp_path):
+    from central.database import uid, utcnow
+    with TestClient(app) as c:
+        first=setup(c,tmp_path);prepare(c,first)
+        second=c.post('/api/projects',json={'name':'Outro','description':''},headers=HEADERS).json()['id']
+        cid=conversation(c,first)
+        owner=c.get('/api/me').json()['id']
+        runid=uid();now=utcnow()
+        ENGINE.db.execute('''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
+                   created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                   (runid,owner,cid,'Projeto anterior','completed','manual','[]','[]',now,now))
+        assert c.post(f'/api/conversations/{cid}/project',
+                      json={'project_id':second},headers=HEADERS).status_code==409
+        assert c.get('/api/conversations').json()[0]['project_id']==first
