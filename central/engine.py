@@ -101,8 +101,13 @@ def ui_execution_plan(agents, prompt, mode, agent_ids, skill_active):
         return None
     chosen=[a for a in enabled if a['id'] in (agent_ids or [])]
     delegated_architect=any(a['specialty']=='architecture' for a in chosen)
-    if mode=='manual' and not (delegated_architect and
-            re.search(r'coorden\w*.*(?:frontend|designer)',prompt,re.I|re.S)):
+    explicit_coordination=bool(re.search(
+        r'arquiteto(?:\s+ia)?.{0,100}coorden\w*.{0,100}frontend.{0,90}designer',
+        prompt,re.I|re.S))
+    # The user's request to have an Architect COORDINATE a team takes priority
+    # over a stale manually selected single worker in the chat toolbar.
+    if mode=='manual' and not (explicit_coordination and
+            (delegated_architect or 'skill ui/ux studio pro' in prompt.casefold())):
         return None
     steps=[]
     def add(role,name,deps,instructions):
@@ -196,6 +201,12 @@ class Engine:
             chosen = discover_agents(agents, prompt, mode, agent_ids)
             if not chosen: raise ValueError('Cadastre ou habilite pelo menos um trabalhador.')
             plan = ui_plan if ui_plan is not None else create_plan(chosen)
+            if (ui_plan is None and self.skills.explicitly_requested(prompt) and
+                ui_implementation_request(prompt) and
+                (mode!='manual' or 'coorden' in prompt.casefold())):
+                raise ValueError('Fluxo de modernização UX/UI indisponível: '
+                                 'habilite os agentes Arquiteto, Designer e Frontend '
+                                 'e vincule esta conversa ao projeto Loja Virtual.')
             # For delegated team projects, the Architect receives downstream context
             # and may request only cataloged dependencies; human remains the authority.
             grant = self.skills.delegation(user_id, conversation_id)
