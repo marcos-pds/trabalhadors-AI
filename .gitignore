@@ -1,0 +1,47 @@
+
+# Banco de dados, credenciais e conversas
+/data/*
+!/data/.gitkeep
+
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.db-shm
+*.db-wal
+
+# Chaves e variáveis de ambiente
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# VS Code e IDEs
+.vscode/
+.idea/
+
+# Arquivos temporários
+*.log
+*.bak
+*.tmp
+.DS_Store
+
+# Futuras dependências e builds
+node_modules/
+dist/
+build/
+/data/
