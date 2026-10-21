@@ -212,3 +212,17 @@ O Arquiteto pode solicitar pacotes **apenas de um catálogo estático** através
 - A delegação é válida na conversa, não globalmente. Revogue a qualquer momento; uma instalação já em andamento não é cancelada automaticamente ao revogar.
 
 Os agentes continuam necessitando de provedores reais conectados. A revisão automática não substitui testes no navegador ou inspeção humana de alterações importantes.
+
+
+### Selecionar projetos e Skills diretamente no Chat IA
+
+No topo da conversa, a barra de contexto **Projeto / Skills do projeto** permite:
+
+- Selecionar **Loja Virtual**, qualquer outro projeto cadastrado, ou **Sem projeto** antes de enviar um pedido. A conversa é vinculada ao ID do projeto selecionado, e a pasta continua restrita ao workspace autorizado.
+- Ativar ou desativar as Skills disponíveis (por exemplo, **UI/UX Studio Pro**) sem acessar outra página. As Skills são persistidas **por projeto**, portanto aparecem ativas em todas as conversas vinculadas ao mesmo projeto.
+- Criar uma conversa nova ao trocar de projeto depois de já haver mensagens ou execuções, **mantendo a conversa anterior intacta**. Rascunhos vazios podem ser reatribuídos pelo endpoint autenticado \`POST /api/conversations/{cid}/project\`; a troca revoga qualquer permissão de Arquiteto antiga antes de salvar a nova vinculação.
+- Uma seleção de projeto **não autoriza** o Arquiteto automaticamente. A delegação para revisão de código/instalação de pacotes continua explícita, limitada à conversa e pode ser revogada.
+- Durante uma execução, os controles de alteração ficam bloqueados na interface; o backend também impede mover conversas que já contêm histórico/execuções para outro projeto.
+- Caso o usuário ainda não tenha criado um projeto, escolha **Sem projeto** para conversas comuns ou cadastre um projeto na aba **Projetos**.
+
+O controle de Skills no chat é uma interface para o catálogo local atualmente disponível. Não significa que as CLIs ou servidores MCP externos listados nas orientações da Skill tenham sido instalados.
