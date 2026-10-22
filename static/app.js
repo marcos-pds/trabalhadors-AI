@@ -507,7 +507,7 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
      await executeSlashCommand(local.command);
      if(input)input.value='';
    }catch(ex){toast(ex.message||'Falha ao executar o comando.')}
-   finally{const next=$('#chat-input');if(next&&S.page==='chat')next.disabled=Boolean(S.currentRun);if(next&&!S.menuOpen)next.focus()}
+   finally{const currentSend=$('#chat-send');if(currentSend)currentSend.disabled=Boolean(S.currentRun);const next=$('#chat-input');if(next&&!S.menuOpen)next.focus()}
    return;
  }
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
