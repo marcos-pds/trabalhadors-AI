@@ -99,7 +99,8 @@ test('all permission questions live inside chat and cannot run before explicit c
  assert.ok(source.includes('data-action="chat-consent-yes"'));
  assert.ok(source.includes('data-action="chat-consent-no"'));
  assert.ok(source.includes('function decideChatPermission(id,allowed)'));
- assert.ok(source.includes('await proposeQaRepair(report.issues)'));
+ assert.ok(source.includes('await offerDependencyInstall(report,cid)'));
+ assert.ok(source.includes('await proposeQaRepair(codeProblems)'));
  assert.ok(source.includes('await askChatPermission({'));
  assert.ok(source.includes("title:'Deseja que '+label+' execute a correção?'"));
  assert.ok(source.includes('if(!accepted)return'));
@@ -163,4 +164,20 @@ test('the inline reviewer refuses stale or incomplete diff and requires APLICAR'
  assert.ok(s.includes("preview.files.length>1"));
  assert.ok(s.includes("Esta proposta contém"));
  assert.ok(s.includes("S.page!=='chat'||chatProjectId()!==pid"));
+});
+
+
+test('pasted Vite missing module log triggers safe local QA, not a shell or arbitrary agent run',()=>{
+ const source=fs.readFileSync('static/app.js','utf8');
+ assert.ok(source.includes('function isLocalBuildDiagnostic(message)'));
+ assert.ok(source.includes("if(chatProjectId()&&isLocalBuildDiagnostic(prompt))"));
+ assert.ok(source.includes("appendEvent('⊙ Erro de compilação reconhecido."));
+ assert.ok(source.includes('await runQualityChecks();return;'));
+ assert.ok(source.includes("title:'Deseja instalar '+candidate+' para corrigir a Loja Virtual?'"));
+ assert.ok(source.includes("await askChatPermission({"));
+ assert.ok(source.includes("'/dependencies/install','POST',{package:candidate}"));
+ assert.ok(source.includes("if(!(fresh.missing_packages||[]).includes(candidate))"));
+ assert.ok(source.includes("await runQualityChecks()"));
+ assert.ok(source.includes("const DIRECT_NPM_ALLOWLIST=new Set(["));
+ assert.ok(source.includes("'lucide-react'"));
 });
