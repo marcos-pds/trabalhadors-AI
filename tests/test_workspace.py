@@ -521,7 +521,9 @@ def test_review_worker_runs_after_frontend_backend_and_never_stages_invalid_json
         producers=[s for s in result['steps'] if s['name'] in ('Frontend IA','Backend IA')]
         assert model.checked_review
         assert len(producers)==2
-        assert set(__import__('json').loads(reviewer['deps']))=={s['id'] for s in producers}
+        tester=next(s for s in result['steps'] if s['name']=='Testador · QA de integração')
+        assert set(__import__('json').loads(tester['deps']))=={s['id'] for s in producers}
+        assert set(__import__('json').loads(reviewer['deps']))==({s['id'] for s in producers}|{tester['id']})
         assert all(s['status']=='completed' for s in producers)
         assert appfile.read_text()=='export default function App(){return <p>Original</p>}'
         assert not (folder/'backend/unsafe-from-review.py').exists()
