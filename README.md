@@ -263,3 +263,12 @@ No Chat IA, após selecionar um projeto, aparecem quatro controles: **Autorizar 
 Executar um projeto local implica executar o código e as dependências que já estiverem nos diretórios autorizados. Mesmo sem comandos arbitrários, código de projeto ou bibliotecas comprometidas podem agir com os privilégios do usuário Windows. Autorize apenas projetos e dependências confiáveis; faça backup ou commit Git antes de testar propostas não revisadas. O instalador de pacotes autorizado ao Arquiteto é separado desta função.
 
 O executor só reconhece estrutura de desenvolvimento React/Vite + FastAPI, vincula-se a **127.0.0.1**, verifica caminhos críticos contra links/junções/hardlinks, recusa execução em portas ocupadas e limita a um projeto ativo por instância. Não permite comandos livres por chat, execução no servidor de produção, compartilhamento pela rede ou pré-visualização de outros processos no sistema. O teste de CI usa processos simulados; ainda é necessária a validação manual com o Python e Node.js instalados no Windows.
+
+
+### Diagnóstico de inicialização da prévia
+
+O botão Iniciar agora só confirma sucesso depois que FastAPI (porta 8000) e Vite (resposta HTTP local na porta 5173) estiverem ativos. Aguarda até 8 segundos e interrompe os processos lançados caso ocorra erro ou tempo limite. Não executa instalação de dependências nem corrige arquivos automaticamente.
+
+Se o Python ou o Vite encerrar rapidamente, a Central retorna um erro HTTP 422 com o nome do processo, código de saída e trecho limitado das mensagens do servidor. O Chat IA mostra o diagnóstico em uma mensagem, mantém a opção Iniciar para nova tentativa e oferece **Diagnóstico** para reabrir/copiar a mensagem após recarregar a conversa (durante a mesma sessão do servidor). Enquanto o serviço não estiver saudável, **Prévia** fica desabilitada. Se um servidor encerrar depois de iniciar, a próxima consulta de status invalida a prévia e guarda a falha. O stdout dos processos é consumido continuamente com buffer limitado para não bloquear subprocessos.
+
+Causas comuns: Vite sem dependências de `node_modules`, backend com importação inválida, pacote uvicorn ausente no virtualenv ou incompatibilidade de código proposta anteriormente. Corrija somente após ler o diagnóstico; as alterações pendentes permanecem na revisão e nenhuma instalação é iniciada automaticamente.
