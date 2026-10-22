@@ -528,7 +528,8 @@ def test_review_worker_runs_after_frontend_backend_and_never_stages_invalid_json
         assert {part['path'] for p in pending for part in p['files']} == {
             'frontend/src/App.tsx','backend/routers/products.py'}
         assert 'O JSON dos arquivos veio incompleto/inválido' not in result['output']
-        assert 'Revisão IA:' in result['output']
+        assert 'Revisor IA:' in result['output']
+        assert 'Essa saída foi ignorada' in result['output']
         assert 'Aguardando revisão e aprovação' in result['output']
 
 
