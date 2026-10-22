@@ -235,3 +235,12 @@ Os cartões da aba Trabalhadores mostram agora o papel reconhecido pelo orquestr
 Os códigos canônicos continuam sendo architecture, frontend e design. Um código canônico explícito sempre tem prioridade sobre o nome mostrado: um trabalhador chamado Arquiteto IA com especialidade backend não se torna Arquiteto na execução e não recebe automaticamente poderes privilegiados.
 
 Não há alteração automática de registros de trabalhadores nem mudanças nas permissões do usuário. Para trabalhadores com nomes personalizados, configure a especialidade com seu código canônico em Trabalhadores -> Configurar.
+
+
+### Revisor IA: somente leitura, sem geração de arquivos
+
+Nos fluxos de múltiplos trabalhadores, o Revisor IA é executado depois das etapas de código de Frontend/Backend e recebe um contexto específico de auditoria (possíveis conflitos de imports, endpoints, requisitos e limitações). O contexto do Revisor não pede manifestos de criação de arquivos. A Central ignora qualquer JSON `files` enviado pelo Revisor, completo ou incompleto: seu parecer é consultivo e **não substitui** aprovação humana ou a revisão independente do Arquiteto quando explicitamente delegada.
+
+Se o Revisor ainda responder com um manifesto de arquivos em vez de um parecer, a conclusão distingue `resposta ignorada` de `revisão concluída`, sem descartar propostas válidas dos trabalhadores de código. Os resultados antigos e as propostas pendentes permanecem intactos; a correção só afeta novas execuções.
+
+Para projetos já existentes, pedidos de estrutura inicial que propõem substituir arquivos ou misturam novas estruturas de backend são mantidos como alterações pendentes. Antes de aplicar, confira o entrypoint `backend/main.py`, módulos auxiliares e o endpoint `/api/products`, bem como imports e props dos componentes React. A existência de propostas não comprova que o projeto compila ou funciona.
