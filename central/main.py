@@ -14,6 +14,7 @@ from .security import Security, password_hash, verify_password, require_owned
 from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .workspace import WorkspaceError
+from .roles import worker_role, role_source
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -228,7 +229,9 @@ class AgentIn(BaseModel):
 
 @app.get('/api/agents')
 def list_agents(user=Depends(current_user)):
-    return DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    agents=DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    return [dict(agent,resolved_role=worker_role(agent),role_source=role_source(agent))
+            for agent in agents]
 
 
 @app.post('/api/agents')
