@@ -110,3 +110,18 @@ test('all permission questions live inside chat and cannot run before explicit c
  assert.ok(!sender.includes('window.confirm('));
  assert.ok(source.includes('cancelChatDecisions()'));
 });
+
+
+test('human workflow steps require inline consent and stale cards cannot decide stages',()=>{
+ const source=fs.readFileSync('static/app.js','utf8');
+ assert.ok(source.includes("if(msg.event==='approval_requested')"));
+ assert.ok(source.includes('void offerStepApproval(d.step_id)'));
+ assert.ok(source.includes('async function offerStepApproval(stepId)'));
+ assert.ok(source.includes('if(approved===null || S.currentRun!==runId'));
+ assert.ok(source.includes("entry.resolve(null);"));
+ assert.ok(source.includes("data-action=\"chat-consent-yes\""));
+ assert.ok(source.includes("data-action=\"chat-consent-no\""));
+ assert.ok(!source.includes('if(!confirm(\'Conceder ao Arquiteto'));
+ assert.ok(!source.includes('if(enabled&&!confirm(\'Autorizar a Central'));
+ assert.ok(source.includes('Deseja abrir uma nova conversa para trocar de projeto?'));
+});
