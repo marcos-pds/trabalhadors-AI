@@ -73,7 +73,7 @@ def test_authenticated_workflow_and_isolation():
         cid=new_convo(c1)
         assert c2.get(f'/api/conversations/{cid}/messages').status_code==404
         assert c2.get('/api/agents').status_code==200
-        assert len(c1.get('/api/agents').json())==10
+        assert len(c1.get('/api/agents').json())==11
         assert c1.post('/api/providers',json={'name':'x'},headers={}).status_code==403
         assert len(c2.get('/api/conversations').json())==0
 
