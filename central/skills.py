@@ -67,7 +67,7 @@ class SkillsHub:
             r'.{0,55}\bskill\s+ui\s*/\s*ux\s+studio\s+pro\b',text,re.S))
 
     def guide(self,user_id,conversation_id,specialty):
-        if specialty not in ('frontend','design','architecture','code','review'):return ''
+        if specialty not in ('frontend','design','architecture','code','review','testing'):return ''
         r=self.db.one('''SELECT s.enabled FROM project_skills s JOIN conversations c
           ON c.project_id=s.project_id AND c.user_id=s.user_id
           WHERE c.id=? AND c.user_id=? AND s.skill_id=?''',
