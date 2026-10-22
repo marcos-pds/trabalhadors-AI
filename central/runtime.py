@@ -152,7 +152,7 @@ class RuntimeManager:
             try:
                 connection.request('GET','/')
                 response=connection.getresponse()
-                return 200<=response.status<500
+                return 200<=response.status<400
             finally:
                 connection.close()
         except (OSError,HTTPException,TimeoutError,ValueError):
