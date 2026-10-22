@@ -2,6 +2,7 @@
 export const SLASH_COMMANDS = Object.freeze([
   {name:'ajuda',description:'Ver os comandos disponíveis',icon:'?',aliases:['help']},
   {name:'testar',description:'Verificar imports React e sintaxe Python sem executar código',icon:'⊙',aliases:['teste']},
+  {name:'revisar',description:'Revisar e aprovar propostas de arquivos sem sair do chat',icon:'▧',aliases:['revisao','revisão']},
   {name:'iniciar',description:'Iniciar React/Vite e FastAPI com autorização',icon:'▶',aliases:['start']},
   {name:'previa',description:'Visualizar a aplicação local em execução',icon:'◉',aliases:['prévia','preview']},
   {name:'parar',description:'Parar os servidores iniciados pela Central',icon:'■',aliases:['stop']},
