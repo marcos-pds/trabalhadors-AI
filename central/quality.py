@@ -17,6 +17,13 @@ IMPORT=re.compile(
     r'\bimport\s+(?!\()(?P<spec>(?:type\s+)?(?:[\w$*{},\s]+?))\s+from\s+'
     r'(?P<quote>["\'])(?P<module>\.[^"\']+)(?P=quote)',re.M)
 BARE_IMPORT=re.compile(r'\bimport\s*["\'](\.[^"\']+)["\']')
+# Imports from external npm packages: "import X from 'lucide-react'", side-effect
+# imports and re-exports. String contents remain data, never executed.
+EXTERNAL_IMPORT=re.compile(
+    r'\b(?:import|export)\s+(?:(?:type\s+)?[^\n;]*?\s+from\s+)?["\']([^"\']+)["\']',
+    re.M)
+DYNAMIC_PACKAGE_IMPORT=re.compile(r'\bimport\s*\(\s*["\']([^"\']+)["\']\s*\)')
+
 EXPORTED=re.compile(r'\bexport\s+(?:declare\s+)?(?:async\s+)?'
                     r'(?:const|let|var|function|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)')
 BRACE_EXPORT=re.compile(r'\bexport\s*(?:type\s*)?\{([^}]+)\}',re.M)
@@ -124,6 +131,53 @@ def inspect_sources(read_file,changes):
     return issues[:25]
 
 
+def npm_name(specifier):
+    """Map a module specifier to its top-level npm package, not a command."""
+    if not specifier or specifier.startswith(('.', '/', '#', 'node:')):
+        return None
+    if specifier.startswith('@'):
+        parts=specifier.split('/')
+        return '/'.join(parts[:2]) if len(parts)>=2 else None
+    return specifier.split('/')[0]
+
+
+def inspect_npm_imports(changes,package_json,installed=None,check_installed=False):
+    """Validate *real* source imports against package.json and node_modules.
+
+    installed(name) is a caller-supplied safe path check. Without a package.json
+    do not guess dependencies. Never execute package code or npm commands here.
+    """
+    if not isinstance(package_json,dict):
+        return [],[]
+    declared=set()
+    for field in ('dependencies','devDependencies','peerDependencies','optionalDependencies'):
+        group=package_json.get(field,{})
+        if isinstance(group,dict):declared.update(group)
+    found={}
+    for path,source in changes.items():
+        if not path.startswith('frontend/src/') or not path.endswith(TS_FILES):
+            continue
+        for match in list(EXTERNAL_IMPORT.finditer(source))+list(DYNAMIC_PACKAGE_IMPORT.finditer(source)):
+            package=npm_name(match.group(1))
+            if package and package not in found:
+                found[package]=path
+    issues=[];missing=[]
+    # builtin/runtime imports are not npm packages (Vite also offers virtuals).
+    builtin={'fs','path','url','crypto','stream','buffer','util','events','process','os','http',
+             'https','module','assert','timers','vite','virtual:','~'}
+    for name,path in sorted(found.items()):
+        if name in builtin or name.startswith(('virtual:','~','@/')):continue
+        if name not in declared:
+            issues.append(f'{path}: dependência npm não declarada: {name}. '
+                          'Consulte package.json e solicite instalação autorizada.')
+            missing.append(name)
+        elif check_installed and installed is not None and not installed(name):
+            issues.append(f'{path}: dependência npm não instalada: {name}. '
+                          'Instale o pacote autorizado antes de iniciar a prévia.')
+            missing.append(name)
+    return issues[:25],missing[:25]
+
+
 def inspect_project(workspaces,user_id,project_id):
     """Static, read-only QA of actual files. No build, imports or code execution."""
     import ast
@@ -172,6 +226,29 @@ def inspect_project(workspaces,user_id,project_id):
         except (OSError,UnicodeError,WorkspaceError):
             return None
     issues.extend(inspect_sources(read_existing,changes))
+    package_source=read_existing('frontend/package.json')
+    package_json=None
+    if package_source is not None:
+        try:package_json=__import__('json').loads(package_source)
+        except (ValueError,TypeError):
+            issues.append('frontend/package.json: JSON inválido; corrija antes de instalar dependências.')
+    def installed(name):
+        target=folder/'frontend/node_modules'
+        if is_link_or_junction(target):return False
+        parts=name.split('/')
+        if not (1<=len(parts)<=2) or any(
+                not re.fullmatch(r'[@a-zA-Z0-9_.-]+',p) for p in parts):return False
+        package=target
+        for part in parts:
+            package=package/part
+            if is_link_or_junction(package):return False
+        manifest=package/'package.json'
+        return manifest.is_file() and not is_link_or_junction(manifest)
+    dependency_issues,missing=inspect_npm_imports(
+        changes,package_json,installed,check_installed=True)
+    issues.extend(dependency_issues)
     return {'status':'failed' if issues else 'passed',
             'checked_files':checked,'issues':issues[:35],
-            'scope':'análise estática de imports/exports React e sintaxe Python; não é build nem teste de navegador'}
+            'missing_packages':missing,
+            'scope':'imports/exports React, bibliotecas npm declaradas/instaladas e sintaxe Python; '
+                    'não é build nem teste de navegador'}
