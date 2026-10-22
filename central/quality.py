@@ -6,6 +6,7 @@ It never runs a shell, executes model code, or modifies the user's project.
 """
 import re
 from pathlib import PurePosixPath
+from .workspace import WorkspaceError, is_link_or_junction
 
 TS_FILES=('.tsx','.ts','.jsx','.js')
 IMPORT=re.compile(
@@ -111,3 +112,55 @@ def inspect_sources(read_file,changes):
                 error=f'{file}: módulo relativo não encontrado: {m.group(1)}'
                 if error not in seen:seen.add(error);issues.append(error)
     return issues[:25]
+
+
+def inspect_project(workspaces,user_id,project_id):
+    """Static, read-only QA of actual files. No build, imports or code execution."""
+    import ast
+    import os
+    from pathlib import Path
+
+    folder=workspaces._folder(user_id,project_id)
+    front=folder/'frontend/src'
+    back=folder/'backend'
+    changes={}
+    issues=[]
+    checked=0
+    for root,prefix,extension in [(front,'frontend/src',TS_FILES),(back,'backend',('.py',))]:
+        if not root.is_dir():continue
+        for base,dirs,files in os.walk(root,followlinks=False):
+            parent=Path(base)
+            depth=len(parent.relative_to(root).parts)
+            dirs[:]=[d for d in dirs if depth<5 and d not in
+                      ('node_modules','.venv','__pycache__') and
+                      not is_link_or_junction(parent/d)]
+            for name in files:
+                if checked>=120:break
+                if not name.endswith(extension):continue
+                file=parent/name
+                if is_link_or_junction(file) or not file.is_file() or file.stat().st_size>160000:continue
+                rel=file.relative_to(folder).as_posix()
+                try:
+                    source=workspaces._current(folder,rel)
+                    if source is None:continue
+                    value=source.decode('utf-8')
+                except (OSError,UnicodeError,WorkspaceError):
+                    continue
+                checked+=1
+                if rel.startswith('frontend/'):changes[rel]=value
+                elif rel.endswith('.py'):
+                    try:ast.parse(value,filename=rel)
+                    except SyntaxError as exc:
+                        issues.append(f'{rel}:{exc.lineno}: erro de sintaxe Python: {exc.msg}')
+            if checked>=120:break
+        if checked>=120:break
+    def read_existing(path):
+        try:
+            source=workspaces._current(folder,path)
+            return source.decode('utf-8') if source is not None else None
+        except (OSError,UnicodeError,WorkspaceError):
+            return None
+    issues.extend(inspect_sources(read_existing,changes))
+    return {'status':'failed' if issues else 'passed',
+            'checked_files':checked,'issues':issues[:35],
+            'scope':'análise estática de imports/exports React e sintaxe Python; não é build nem teste de navegador'}
