@@ -233,6 +233,8 @@ def test_modernization_with_manual_architect_creates_real_worker_tasks_and_appro
                     yield json.dumps({'files':[{'path':'frontend/src/components/ProductCard.tsx',
                       'content':'export default function ProductCard(){return <article>Vitrine</article>}' }]})
                 else: raise AssertionError('No file task instructions')
+            elif 'UI_STAGE_TEST' in system:
+                yield 'Análise QA concluída.'
             elif 'UI_STAGE_REVIEW' in system:
                 yield 'Checklist aprovado, o servidor deve verificar os diffs.'
             else:
@@ -268,7 +270,7 @@ def test_modernization_with_manual_architect_creates_real_worker_tasks_and_appro
         run=wait_for(c,response.json()['id'],timeout=8)
         assert run['status']=='completed',run.get('error')
         specialties=[step['name'] for step in run['steps']]
-        assert len(run['steps'])==6
+        assert len(run['steps'])==7
         assert any('Designer' in name for name in specialties)
         assert len([n for n in specialties if n.startswith('Frontend')])==3
         assert 'Loja Premium' in (frontend/'App.tsx').read_text()
@@ -313,6 +315,8 @@ def test_architect_markdown_npm_plan_is_normalized_without_shell_execution(tmp_p
                 assert path,system
                 target=path.group(1)
                 yield json.dumps({'files':[{'path':target,'content':'// arquivo modernizado\n'}]})
+            elif 'UI_STAGE_TEST' in system:
+                yield 'Análise QA concluída.'
             elif 'UI_STAGE_REVIEW' in system:
                 yield 'Os arquivos estão com a etapa de revisão concluída.'
             elif 'ARQUITETO REVISOR AUTORIZADO' in system:
@@ -390,6 +394,8 @@ def test_explicit_skill_ux_request_ignores_stale_manual_frontend_selection(tmp_p
                 assert target,system[:900]
                 path=target.group(1)
                 yield json.dumps({'files':[{'path':path,'content':'/* modernization: '+path+' */\n'}]})
+            elif 'UI_STAGE_TEST' in system:
+                yield 'Análise QA concluída.'
             elif 'UI_STAGE_REVIEW' in system:
                 yield 'Revisão de integração: comparar os diffs antes de aprovar.'
             else:raise AssertionError('Etapa desconhecida '+system[:100])
@@ -413,7 +419,7 @@ def test_explicit_skill_ux_request_ignores_stale_manual_frontend_selection(tmp_p
         done=wait_for(c,r.json()['id'],timeout=9)
         assert done['status']=='completed',done.get('error')
         names=[step['name'] for step in done['steps']]
-        assert len(names)==6,names
+        assert len(names)==7,names
         assert names[0].startswith('Arquiteto')
         assert 'Designer' in names[1]
         assert len([name for name in names if name.startswith('Frontend')])==3
@@ -549,7 +555,7 @@ def test_disabled_designer_explains_exact_blocker_without_duplicate_chat_bubbles
         ENGINE.db.execute('UPDATE agents SET enabled=1 WHERE id=?',(designer['id'],))
         from central.engine import ui_execution_plan
         plan=ui_execution_plan(c.get('/api/agents').json(),prompt,'auto',[],True)
-        assert plan is not None and len(plan)==6
+        assert plan is not None and len(plan)==7
 
 
 def test_unbound_project_explains_skill_issue_without_chat_ghost_message(tmp_path):
@@ -605,6 +611,8 @@ def test_modified_specialties_keep_default_agent_roles_without_rewriting_databas
                          if name.endswith('/App.tsx') else
                          'export default function ProductCard(){return <article>Produto</article>}')
                 yield json.dumps({'files':[{'path':name,'content':content}]})
+            elif 'UI_STAGE_TEST' in system:
+                yield 'Análise QA concluída.'
             elif 'UI_STAGE_REVIEW' in system:
                 yield 'Revisado: preservar endpoint FastAPI.'
             else:
@@ -640,7 +648,7 @@ def test_modified_specialties_keep_default_agent_roles_without_rewriting_databas
             'Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
             'O Arquiteto IA deve coordenar o Frontend IA e Designer IA.',
             'auto',[],True)
-        assert plan is not None and len(plan)==6
+        assert plan is not None and len(plan)==7
         calls=[]
         def fake_install(self,owner,proj,manager,packages):
             calls.append((manager,packages))
@@ -656,7 +664,7 @@ def test_modified_specialties_keep_default_agent_roles_without_rewriting_databas
         assert r.status_code==200,r.text
         done=wait_for(c,r.json()['id'],timeout=9)
         assert done['status']=='completed',done.get('error')
-        assert len(done['steps'])==6
+        assert len(done['steps'])==7
         for name in originals:
             assert (folder/name).read_text()!=('old '+name)
         assert (backend/'main.py').read_text()=='preserve FastAPI'
