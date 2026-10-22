@@ -247,6 +247,16 @@ Para projetos já existentes, pedidos de estrutura inicial que propõem substitu
 
 
 
+## Visual minimalista inspirado no Google AI Studio
+
+A interface padrão agora utiliza um tema grafite semelhante à referência compartilhada: barra superior compacta, chat em uma coluna, histórico e controles no menu hambúrguer, boas-vindas sem gradientes, mensagens discretas e compositor flutuante com sugestões e paleta de comandos `/`.
+
+**Arquivos:** `static/gemini-theme.css` é carregado após `static/style.css`; `static/ui-icons.mjs` contém SVGs locais para menus, navegação e compositor. A alteração é puramente visual e mantém todos os endpoints, permissões, revisões e rotinas da Central.
+
+**Bibliotecas avaliadas:** Tailwind CSS v4 e Lucide são boas opções para uma evolução com pipeline de compilação. Nesta etapa, para **não alterar a instalação Python, não adicionar dependências remotas e manter o frontend sem build**, o tema foi implementado com CSS próprio e ícones SVG locais. Não foram instalados Tailwind ou Lucide npm. O estilo pode ser migrado para Tailwind em fase posterior se o projeto ganhar Vite.
+
+**Verificação:** `python -m pytest -q` e `node --test tests/test_slash_commands.cjs tests/test_chat_first.cjs tests/test_gemini_theme.cjs`. Testes automatizados não substituem inspeção visual em navegador Windows com projetos reais.
+
 ### Chat principal e paleta de comandos da Central IA
 
 O aplicativo inicia diretamente no **Chat IA** com apenas a conversa e o campo de mensagem à vista. O botão **☰** abre um menu recolhível que contém todas as seções anteriores, o histórico de conversas, seleção do projeto, Skills, modo de agentes e o painel de execução. A navegação funciona no desktop e no celular; `Esc` fecha o menu. Isso apenas reorganiza a interface: projetos, permissões, arquivos, QA, agentes, histórico e runtime continuam com seus endpoints e verificações existentes.
