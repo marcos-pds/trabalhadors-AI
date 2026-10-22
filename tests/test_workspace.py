@@ -398,3 +398,74 @@ def test_architect_asks_for_app_file_then_repairs_from_workspace_context(tmp_pat
         assert file.read_text().endswith('old App content</main>}')
         assert decide(c,project,pending[0]['id']).status_code==200
         assert 'Cartão integrado' in file.read_text()
+
+
+
+def test_run_report_preserves_applied_files_when_full_explorer_info_is_unavailable(tmp_path,monkeypatch):
+    """A UIUX run cannot turn successful file creation into a generic Windows-folder failure."""
+    class CreatedFile:
+        async def stream(self, provider, key, model, system, messages):
+            yield '{"files":[{"path":"frontend/src/components/QualityMark.tsx",'
+            yield '"content":"export default function QualityMark(){return <span>Qualidade</span>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        ENGINE.client=CreatedFile()
+        conversation=c.post('/api/conversations',json={'project_id':project},
+                            headers=HEADERS).json()['id']
+        def explode(*args,**kwargs):
+            raise RuntimeError('old proposals cannot be decoded')
+        monkeypatch.setattr(ENGINE.workspaces,'info',explode)
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        response=c.post('/api/runs',json={'conversation_id':conversation,
+            'mode':'manual','agent_ids':[agent['id']],
+            'prompt':'Crie um novo componente no projeto existente.'},headers=HEADERS)
+        assert response.status_code==200,response.text
+        run=wait_for(c,response.json()['id'])
+        assert run['status']=='completed',run.get('error')
+        output=run['output']
+        assert 'Resultado no Windows' in output
+        assert 'QualityMark.tsx' in output
+        assert 'Novos arquivos criados automaticamente' in output
+        assert 'Não foi possível consultar a pasta local' not in output
+        assert (folder/'frontend/src/components/QualityMark.tsx').exists()
+
+
+def test_run_report_keeps_proposals_when_file_count_scan_fails(tmp_path,monkeypatch):
+    """An unreadable or changing directory must not hide pending diffs from the user."""
+    class ChangedFile:
+        async def stream(self,provider,key,model,system,messages):
+            yield '{"files":[{"path":"frontend/src/App.tsx","content":"export default function App(){return <main>Modernizada</main>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        current=folder/'frontend/src/App.tsx';current.parent.mkdir(parents=True,exist_ok=True)
+        original='export default function App(){return <div>Original</div>}'
+        current.write_text(original)
+        ENGINE.client=ChangedFile()
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        calls=[0]
+        real_tree=ENGINE.workspaces.tree
+        def flaky_tree(*args,**kwargs):
+            calls[0]+=1
+            if calls[0]>=2:
+                raise PermissionError('Windows file temporarily inaccessible')
+            return real_tree(*args,**kwargs)
+        monkeypatch.setattr(ENGINE.workspaces,'tree',flaky_tree)
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        response=c.post('/api/runs',json={'conversation_id':convo,'mode':'manual',
+            'agent_ids':[agent['id']],'prompt':'Atualize frontend/src/App.tsx mantendo as funcionalidades.'},
+            headers=HEADERS)
+        assert response.status_code==200,response.text
+        result=wait_for(c,response.json()['id'])
+        assert result['status']=='completed',result.get('error')
+        assert current.read_text()==original
+        assert 'contagem indisponível' in result['output']
+        assert 'Aguardando revisão e aprovação' in result['output']
+        assert 'frontend/src/App.tsx' in result['output']
+        assert 'Não foi possível consultar a pasta local' not in result['output']
+        events=ENGINE.db.all('SELECT event,payload FROM events WHERE run_id=?',
+                             (response.json()['id'],))
+        assert any(e['event']=='workspace_summary_warning' for e in events)
+        # Pending proposal survives the file-count failure and stays reviewable.
+        rows=ENGINE.db.all('SELECT * FROM workspace_proposals WHERE run_id=?',
+                           (response.json()['id'],))
+        assert len(rows)==1 and rows[0]['status']=='pending'
