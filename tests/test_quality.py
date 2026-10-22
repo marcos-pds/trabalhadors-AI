@@ -150,3 +150,108 @@ def test_team_adds_testing_before_reviewer(tmp_path):
         review=next(x for x in stages if x['agent_id']==next(
                a['id'] for a in assigned if worker_role(a)=='review'))
         assert test_step['id'] in __import__('json').loads(review['deps'])
+
+
+
+def test_vite_css_import_is_valid_when_css_is_part_of_same_pending_proposals():
+    """Reported on Windows: pending index.css was wrongly ignored as non-TypeScript."""
+    files={
+        'frontend/src/App.tsx': (
+            'import LoadingSpinner from "./components/LoadingSpinner";\n'
+            'export default function App(){ return <LoadingSpinner /> }'),
+        'frontend/src/components/LoadingSpinner.tsx': (
+            'export default function LoadingSpinner(){ return <div>Carregando</div> }'),
+        'frontend/src/main.tsx': (
+            'import "./index.css";\n'
+            'import App from "./App";\n'
+            'export default App;'),
+        'frontend/src/index.css': (
+            'body { margin: 0; background: #fff; }\n')
+    }
+    assert inspect_sources(lambda _:None,files)==[]
+    # Removing the CSS proposal before it exists on disk is a REAL error.
+    without_css={path:source for path,source in files.items() if not path.endswith('.css')}
+    assert inspect_sources(lambda _:None,without_css)==[
+        'frontend/src/main.tsx: módulo relativo não encontrado: ./index.css']
+    # A CSS already saved on disk also satisfies the import.
+    assert inspect_sources(
+        lambda name: files.get(name) if name=='frontend/src/index.css' else None,
+        without_css)==[]
+
+
+def test_vite_css_modules_do_not_need_typescript_default_export():
+    proposed={
+      'frontend/src/App.tsx':
+         'import styles from "./App.module.css";\nexport default function App(){return styles.root}',
+      'frontend/src/App.module.css':'.root {display: block}',
+      'frontend/src/main.tsx':'import "./index.css";\nimport App from "./App";',
+      'frontend/src/index.css':'body{margin:0}'
+    }
+    assert inspect_sources(lambda _:None,proposed)==[]
+
+
+def test_vite_css_not_confused_with_missing_named_react_export():
+    files={
+        'frontend/src/main.tsx':
+            'import "./index.css";\nimport { LoadingSpinner } from "./components/LoadingSpinner";',
+        'frontend/src/index.css':'body{margin:0}',
+        'frontend/src/components/LoadingSpinner.tsx':
+            'export default function LoadingSpinner(){return <span/>}'
+    }
+    issues=inspect_sources(lambda _:None,files)
+    assert len(issues)==1 and 'LoadingSpinner' in issues[0]
+    assert 'index.css' not in issues[0]
+
+
+def test_repaired_react_files_with_new_css_are_staged_for_review_without_false_qa(tmp_path):
+    """Same scenario as Windows output: proposed LoadingSpinner, main.tsx, index.css.
+
+    Existing files must stay untouched, proposals must stay pending, and no
+    unsupported TypeScript-only QA error should be raised for the CSS import.
+    """
+    import json
+    class ReactRepair:
+        async def stream(self,provider,key,model,system,messages):
+            yield json.dumps({'files':[
+                {'path':'frontend/src/components/LoadingSpinner.tsx',
+                 'content':'export function LoadingSpinner(){return <span>Carregando</span>}'},
+                {'path':'frontend/src/main.tsx',
+                 'content':'import "./index.css";\nimport App from "./App";\nexport default App;'},
+                {'path':'frontend/src/index.css',
+                 'content':'body {margin: 0;}'}
+            ]})
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        root=folder/'frontend/src'
+        (root/'components').mkdir(parents=True,exist_ok=True)
+        appfile=root/'App.tsx'
+        appfile.write_text(
+            'import { LoadingSpinner } from "./components/LoadingSpinner";\n'
+            'export default function App(){return <LoadingSpinner />;}')
+        component=root/'components/LoadingSpinner.tsx'
+        component.write_text('export default function LoadingSpinner(){return <span/>}')
+        main=root/'main.tsx'
+        main.write_text('import "./index.css";\nimport App from "./App";\nexport default App;')
+        original=(component.read_text(),main.read_text())
+        worker=next(a for a in c.get('/api/agents').json()
+                    if worker_role(a)=='frontend')
+        cid=c.post('/api/conversations',json={'project_id':project},
+                   headers=HEADERS).json()['id']
+        ENGINE.client=ReactRepair()
+        run=c.post('/api/runs',json={
+            'conversation_id':cid,'mode':'manual','agent_ids':[worker['id']],
+            'prompt':'Corrija os erros QA dos imports LoadingSpinner e index.css.'},
+            headers=HEADERS)
+        assert run.status_code==200,run.text
+        done=wait_for(c,run.json()['id'])
+        assert done['status']=='completed',done.get('error')
+        assert 'QA Testador IA: frontend/src/main.tsx' not in done['output']
+        assert 'Aguardando revisão e aprovação' in done['output']
+        proposals=c.get(f'/api/projects/{project}/workspace').json()['proposals']
+        pending=[p for p in proposals if p['status']=='pending']
+        paths={part['path'] for p in pending for part in p['files']}
+        assert paths=={
+          'frontend/src/components/LoadingSpinner.tsx',
+          'frontend/src/main.tsx','frontend/src/index.css'}
+        assert (component.read_text(),main.read_text())==original
+        assert not (root/'index.css').exists()
