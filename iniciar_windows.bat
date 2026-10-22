@@ -26,6 +26,25 @@ if not exist ".venv\Scripts\python.exe" (
 echo Verificando dependencias...
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto error
+where node >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo Node.js nao encontrado. Instale Node.js 20 ou mais recente em https://nodejs.org/.
+    pause
+    exit /b 1
+)
+where npm >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo npm nao encontrado. Reinstale Node.js incluindo o npm.
+    pause
+    exit /b 1
+)
+echo Preparando a interface React...
+if not exist "node_modules" (
+    call npm install
+    if errorlevel 1 goto error
+)
+call npm run build
+if errorlevel 1 goto error
 echo.
 echo Acesse: http://127.0.0.1:8765
 echo Pressione Ctrl+C para encerrar a Central.

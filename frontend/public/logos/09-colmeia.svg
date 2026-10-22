@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+<title id="title">Colmeia</title>
+<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".45" stop-color="#9B72CB"/><stop offset=".72" stop-color="#D96570"/><stop offset="1" stop-color="#F9AB00"/></linearGradient></defs>
+<g fill="none" stroke="url(#g)" stroke-width="3.5" stroke-linejoin="round"><path d="m32 6 11 6v13l-11 6-11-6V12l11-6Z"/><path d="m17 31 11 6v13l-11 6-11-6V37l11-6Z"/><path d="m47 31 11 6v13l-11 6-11-6V37l11-6Z"/></g><circle cx="32" cy="19" r="3" fill="#f9ab00"/><circle cx="17" cy="44" r="3" fill="#34a853"/><circle cx="47" cy="44" r="3" fill="#d96570"/>
+</svg>

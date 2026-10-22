@@ -24,6 +24,7 @@
 
 # Python
 .venv/
+.venv-*/
 venv/
 __pycache__/
 *.py[cod]
@@ -44,4 +45,5 @@ __pycache__/
 node_modules/
 dist/
 build/
+/static/build/
 /data/

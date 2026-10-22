@@ -9,8 +9,8 @@ Plataforma multiagente em português: autenticação, chat com streaming SSE, ag
 ## Instalação no Windows (recomendado)
 
 1. Extraia o ZIP em uma pasta de sua escolha, como `C:\Projetos\central-trabalhadores-ia`.
-2. Instale **Python 3.11 ou mais recente** de https://www.python.org/downloads/ (marque *Add Python to PATH*).
-3. Dê dois cliques em **`iniciar_windows.bat`** e permita a instalação das dependências na primeira execução.
+2. Instale **Python 3.11 ou mais recente** de https://www.python.org/downloads/ (marque *Add Python to PATH*) e **Node.js 20 ou mais recente** de https://nodejs.org/.
+3. Dê dois cliques em **`iniciar_windows.bat`** e permita a instalação das dependências Python e npm na primeira execução. O iniciador compila a interface React antes de iniciar o servidor.
 4. Abra o navegador no endereço **http://127.0.0.1:8765**.
 5. Crie uma conta local (senha de pelo menos 10 caracteres) e vá até **Provedores → Conectar provedor**.
 6. Selecione seu provedor, informe o identificador **exato** de um modelo disponível em sua conta e a sua chave de API. Depois, clique em **Testar**.
@@ -24,16 +24,22 @@ O arquivo `iniciar_windows.bat` usa um ambiente virtual (`.venv`), sem instalar 
 cd C:\Projetos\central-trabalhadores-ia
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm install
+npm run build
 .\.venv\Scripts\python.exe run.py
 ```
 
 ### Linux / macOS
+
+Instale Python 3.11 ou mais recente e Node.js 20 ou mais recente. Depois, na raiz do projeto:
 
 ```bash
 cd central-trabalhadores-ia
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+npm install
+npm run build
 python run.py
 ```
 
@@ -50,17 +56,19 @@ central-trabalhadores-ia/
 │   ├── security.py        # Sessões e credenciais criptografadas
 │   └── database.py        # SQLite persistente / eventos
 ├── static/
+│   └── build/             # Bundle gerado pelo Vite e servido pelo FastAPI
+├── frontend/
 │   ├── index.html
-│   ├── style.css          # UI premium responsiva, temas escuro/claro
-│   └── app.js             # SPA sem build/dependências npm
+│   └── src/               # Componentes React e estilos Tailwind
 ├── tests/test_app.py      # Testes de integração controlados
 ├── run.py                 # Ponto de entrada local
 ├── iniciar_windows.bat    # Iniciador Windows
 ├── requirements.txt
+├── package.json           # React, Vite e Tailwind CSS
 └── ESPECIFICACAO.md       # Documento original fornecido
 ```
 
-**Stack:** FastAPI / Python 3.11+, SQLite (WAL), httpx, Fernet, HTML/CSS/JS sem bundler. A escolha de frontend sem React reduz a quantidade de dependências e permite executar imediatamente via Python. Para escalar para uma equipe e milhões de tarefas, é necessário evoluir a arquitetura para filas externas e workers distribuídos.
+**Stack:** FastAPI / Python 3.11+, React, Vite, Tailwind CSS, SQLite (WAL), httpx e Fernet. O bundle estático do frontend fica em `static/build/`; durante o desenvolvimento, `npm run dev` inicia o Vite em `127.0.0.1:5173` e encaminha as chamadas de API ao FastAPI em `127.0.0.1:8765`. Para escalar para uma equipe e milhões de tarefas, é necessário evoluir a arquitetura para filas externas e workers distribuídos.
 
 ## Provedores e modelos
 

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+<title id="title">Constelação</title>
+<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".45" stop-color="#9B72CB"/><stop offset=".72" stop-color="#D96570"/><stop offset="1" stop-color="#F9AB00"/></linearGradient></defs>
+<circle cx="32" cy="32" r="20" fill="none" stroke="url(#g)" stroke-width="3"/><path d="m32 12 5 15 15 5-15 5-5 15-5-15-15-5 15-5 5-15Z" fill="url(#g)"/><circle cx="32" cy="32" r="4" fill="#fff"/>
+</svg>

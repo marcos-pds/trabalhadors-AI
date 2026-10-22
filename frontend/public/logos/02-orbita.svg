@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+<title id="title">Órbita</title>
+<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".45" stop-color="#9B72CB"/><stop offset=".72" stop-color="#D96570"/><stop offset="1" stop-color="#F9AB00"/></linearGradient></defs>
+<circle cx="32" cy="32" r="6" fill="url(#g)"/><ellipse cx="32" cy="32" rx="24" ry="10" fill="none" stroke="url(#g)" stroke-width="3.5" transform="rotate(-35 32 32)"/><ellipse cx="32" cy="32" rx="24" ry="10" fill="none" stroke="#8ab4f8" stroke-width="2.5" transform="rotate(35 32 32)"/><circle cx="12" cy="18" r="3.5" fill="#f9ab00"/>
+</svg>

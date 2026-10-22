@@ -36,12 +36,13 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
+FRONTEND_BUILD = ROOT/'static'/'build'
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 
 
 @app.get('/', include_in_schema=False)
 def index():
-    return FileResponse(ROOT/'static'/'index.html')
+    return FileResponse(FRONTEND_BUILD/'index.html')
 
 
 def current_user(request: Request):

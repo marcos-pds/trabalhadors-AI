@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
+  --color-ink: #131314;
+  --color-sidebar: #1b1b1b;
+  --color-panel: #1f1f1f;
+  --color-card: #242528;
+  --color-line: #3c4043;
+  --color-copy: #e8eaed;
+  --color-muted: #9aa0a6;
+  --color-lilac: #a8c7fa;
+  --color-aqua: #8ab4f8;
+}
+
+:root { font-family: var(--font-sans); color: var(--color-copy); background: var(--color-ink); font-synthesis: none; text-rendering: optimizeLegibility; }
+:root.light { --color-ink: #f6f5f8; --color-sidebar: #eeedf2; --color-panel: #fff; --color-card: #f3f2f6; --color-line: #dedce5; --color-copy: #24222a; --color-muted: #706d78; --color-lilac: #7155c7; --color-aqua: #287f91; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .56; }
+::selection { color: white; background: #8e72dd; }
+select option { background: #242528; color: #e8eaed; }
+.glass-glow { background: radial-gradient(ellipse 34% 30% at 50% 48%, #4285f41c, transparent 72%), radial-gradient(ellipse 32% 28% at 48% 52%, #9b72cb14, transparent 72%); }
+.scrollbar-soft { scrollbar-color: #424149 transparent; scrollbar-width: thin; }
+.orb { animation: float 5s ease-in-out infinite; }
+.brand-orbit { filter: drop-shadow(0 2px 10px #4285f455); }
+@keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+@property --chat-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.chat-composer {
+  border: 1px solid transparent;
+  background: linear-gradient(#222326, #222326) padding-box,
+    conic-gradient(from var(--chat-angle), #4285f4, #9b72cb, #d96570, #f9ab00, #34a853, #4285f4) border-box;
+  transition: box-shadow 240ms ease, filter 240ms ease;
+}
+.chat-composer:hover,
+.chat-composer.is-typing {
+  animation: rotate-chat-border 3s linear infinite;
+  box-shadow: 0 0 0 1px #4285f455, 0 0 30px #4285f426;
+}
+@keyframes rotate-chat-border { to { --chat-angle: 360deg; } }
+
+.menu-drawer { animation: menu-drawer-in 220ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes menu-drawer-in { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: translateX(0); } }
+.menu-drawer nav button { position: relative; transition: transform 180ms ease, background-color 180ms ease, color 180ms ease, box-shadow 180ms ease; }
+.menu-drawer nav button:hover { transform: translateX(4px); box-shadow: inset 2px 0 #8ab4f8, 0 5px 18px #00000024; }
+.menu-drawer nav button:active { transform: translateX(2px) scale(.985); }
+.menu-toggle span { transition: transform 220ms cubic-bezier(.2,.8,.2,1); }
+.menu-toggle:hover span { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .chat-composer:hover, .chat-composer.is-typing { animation: none; }
+}

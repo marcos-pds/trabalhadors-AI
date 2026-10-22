@@ -22,6 +22,7 @@ TEMPLATES = [
 ]
 
 KEYWORDS = {
+ 'architecture': ['arquitet','arquitetura','sistema','estrutura','dependência','design técnico'],
  'frontend': ['frontend','front-end','react','interface','componente','css','html','tela','página','dashboard'],
  'backend': ['backend','back-end','api','servidor','banco','database','autenticação','login','endpoint'],
  'design': ['design','layout','visual','estilo','figma','ui','identidade'],
@@ -29,6 +30,8 @@ KEYWORDS = {
  'devops': ['deploy','docker','devops','infra','ci/cd','pipeline'],
  'video': ['vídeo','video','legenda','transcri','reels'],
  'code': ['código','program','função','script','bug','corrij'],
+ 'review': ['revis','avalie','valid','auditoria','qualidade','critique'],
+ 'coordination': ['coordene','organize','resuma','sintetize','equipe','multiagente'],
 }
 
 

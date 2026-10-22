@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+<title id="title">Mosaico</title>
+<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".45" stop-color="#9B72CB"/><stop offset=".72" stop-color="#D96570"/><stop offset="1" stop-color="#F9AB00"/></linearGradient></defs>
+<path d="M10 10h18v18H10z" rx="5" fill="#4285f4"/><path d="M36 10h18v18H36z" rx="9" fill="#9b72cb"/><path d="M10 36h18v18H10z" rx="9" fill="#34a853"/><path d="M36 36h18v18H36z" rx="5" fill="#f9ab00"/><circle cx="32" cy="32" r="6" fill="#d96570"/>
+</svg>

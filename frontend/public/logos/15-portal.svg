@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+<title id="title">Portal</title>
+<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#4285F4"/><stop offset=".45" stop-color="#9B72CB"/><stop offset=".72" stop-color="#D96570"/><stop offset="1" stop-color="#F9AB00"/></linearGradient></defs>
+<path d="M32 7a25 25 0 1 0 0 50 25 25 0 0 0 0-50Zm0 8a17 17 0 1 1 0 34 17 17 0 0 1 0-34Z" fill="url(#g)" fill-rule="evenodd"/><path d="M32 20c-7 0-12 5-12 12s5 12 12 12 12-5 12-12" fill="none" stroke="#8ab4f8" stroke-width="3.5" stroke-linecap="round"/><circle cx="44" cy="20" r="5" fill="#f9ab00"/>
+</svg>
