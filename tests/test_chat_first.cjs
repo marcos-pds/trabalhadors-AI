@@ -48,12 +48,13 @@ test('slash commands cover running and navigation without arbitrary execution',a
                  'projetos','arquivos','historico','monitoramento','provedores',
                  'configuracoes','tema'];
  assert.deepEqual(SLASH_COMMANDS.map(x=>x.name),required);
- const names=new Set();
+ const names=new Map();
  for(const item of SLASH_COMMANDS){
   for(const alias of [item.name,...item.aliases]){
    const normal=normalizeSlash(alias);
-   assert.ok(!names.has(normal),'duplicate '+normal);
-   names.add(normal);
+   if(names.has(normal))assert.equal(names.get(normal),item.name,
+     'Alias '+normal+' não pode apontar para comandos diferentes');
+   names.set(normal,item.name);
    assert.equal(parseSlashCommand('/'+alias).command,item.name);
   }
  }
