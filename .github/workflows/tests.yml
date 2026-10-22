@@ -4,11 +4,13 @@ on:
     branches:
       - feat/local-project-workspaces
       - feat/chat-first-slash-integrated
+      - feat/gemini-visual-minimalista
   pull_request:
     branches:
       - main
       - feat/local-project-workspaces
       - feat/uiux-skills-architect-autonomy
+      - feat/chat-first-slash-integrated
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -30,5 +32,6 @@ jobs:
         run: |
           node --check static/app.js
           node --check static/slash-commands.mjs
+          node --check static/ui-icons.mjs
       - name: Test chat slash commands
-        run: node --test tests/test_slash_commands.cjs tests/test_chat_first.cjs
+        run: node --test tests/test_slash_commands.cjs tests/test_chat_first.cjs tests/test_gemini_theme.cjs
