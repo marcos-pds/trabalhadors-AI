@@ -180,3 +180,214 @@ A Central pode preparar uma subpasta privada para cada **Projeto** em `C:\Projet
 - Visualização é um **diff textual**, não execução de HTML nem um navegador incorporado. **Não existe execução de shell, instalação de dependências, deploy, Git automático ou renderização do projeto** nesta fase. Isso requer ferramentas e autorizações separadas.
 - A aplicação de um conjunto de arquivos faz uma pré-checagem de versões e tenta recuperar alterações anteriores em caso de erro. Sistemas de arquivos não são transacionais: faça backup/Git antes de aprovar mudanças importantes. A Central não permite escolher uma pasta arbitrária por mensagem, apenas subpastas autorizadas.
 - Os provedores atuais possuem um limite de saída em tokens; projetos grandes devem ser desenvolvidos em etapas. A qualidade dos arquivos é responsabilidade dos agentes e da revisão humana, não garantida por esta integração.
+
+
+## Skills UX/UI e delegação controlada ao Arquiteto IA
+
+A aba **Skills UX/UI** permite ativar por projeto o guia interno **UI/UX Studio Pro**. Ele enriquece o contexto dos trabalhadores Frontend, Designer, Programador, Arquiteto e Revisor com práticas de UX, acessibilidade, design system, Tailwind 4, shadcn/ui, Lucide, Motion e testes visuais. É uma **skill local de instruções**, não um cliente MCP externo nem um instalador automático de shadcn/ui; não existem comandos arbitrários nem screenshots de Playwright nesta fase.
+
+### Delegar autoridade via comando no chat
+
+Abra uma conversa **vinculada a um projeto com pasta preparada** e digite **`/arquiteto`**, confirmando a permissão; alternativamente envie, como uma mensagem isolada e literal, a declaração:
+
+    Autorizo o Arquiteto IA a aprovar alterações e instalar pacotes permitidos neste projeto.
+
+A autorização fica persistida **somente naquela conversa/projeto**; outras conversas não herdam os poderes. Para revogar, digite **`/arquiteto`** novamente ou envie:
+
+    Revogo a autonomia do Arquiteto IA.
+
+O backend interpreta somente essas declarações explícitas **do usuário autenticado**, não instruções embutidas em arquivos ou respostas de modelos.
+
+Com a autorização ativa, as propostas de alteração de arquivos **comuns de código** criadas pelos agentes podem ser revisadas em uma chamada independente ao Arquiteto IA. Ele recebe o diff e deve responder JSON com decisão e justificativa. Se aprovar, o servidor compara a versão original, grava e registra o motivo da decisão no SQLite. Na dúvida, erro, ausência de provedor, diff grande, exclusão, arquivo de configuração sensível ou autorização revogada, **a proposta continua aguardando sua aprovação**.
+
+### Instalação autorizada de bibliotecas
+
+O Arquiteto pode solicitar pacotes **apenas de um catálogo estático** através do bloco de texto estruturado central-packages (JSON completo). Suporte atual: npm no diretório frontend (Tailwind CSS, Lucide, Motion, Radix, clsx, Playwright como biblioteca) e pip no virtualenv backend (httpx, pytest, SQLAlchemy, Pydantic, python-multipart). Limite de cinco pacotes por bloco e uma transação por execução.
+
+- **npm**: comando interno com argumentos fixos, diretório fixo, registry oficial, sem shell, audit nem lifecycle scripts (--ignore-scripts). Instalação altera package.json/package-lock.json; é uma alteração autorizada especificamente pelo usuário ao delegar pacotes.
+- **pip**: requer um virtualenv backend/.venv existente, instala apenas pacotes wheel do PyPI oficial, sem entrada interativa e sem shell.
+- Instalar dependências **envolve riscos** mesmo sem scripts, pode consumir rede/disco e instalar código de terceiros. Faça backup ou crie commits Git antes. No ambiente de produção, prefira versões travadas e revisões de dependências.
+- O Arquiteto **não pode executar npm run, pip install de nome arbitrário, npx shadcn, comandos PowerShell, scripts pós-instalação, exclusões automáticas ou acessar fora do projeto**.
+- O histórico das instalações fica na aba **Skills UX/UI**; as decisões de aprovação do Arquiteto ficam registradas na tabela architect_approval_log.
+- A delegação é válida na conversa, não globalmente. Revogue a qualquer momento; uma instalação já em andamento não é cancelada automaticamente ao revogar.
+
+Os agentes continuam necessitando de provedores reais conectados. A revisão automática não substitui testes no navegador ou inspeção humana de alterações importantes.
+
+
+### Selecionar projetos e Skills diretamente no Chat IA
+
+No topo da conversa, a barra de contexto **Projeto / Skills do projeto** permite:
+
+- Selecionar **Loja Virtual**, qualquer outro projeto cadastrado, ou **Sem projeto** antes de enviar um pedido. A conversa é vinculada ao ID do projeto selecionado, e a pasta continua restrita ao workspace autorizado.
+- Ativar ou desativar as Skills disponíveis (por exemplo, **UI/UX Studio Pro**) sem acessar outra página. As Skills são persistidas **por projeto**, portanto aparecem ativas em todas as conversas vinculadas ao mesmo projeto.
+- Criar uma conversa nova ao trocar de projeto depois de já haver mensagens ou execuções, **mantendo a conversa anterior intacta**. Rascunhos vazios podem ser reatribuídos pelo endpoint autenticado \`POST /api/conversations/{cid}/project\`; a troca revoga qualquer permissão de Arquiteto antiga antes de salvar a nova vinculação.
+- Uma seleção de projeto **não autoriza** o Arquiteto automaticamente. A delegação para revisão de código/instalação de pacotes continua explícita, limitada à conversa e pode ser revogada.
+- Durante uma execução, os controles de alteração ficam bloqueados na interface; o backend também impede mover conversas que já contêm histórico/execuções para outro projeto.
+- Caso o usuário ainda não tenha criado um projeto, escolha **Sem projeto** para conversas comuns ou cadastre um projeto na aba **Projetos**.
+
+O controle de Skills no chat é uma interface para o catálogo local atualmente disponível. Não significa que as CLIs ou servidores MCP externos listados nas orientações da Skill tenham sido instalados.
+
+
+### Compatibilidade de especialidades em Trabalhadores
+
+Os cartões da aba Trabalhadores mostram agora o papel reconhecido pelo orquestrador. O campo editável Especialidade aceita descrições personalizadas; para os nomes padrão exatos Arquiteto IA, Frontend IA e Designer IA, o roteamento pode recuperar o papel mesmo quando essa especialidade foi personalizada.
+
+Os códigos canônicos continuam sendo architecture, frontend e design. Um código canônico explícito sempre tem prioridade sobre o nome mostrado: um trabalhador chamado Arquiteto IA com especialidade backend não se torna Arquiteto na execução e não recebe automaticamente poderes privilegiados.
+
+Não há alteração automática de registros de trabalhadores nem mudanças nas permissões do usuário. Para trabalhadores com nomes personalizados, configure a especialidade com seu código canônico em Trabalhadores -> Configurar.
+
+
+### Revisor IA: somente leitura, sem geração de arquivos
+
+Nos fluxos de múltiplos trabalhadores, o Revisor IA é executado depois das etapas de código de Frontend/Backend e recebe um contexto específico de auditoria (possíveis conflitos de imports, endpoints, requisitos e limitações). O contexto do Revisor não pede manifestos de criação de arquivos. A Central ignora qualquer JSON `files` enviado pelo Revisor, completo ou incompleto: seu parecer é consultivo e **não substitui** aprovação humana ou a revisão independente do Arquiteto quando explicitamente delegada.
+
+Se o Revisor ainda responder com um manifesto de arquivos em vez de um parecer, a conclusão distingue `resposta ignorada` de `revisão concluída`, sem descartar propostas válidas dos trabalhadores de código. Os resultados antigos e as propostas pendentes permanecem intactos; a correção só afeta novas execuções.
+
+Para projetos já existentes, pedidos de estrutura inicial que propõem substituir arquivos ou misturam novas estruturas de backend são mantidos como alterações pendentes. Antes de aplicar, confira o entrypoint `backend/main.py`, módulos auxiliares e o endpoint `/api/products`, bem como imports e props dos componentes React. A existência de propostas não comprova que o projeto compila ou funciona.
+
+
+
+### Paleta de comandos do Chat IA
+
+Digite uma barra `/` no campo de texto. A paleta de sugestões abre automaticamente **acima do campo**, com navegação por setas, `Enter` para escolher, `Tab` para completar e `Esc` para fechar. Também é possível clicar numa opção. Os comandos são locais e **não consomem tokens dos provedores**, não entram no histórico como solicitações à IA e não são interpretados como comandos do terminal.
+
+| Comando | Ação |
+| --- | --- |
+| `/ajuda` | Mostrar a lista atual de comandos |
+| `/testar` | Verificação estática do Testador IA, sem executar código |
+| `/iniciar` | Iniciar os servidores React/Vite e FastAPI, após autorização |
+| `/previa` | Abrir uma prévia real da aplicação local |
+| `/parar` | Encerrar os servidores iniciados pela Central |
+| `/autorizar` | Conceder autorização para execução local após confirmação |
+| `/revogar` | Revogar autorização de execução e encerrar servidores |
+| `/diagnostico` | Mostrar o último erro de inicialização com opção de copiar |
+| `/status` | Mostrar vínculo do projeto, autorização e estado dos servidores |
+| `/arquiteto` | Conceder/revogar a delegação de aprovação e instalação permitida |
+| `/projeto` | Focar o seletor de projeto da conversa |
+| `/skills` | Focar os controles de Skills do projeto |
+
+Os controles **Projeto** e **Skills do projeto** continuam visíveis no topo. Os comandos `/projeto` e `/skills` apenas focam esses controles; não trocam de projeto ou concedem permissões por conta própria.
+
+A barra de botões de runtime foi removida do layout, mas os endpoints de execução e suas verificações de permissão, CSRF, sandbox e catálogo de pacotes continuam os mesmos. Digitar `/iniciar npm install`, ou qualquer comando que não esteja no catálogo, é recusado e **não é encaminhado à IA**; não há interpretador de shell no chat. A autorização do Arquiteto é independente da autorização para executar os servidores, e ambas seguem exigindo confirmação do usuário.
+
+## Executar e visualizar projetos diretamente no Chat IA
+
+No Chat IA, após selecionar um projeto, digite **`/`** no campo de mensagem para abrir a paleta de comandos. Os antigos botões **Autorizar execução**, **Iniciar**, **Prévia** e **Parar** foram removidos e substituídos por **`/autorizar`**, **`/iniciar`**, **`/previa`** e **`/parar`**. A autorização é concedida pelo usuário autenticado com confirmação explícita e fica registrada apenas para a conversa e o projeto vinculados. Revogar a autorização encerra os processos que a Central iniciou. Mudar de projeto em um rascunho também interrompe os servidores e elimina a autorização anterior. Autorizar o Arquiteto IA não equivale a autorizar execução local.
+
+**`/iniciar`** abre dois processos locais com comandos predefinidos (sem shell e sem comandos gerados por modelos):
+- FastAPI: usa `backend/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000` no Windows.
+- React/Vite: chama diretamente o executável do Vite `frontend/node_modules/vite/bin/vite.js` usando Node.js na porta fixa 5173, sem `npm run`, `npx` ou scripts de instalação.
+- Dependências e ambientes virtuais precisam estar previamente preparados em `frontend/node_modules` e `backend/.venv`. A Central **não instala dependências, altera arquivos de projeto, faz build ou publica o site** ao executar `/iniciar`.
+- O frontend deve conversar com o FastAPI via `http://127.0.0.1:8000/api/products` conforme seu código. Se a porta 5173 ou 8000 estiver ocupada por servidores iniciados manualmente, a Central recusa o início e pede que sejam parados ou que sejam visualizados separadamente. Por segurança não assume a posse de servidores desconhecidos.
+- **`/previa`** abre a aplicação React realmente servida pelo Vite em um iframe com sandbox, com opção **Nova aba**. A prévia é do código já aplicado no disco: propostas pendentes de aprovação não aparecem.
+- **`/parar`** encerra os processos iniciados por esta instância da Central. Eles também são encerrados no desligamento normal da Central. Permissões persistidas não iniciam servidores automaticamente após reiniciar o programa.
+
+### Segurança e limitações
+
+Executar um projeto local implica executar o código e as dependências que já estiverem nos diretórios autorizados. Mesmo sem comandos arbitrários, código de projeto ou bibliotecas comprometidas podem agir com os privilégios do usuário Windows. Autorize apenas projetos e dependências confiáveis; faça backup ou commit Git antes de testar propostas não revisadas. O instalador de pacotes autorizado ao Arquiteto é separado desta função.
+
+O executor só reconhece estrutura de desenvolvimento React/Vite + FastAPI, vincula-se a **127.0.0.1**, verifica caminhos críticos contra links/junções/hardlinks, recusa execução em portas ocupadas e limita a um projeto ativo por instância. Não permite comandos livres por chat, execução no servidor de produção, compartilhamento pela rede ou pré-visualização de outros processos no sistema. O teste de CI usa processos simulados; ainda é necessária a validação manual com o Python e Node.js instalados no Windows.
+
+
+### Diagnóstico de inicialização da prévia
+
+O comando `/iniciar` só confirma sucesso depois que FastAPI (porta 8000) e Vite (resposta HTTP local na porta 5173) estiverem ativos. Aguarda até 8 segundos e interrompe os processos lançados caso ocorra erro ou tempo limite. Não executa instalação de dependências nem corrige arquivos automaticamente.
+
+Se o Python ou o Vite encerrar rapidamente, a Central retorna um erro HTTP 422 com o nome do processo, código de saída e trecho limitado das mensagens do servidor. O Chat IA mostra o diagnóstico em uma mensagem, mantém `/iniciar` para nova tentativa e oferece **`/diagnostico`** para reabrir/copiar a mensagem após recarregar a conversa (durante a mesma sessão do servidor). Enquanto o serviço não estiver saudável, `/previa` continua indisponível. Se um servidor encerrar depois de iniciar, a próxima consulta de status invalida a prévia e guarda a falha. O stdout dos processos é consumido continuamente com buffer limitado para não bloquear subprocessos.
+
+Causas comuns: Vite sem dependências de `node_modules`, backend com importação inválida, pacote uvicorn ausente no virtualenv ou incompatibilidade de código proposta anteriormente. Corrija somente após ler o diagnóstico; as alterações pendentes permanecem na revisão e nenhuma instalação é iniciada automaticamente.
+
+
+### Logs de falha no Vite/PostCSS
+
+Quando um servidor Vite encerra com código 1, as primeiras linhas normalmente explicam a causa (por exemplo, `Failed to load PostCSS config`, plugin Tailwind não instalado ou formato incompatível de `postcss.config.js`). O buffer anterior mostrava apenas as **últimas cinco linhas** e podia ocultar essa mensagem, exibindo apenas `at Array.map`, `at plugins` e `Node.js ...`.
+
+O diagnóstico do runtime agora preserva o início do log **e** o fim do stack trace, com retenção limitada. Digite **`/diagnostico`** no Chat IA e escolha **Copiar diagnóstico**, sem incluir arquivos contendo chaves de API. Não altere o arquivo de configuração de CSS por suposição: primeiro confira a mensagem completa e os arquivos `frontend/postcss.config.*`, `frontend/vite.config.ts`, `frontend/package.json` e eventuais configs ancestrais.
+
+Para diagnosticar diretamente no Git Bash, sem modificar dependências:
+```bash
+cd /c/Projetos/Central-IA/loja-virtual-8943d369/frontend
+npm run dev
+```
+Copie as **primeiras linhas do erro**, não apenas o final. Não atribua esse erro automaticamente ao Node.js 24 sem confirmar a mensagem principal.
+
+
+## Testador IA: QA independente antes da aprovação e da prévia
+
+A Central agora inclui um trabalhador **Testador IA** com papel `testing`. Contas já existentes recebem o trabalhador padrão no início da Central **somente se ainda não houver um Testador**, preservando os agentes personalizados e suas configurações. Novas contas também recebem esse modelo.
+
+### Quando o Testador é chamado
+- Na modernização com **UI/UX Studio Pro**, o Testador recebe a saída de Arquiteto/Designer/Frontend **depois** das tarefas de implementação e **antes** da revisão de integração do Arquiteto.
+- Nas execuções de equipe envolvendo Frontend/Backend/Programador, o Testador entra depois dos produtores de código e antes do Revisor IA. Também aceita seleção explícita do Testador na equipe, mantendo a ordem correta.
+- O Testador recebe um diagnóstico objetivo dos arquivos propostos (não precisa inventar resultados de testes). Seu parecer de IA é consultivo; a **validação estática determinística** permanece independente do provedor.
+- O Testador é **somente leitura**, não pode propor/alterar arquivos nem instalar bibliotecas, mesmo que o modelo devolva um manifesto de escrita.
+
+### Validação automática de código proposto
+O estágio de arquivos verifica imports relativos React/TypeScript em relação ao conteúdo dos arquivos existentes e de todas as propostas da execução. Detecta, por exemplo, um `import { LoadingSpinner }` em `App.tsx` quando `LoadingSpinner.tsx` só oferece `export default`. Identifica imports de módulos locais ausentes e exports nomeados inexistentes.
+
+Se houver incompatibilidade, **nenhum arquivo daquela rodada é aplicado automaticamente**, e a autorização delegada ao Arquiteto **não contorna** a falha. O relatório do chat exibe os caminhos e símbolos afetados; as propostas permanecem disponíveis para revisão e correção.
+
+### Testar o projeto atual no Chat IA
+Digite **`/testar`** na conversa para verificar o projeto local, sem procurar botões na barra. Esta primeira versão executa **somente análise estática**, sem iniciar processos, e verifica imports/exports de React/TypeScript e sintaxe Python dos arquivos na pasta autorizada (até 120 arquivos). Retorna uma lista de erros no chat. Ao executar **`/iniciar`**, uma verificação estática semelhante é feita como pré-requisito, impedindo a execução de um projeto com incompatibilidade detectada.
+
+**Limitação deliberada:** isso não substitui o compilador TypeScript, `npm run build`, os testes `pytest` do próprio projeto ou testes de navegador com Playwright. Erros de tipagem avançada, runtime, integração HTTP, configurações PostCSS ou Tailwind podem não ser detectados pela verificação estática atual. Nenhum comando de testes é executado sem autorização específica para execução de código.
+
+As sete propostas antigas e os arquivos já existentes continuam intactos. A política não executa nem aceita automaticamente código corrigido pela IA; o Frontend/Backend deve preparar uma nova proposta e o fluxo de aprovação continua valendo.
+
+
+### Autorizações e propostas de correção dentro da conversa
+
+Quando **`/testar`** encontra problemas concretos de imports/exports React ou sintaxe Python no projeto selecionado, o Chat IA apresenta o diagnóstico e logo abaixo um cartão da Central perguntando: **"Deseja que Frontend IA execute a correção?"** (ou Backend IA quando houver somente erros Python; ambos quando há problemas nas duas áreas). O cartão oferece botões **Confirmar correção** e **Negar**.
+
+- **Confirmar** apenas autoriza o início de uma nova tarefa de reparo com os agentes ativos das especialidades corretas. A Central verifica novamente o projeto e os erros reais antes de enviar o pedido, rejeitando decisões sobre diagnósticos obsoletos, troca de projeto ou mudança dos trabalhadores.
+- O novo pedido usa o endpoint normal de runs e respeita o limite de uso/custo dos provedores. O trabalho solicitado gera arquivos completos em formato `central-files`; arquivos existentes continuam protegidos pelo fluxo de propostas e revisão, inclusive aprovação delegada existente. **A autorização de correção não equivale a autorização de instalação, execução de comandos ou aprovação de diffs.**
+- **Negar** não chama os agentes e não altera os arquivos. Saídas de modelos, texto colado e registros antigos não podem acionar esses botões, que dependem de clique humano na conversa corrente. Autorizações pendentes são canceladas ao trocar de contexto ou atualizar o histórico da conversa.
+- As confirmações antes feitas pelo navegador para `/autorizar`, `/arquiteto` e mudança de projeto em conversa com histórico aparecem agora como cartões dentro do chat. Etapas de fluxo que precisam de decisão humana também apresentam **Aprovar etapa / Negar etapa** no chat, em vez de botões no painel lateral. Cancelar um cartão devido à navegação não rejeita automaticamente a etapa de fluxo.
+- A lista de propostas de substituição e exclusão de arquivos ainda precisa ser inspecionada no explorador **Projetos → Arquivos** para visualizar o diff integral e obter a confirmação `APLICAR` antes de gravar. Cartões de reparo não substituem essa inspeção.
+
+**Validação:** verificações Python e Node na CI, inclusive escolha de Frontend/Backend baseada no caminho diagnosticado, limites do prompt de correção, bloqueio de comandos inventados e uso de cartões de consentimento na interface. O teste de interação real com o navegador e modelos conectados ainda deve ser feito no Windows.
+
+
+### Corrigido: importação de CSS em propostas React/Vite
+
+Em uma correção iniciada pelo `/testar`, o Frontend IA preparou propostas para `frontend/src/components/LoadingSpinner.tsx`, `frontend/src/main.tsx` e `frontend/src/index.css`. O QA bloqueou a revisão porque dizia que `./index.css` não existia, apesar de o arquivo CSS estar incluído nas propostas da mesma execução.
+
+A causa era o resolvedor `central/quality.py`: ele procurava exclusivamente módulos `.ts/.tsx/.js/.jsx`, sem considerar propostas de `.css`. Agora arquivos de estilo e recursos textuais conhecidos participam da resolução de imports relativos tanto nas propostas ainda não aplicadas quanto no código que já está no disco. Os arquivos de estilo são verificados quanto à existência, mas não são tratados como módulos JavaScript com exports nomeados.
+
+A verificação continua detectando `import { LoadingSpinner }` contra um módulo com apenas `export default`. Propostas existentes continuam exigindo aprovação independente; corrigir o falso positivo **não as aplica**. Para validar, atualize a branch, revise as três propostas em **Projetos → Arquivos**, aplique somente os diffs corretos e use `/testar` novamente. Um relatório histórico de execução não é recalculado retroativamente.
+
+Quatro testes novos cobrem arquivos CSS propostos na mesma rodada, CSS ausente de fato, CSS modules e integração real do staging preservando arquivos existentes. Na CI: **88 passed, 1 warning** em Python, **9 tests passed** no Node.
+
+
+## Revisão de propostas diretamente no Chat IA
+
+Ao selecionar um projeto com propostas de arquivos aguardando decisão, o Chat IA exibe um **alerta persistente de revisão pendente** imediatamente abaixo de Projeto e Skills. O alerta apresenta a quantidade de propostas, os caminhos dos arquivos envolvidos e **Revisar no chat**, sem precisar navegar até Projetos → Arquivos. O mesmo fluxo pode ser aberto pelo comando **`/revisar`**.
+
+Dentro da própria conversa, a Central mostra uma proposta por vez, com a lista completa de arquivos daquela proposta e um **diff unificado** colorido (linhas adicionadas e removidas). A revisão permite alternar entre propostas do mesmo projeto. Uma proposta contendo múltiplos arquivos é **atômica**: aprovar ou rejeitar decide todos os arquivos daquele manifesto, não apenas o arquivo visualizado.
+
+Para **aprovar e aplicar**, é obrigatório inspecionar o diff e digitar exatamente `APLICAR` no cartão do chat. A Central recarrega o diff do servidor antes de aceitar a decisão e bloqueia a operação se o conteúdo ou o arquivo base mudou, se o diff foi truncado, se a proposta já foi decidida, ou se há uma execução em andamento. Para rejeitar, o botão **Rejeitar proposta** muda apenas o estado da proposta, sem tocar em arquivos reais. Os endpoints continuam validando dono do projeto, estado pendente, hash original dos arquivos e a confirmação de aprovação. Não há aprovação automática ao abrir o alerta.
+
+O alerta é atualizado ao abrir a conversa, quando um run termina, quando uma proposta nova é criada e após aprovar ou rejeitar. Mostra somente propostas **pendentes do projeto atualmente selecionado**, mesmo quando surgiram em outras conversas ligadas ao mesmo projeto. Decisões já tomadas não reaparecem após recarregar o chat. O histórico textual original não é alterado nem apagado. Em caso de diff maior que o limite de visualização (até 480 KB por arquivo solicitado), a aprovação no chat é bloqueada para evitar alterações não inspecionadas.
+
+Os arquivos da Loja Virtual no Windows continuam intactos até que um usuário aprove explicitamente cada proposta. A barra de alerta e o painel de diff usam HTML escapado para que texto/código gerado pelos agentes não execute JavaScript na interface.
+
+A API oferece `GET /api/projects/{pid}/workspace/pending` para consultar apenas os metadados das propostas pendentes sem percorrer todos os arquivos, e `GET /api/projects/{pid}/workspace/proposals/{id}?full=true` para obter o diff integral na revisão.
+
+
+## Chat IA: ler problemas reais do projeto e corrigir dependências
+
+O Chat IA reconhece mensagens comuns do Vite (`Failed to resolve import`, `[plugin:vite:import-analysis]`, `No matching export`, `Failed to load PostCSS config`) coladas na conversa de um projeto selecionado, e direciona essas mensagens ao **Testador IA** em vez de supor um comando do terminal ou enviar o erro cegamente a um agente.
+
+O Testador lê os arquivos reais do projeto **somente dentro da pasta local autorizada** e, além dos imports/exports relativos já verificados, analisa imports externos em componentes `.ts/.tsx/.js/.jsx` com base no `frontend/package.json` e no diretório `frontend/node_modules` (sem importar nem executar os módulos). A API `GET /api/conversations/{cid}/quality` devolve `issues` e `missing_packages` com o nome dos pacotes externos ausentes. Pacotes declarados mas não instalados também são identificados. A validação de arquivos novos considera declarações de dependências antes de autoaprovação, sem executar `npm`.
+
+### Exemplo: `ProductCard.tsx` exige `lucide-react`
+
+Se `frontend/src/components/ProductCard.tsx` contém `import { ShoppingCart, Star } from "lucide-react"` e a dependência não está declarada ou instalada, `/testar` ou a colagem do erro Vite exibirá o diagnóstico. Para um pacote pertencente ao **catálogo explícito permitido**, o Chat IA perguntará:
+
+**“Deseja instalar lucide-react para corrigir a Loja Virtual?” → Confirmar / Negar**.
+
+Ao confirmar, o backend verifica novamente o projeto e a dependência ausente, executa apenas `npm install --ignore-scripts --no-audit --no-fund` com argumentos fixos na pasta `frontend` autorizada, registra a operação no histórico de instalações do projeto e repete o QA. O `package.json`, `package-lock.json` e `node_modules` podem ser modificados **apenas após essa autorização**, porque instalar pacotes exige mudar as dependências. A instalação de bibliotecas de terceiros ainda apresenta risco; o comando não possui acesso a uma ferramenta shell genérica.
+
+Se houver também erros de código, o Testador poderá solicitar confirmação para o Frontend/Backend IA **preparar propostas completas**, com o diff e revisão no chat. Não sobrescreve `App.tsx`, `ProductCard.tsx` nem arquivos do backend automaticamente ao autorizar uma instalação. Para tarefas de dependências, a Central passa `ProductCard.tsx` e `frontend/package.json` ao agente quando citados nos erros, respeitando os limites de tamanho e de segurança já existentes.
+
+**Limites atuais:** análise estática não é um compilador completo, não garante funcionamento no navegador e nem todas as dependências podem ser instaladas; pacotes fora do catálogo precisam de revisão específica. Logs desconhecidos continuam disponíveis no chat para investigação pelos agentes, e as alterações ainda precisam dos fluxos de aprovação já definidos. A pasta Windows privada do usuário não é alterada pelos commits no GitHub; deve-se atualizar a branch e testar localmente.

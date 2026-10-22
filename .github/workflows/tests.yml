@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/local-project-workspaces
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -24,4 +25,8 @@ jobs:
       - name: Unit and integration tests
         run: python -m pytest -q
       - name: Validate frontend JavaScript syntax
-        run: node --check static/app.js
+        run: |
+          node --check static/app.js
+          node --check static/slash-commands.mjs
+      - name: Test chat slash commands
+        run: node --test tests/test_slash_commands.cjs

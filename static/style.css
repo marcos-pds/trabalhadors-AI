@@ -46,3 +46,145 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 .ws-diff-list{max-height:45vh;overflow:auto}.ws-diff{margin-bottom:14px}.ws-diff strong,.ws-diff small{display:block}.ws-diff small{color:var(--muted);margin:5px 0}.ws-diff pre{font:11px/1.5 ui-monospace,Consolas,monospace;white-space:pre;overflow:auto;max-height:270px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
 .ws-conflict{color:#ffbe73}
 @media(max-width:950px){.workspace-columns{grid-template-columns:1fr}.workspace-toolbar{align-items:stretch}}
+
+
+/* Project and Skill controls inside the Chat IA */
+.chat-context-bar{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;padding:11px 18px;border-bottom:1px solid var(--line);background:var(--card)}
+.chat-context-field{display:flex;align-items:flex-start;flex-direction:column;gap:6px;min-width:160px}
+.chat-context-field>label,.chat-context-label{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.04em}
+.chat-context-field select{min-width:175px;max-width:255px;padding:8px 10px;font-size:12px}
+.chat-context-skills{flex:1;min-width:240px}
+.chat-skill-list{display:flex;flex-wrap:wrap;gap:7px;align-items:center;min-height:35px}
+.chat-skill-chip{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);cursor:pointer;white-space:nowrap;font-size:12px;transition:border-color .12s ease,background .12s ease}
+.chat-skill-chip.active{border-color:var(--purple);background:var(--card)}
+.chat-skill-chip input{accent-color:var(--purple);margin:0;cursor:pointer}
+.chat-skill-chip small{color:var(--muted);font-size:10px}
+.chat-context-note{color:var(--muted);font-size:10px;line-height:1.5;flex-basis:100%}
+.chat-context-empty{color:var(--muted);font-size:12px}
+@media(max-width:780px){
+ .chat-context-bar{padding:12px;gap:10px}
+ .chat-context-field,.chat-context-skills{min-width:0;width:100%}
+ .chat-context-field select{width:100%;max-width:none}
+ .chat-skill-list{width:100%}
+ .chat-context-note{font-size:10px}
+}
+
+
+/* Ações locais ficam na paleta /, sem faixa extra de botões no chat. */
+.runtime-preview-back{position:fixed;inset:0;background:rgba(3,7,20,.85);z-index:400;
+ display:flex;align-items:center;justify-content:center;padding:18px}
+.runtime-preview-window{display:flex;flex-direction:column;width:min(1320px,98vw);
+ height:min(850px,94vh);background:var(--panel);border:1px solid var(--line);
+ box-shadow:0 30px 90px #000b;border-radius:15px;overflow:hidden}
+.runtime-preview-header{display:flex;gap:12px;align-items:center;padding:12px 16px;
+ flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.runtime-preview-header strong{flex:1;font-size:14px}
+.runtime-preview-header span{color:var(--muted);font-size:11px}
+.runtime-preview-window iframe{flex:1;min-height:0;border:0;background:white;width:100%}
+.runtime-preview-note{font-size:11px;color:var(--muted);padding:9px 16px;margin:0}
+@media(max-width:780px){.runtime-preview-back{padding:5px}
+ .runtime-preview-window{height:96vh;width:100%}.runtime-preview-header span{display:none}}
+
+
+.runtime-detail-window{width:min(760px,95vw);max-height:85vh;overflow:auto;padding:22px;
+ background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 90px #000a}
+.runtime-detail-window h3{font-size:17px;margin:0 0 12px}
+.runtime-detail-window p{font-size:12px;line-height:1.6;color:var(--muted)}
+.runtime-error-log{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;
+ background:var(--bg);color:var(--text);border:1px solid var(--line);
+ border-radius:8px;padding:16px;max-height:50vh;overflow:auto}
+.runtime-detail-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:15px}
+
+
+/* Slash command menu above the composer; available without adding toolbar height. */
+.chat-architect-status{font-size:10px;color:var(--muted);padding:5px 8px;
+ border:1px solid var(--line);border-radius:8px;white-space:nowrap}
+.chat-compose .composer-box{position:relative;overflow:visible}
+.chat-slash-menu{position:absolute;left:-1px;right:-1px;bottom:calc(100% + 9px);
+ z-index:60;max-height:min(330px,48vh);overflow-y:auto;background:var(--panel);
+ border:1px solid var(--line);border-radius:12px;padding:7px;
+ box-shadow:0 16px 45px #0008}
+.chat-slash-menu[hidden]{display:none!important}
+.slash-menu-title{display:flex;align-items:center;justify-content:space-between;gap:10px;
+ padding:8px 11px;font-weight:700;font-size:11px;color:var(--muted)}
+.slash-menu-title span{font-weight:400}
+.slash-option{width:100%;display:flex;align-items:center;gap:12px;
+ background:transparent;color:var(--text);border:0;border-radius:9px;
+ padding:10px 12px;text-align:left;cursor:pointer}
+.slash-option.active,.slash-option:hover,.slash-option:focus-visible{
+ background:var(--card);outline:1px solid var(--purple)}
+.slash-glyph{display:grid;place-items:center;width:28px;height:28px;
+ flex:0 0 28px;border-radius:7px;background:var(--card);color:var(--purple)}
+.slash-info{display:flex;min-width:0;flex-direction:column;gap:3px}
+.slash-info strong{font-size:13px}
+.slash-info small{font-size:11px;color:var(--muted);line-height:1.35;white-space:normal}
+.slash-empty{padding:15px;color:var(--muted);font-size:12px}
+.chat-compose kbd{font:inherit;border:1px solid var(--line);
+ border-radius:4px;padding:0 4px;color:var(--text)}
+@media(max-width:780px){.chat-slash-menu{max-height:42vh}
+ .slash-menu-title span{font-size:10px}
+ .slash-option{padding:9px 10px}}
+
+
+/* In-conversation requests for human authorization and QA-assisted correction. */
+.chat-permission .message-content{min-width:0;width:100%}
+.chat-permission-card{background:var(--panel);border:1px solid var(--purple);
+ border-radius:11px;padding:15px 17px;max-width:630px;box-shadow:0 6px 20px #0002}
+.chat-permission-card>strong{font-size:13px;line-height:1.5;display:block}
+.chat-permission-card p{font-size:12px;line-height:1.6;white-space:pre-wrap;
+ overflow-wrap:anywhere;margin:9px 0;color:var(--text)}
+.chat-permission-card small{font-size:11px;line-height:1.5;color:var(--muted);
+ display:block;overflow-wrap:anywhere}
+.chat-permission-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+.chat-permission-actions .btn{min-height:34px}
+.chat-permission-result{font-size:11px;color:var(--muted);margin-top:8px}
+.chat-permission-result:empty{display:none}
+@media(max-width:600px){.chat-permission-card{padding:12px}
+ .chat-permission-actions{flex-direction:column}.chat-permission-actions .btn{width:100%}}
+
+
+/* Persistent, project-scoped pending review alert in Chat IA */
+.chat-pending-banner{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;
+ padding:11px 18px;border-bottom:1px solid var(--line);
+ background:color-mix(in srgb,var(--panel) 86%,#8f6cf4 14%)}
+.chat-pending-banner[hidden]{display:none}
+.chat-pending-summary{display:flex;flex-wrap:wrap;gap:7px 12px;align-items:center;min-width:0}
+.chat-pending-summary strong{color:#dec7ff;font-size:12px}
+.chat-pending-summary span{font-size:11px;color:var(--muted)}
+.chat-pending-paths{display:flex;gap:5px;flex-wrap:wrap;flex:1;min-width:0}
+.chat-pending-paths code{font:10px/1.5 ui-monospace,Consolas,monospace;color:var(--text);
+ background:var(--card);border:1px solid var(--line);border-radius:5px;padding:2px 5px}
+.chat-pending-paths span{color:var(--muted);font-size:10px;align-self:center}
+.chat-pending-actions{display:flex;gap:6px;margin-left:auto}
+.chat-review-message .message-content{flex:1;min-width:0;width:100%;max-width:100%}
+.chat-review-card{border:1px solid var(--line);border-radius:13px;
+ background:var(--panel);padding:16px;max-width:100%}
+.chat-review-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chat-review-head strong{font-size:13px}
+.chat-review-card>p{color:var(--muted);font-size:11px;line-height:1.6;margin:10px 0}
+.chat-review-choices{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.chat-review-choice{border:1px solid var(--line);background:var(--card);color:var(--text);
+ text-align:left;border-radius:7px;font-size:10px;cursor:pointer;max-width:100%;
+ overflow-wrap:anywhere;padding:8px}
+.chat-review-choice.selected{border-color:var(--purple);background:var(--bg)}
+.chat-review-file{margin:10px 0 16px}
+.chat-review-file-title{display:flex;align-items:center;justify-content:space-between;
+ gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.chat-review-file-title strong{font:11px ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.chat-review-file-title small{font-size:10px;color:var(--muted)}
+.chat-review-diff{max-width:100%;max-height:375px;overflow:auto;white-space:pre;
+ font:11px/1.55 ui-monospace,Consolas,monospace;background:var(--bg);
+ border:1px solid var(--line);border-radius:9px;padding:11px}
+.chat-diff-added{color:#8ed6a8}.chat-diff-removed{color:#f9a3a3}
+.chat-diff-hunk{color:#acb9ff}.chat-diff-meta{color:#90bded}
+.chat-review-warning{padding:8px 10px;background:var(--card);border-left:2px solid #ffbe73;
+ border-radius:4px;color:#ffcd89;font-size:11px;line-height:1.5}
+.chat-review-confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+ font-size:11px;color:var(--muted);margin:13px 0}
+.chat-review-confirm input{max-width:160px;font-size:12px}
+.chat-review-controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px}
+.chat-review-message-status{font-size:11px;color:#ffcd89;margin-top:10px}
+.chat-review-message-status:empty{display:none}
+@media(max-width:850px){.chat-pending-banner{padding:10px;align-items:flex-start}
+ .chat-pending-actions{margin-left:0}.chat-pending-paths{flex-basis:100%}
+ .chat-review-card{padding:10px}.chat-review-controls .btn{flex:1;min-width:140px}}

@@ -1,10 +1,12 @@
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null};
+import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
+import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
 const fmtDate=s=>s?new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
-const icon={dashboard:'◫',chat:'▣',agents:'◈',workflows:'⌁',projects:'▤',workspace:'▧',history:'◷',monitoring:'⌁',providers:'⬡',settings:'⚙'};
-const pages={dashboard:'Dashboard',chat:'Chat IA',agents:'Trabalhadores',workflows:'Fluxos',projects:'Projetos',workspace:'Arquivos',history:'Histórico',monitoring:'Monitoramento',providers:'Provedores',settings:'Configurações'};
+const icon={dashboard:'◫',chat:'▣',agents:'◈',workflows:'⌁',projects:'▤',workspace:'▧',skills:'✦',history:'◷',monitoring:'⌁',providers:'⬡',settings:'⚙'};
+const pages={dashboard:'Dashboard',chat:'Chat IA',agents:'Trabalhadores',workflows:'Fluxos',projects:'Projetos',workspace:'Arquivos',skills:'Skills UX/UI',history:'Histórico',monitoring:'Monitoramento',providers:'Provedores',settings:'Configurações'};
 let toastTimer=0;
 function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;let root=$('.toasts');if(!root){root=document.createElement('div');root.className='toasts';document.body.append(root)}root.append(el);setTimeout(()=>el.remove(),5200)}
 async function api(path,method='GET',data,opts={}){
@@ -39,7 +41,7 @@ function authView(){
 }
 function shell(){
  applyTheme();
- $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
+ $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
  renderPage();
 }
 function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${icon[page]}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
@@ -57,6 +59,7 @@ async function renderPage(){let html='';const ct=$('#content');ct.className=S.pa
  if(S.page==='workflows')html=workflows();
  if(S.page==='projects')html=projects();
  if(S.page==='workspace'){await refreshWorkspace();html=workspaceView()}
+ if(S.page==='skills'){await refreshSkills();html=skillsView()}
  if(S.page==='history')html=history();
  if(S.page==='settings')html=settings();
  if(S.page==='chat')html=chat();
@@ -100,12 +103,29 @@ async function openHealthHistory(pid){
 }
 function providers(){return `${heading('INTEGRAÇÕES','Provedores de inteligência artificial','Gerencie APIs, prioridades e disponibilidade medida das conexões.',`<button class="btn btn-primary" data-action="add-provider">＋ Conectar provedor</button>`)}<div class="hint">Estado "Ativo" significa habilitado. Os indicadores abaixo usam somente requisições reais. Suspensões temporárias não alteram suas credenciais e são retomadas com uma única chamada de recuperação após a espera.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Provedor</th><th>Modelo</th><th>Prioridade</th><th>Saúde</th><th class="right">Ações</th></tr></thead><tbody>${S.providers.map(p=>{const state=healthState(p);const h=p.health||{};return `<tr><td><strong>${esc(p.name)}</strong><small>${esc(p.kind)} · ${p.has_key?'Chave armazenada':'Sem chave'}</small></td><td>${esc(p.model)}</td><td>${p.priority}</td><td><span class="status ${state[1]}">${state[0]}</span><small>${healthNote(p)}${h.state==='suspended'?` · Retorno em ~${h.remaining_seconds}s`:''}</small></td><td><div class="action-group"><button class="btn btn-sm" data-action="test-provider" data-id="${p.id}">Testar</button><button class="btn btn-sm" data-action="health-history" data-id="${p.id}">Histórico</button><button class="btn btn-sm btn-quiet" data-action="edit-provider" data-id="${p.id}">Editar</button><button class="btn btn-sm btn-danger" data-action="delete-provider" data-id="${p.id}">Excluir</button></div></td></tr>`}).join('')||`<tr><td colspan="5"><div class="empty">Nenhum provedor cadastrado.</div></td></tr>`}</tbody></table></div>`}
 
-function agents(){return `${heading('EQUIPE IA','Seus trabalhadores inteligentes','Dez especialidades já estão preparadas. Personalize as instruções e selecione os modelos.',`<button class="btn btn-primary" data-action="add-agent">＋ Criar trabalhador</button>`)}<div class="cards">${S.agents.map(a=>`<article class="agent-card"><div class="card-top"><div class="avatar">${esc(a.avatar)}</div><span class="status ${a.enabled?'completed':'failed'}">${a.enabled?'Disponível':'Desativado'}</span></div><h3>${esc(a.name)}</h3><p>${esc(a.instructions.slice(0,116))}${a.instructions.length>116?'…':''}</p><div class="chips"><span class="chip">${esc(a.specialty)}</span><span class="chip">${esc(S.providers.find(p=>p.id===a.provider_id)?.name||'Modelo automático')}</span></div><div class="agent-actions"><span style="color:var(--muted);font-size:11px">${a.max_concurrency} tarefa(s)/agente*</span><button class="btn btn-sm" data-action="edit-agent" data-id="${a.id}">Configurar →</button></div></article>`).join('')}</div><p class="page-desc" style="margin-top:17px">* Os limites individuais estão salvos nas configurações; nesta versão, o executor aplica um limite global de concorrência.</p>`}
+function agents(){return `${heading('EQUIPE IA','Seus trabalhadores inteligentes','Dez especialidades já estão preparadas. Personalize as instruções e selecione os modelos.',`<button class="btn btn-primary" data-action="add-agent">＋ Criar trabalhador</button>`)}<div class="cards">${S.agents.map(a=>`<article class="agent-card"><div class="card-top"><div class="avatar">${esc(a.avatar)}</div><span class="status ${a.enabled?'completed':'failed'}">${a.enabled?'Disponível':'Desativado'}</span></div><h3>${esc(a.name)}</h3><p>${esc(a.instructions.slice(0,116))}${a.instructions.length>116?'…':''}</p><div class="chips"><span class="chip" title="Especialidade informada">${esc(a.specialty)}</span><span class="chip" title="Papel reconhecido pelo orquestrador">Papel: ${esc(({architecture:'Arquiteto',design:'Designer',frontend:'Frontend',backend:'Backend',code:'Programador',review:'Revisor',testing:'Testador'}[a.resolved_role]||a.resolved_role||'não reconhecido'))}${a.role_source==='name'?' · nome':''}</span><span class="chip">${esc(S.providers.find(p=>p.id===a.provider_id)?.name||'Modelo automático')}</span></div><div class="agent-actions"><span style="color:var(--muted);font-size:11px">${a.max_concurrency} tarefa(s)/agente*</span><button class="btn btn-sm" data-action="edit-agent" data-id="${a.id}">Configurar →</button></div></article>`).join('')}</div><p class="page-desc" style="margin-top:17px">* Os limites individuais estão salvos nas configurações; nesta versão, o executor aplica um limite global de concorrência.</p>`}
 async function refreshWorkspace(){
  if(!S.workspaceProject)S.workspaceProject=S.projects[0]?.id||null;
  if(!S.workspaceProject){S.workspaceInfo=null;return}
  try{S.workspaceInfo=await api(`/projects/${S.workspaceProject}/workspace`)}
  catch(ex){if(ex.message.includes('Prepare primeiro'))S.workspaceInfo={needsSetup:true};else S.workspaceInfo={error:ex.message}}
+}
+
+async function refreshSkills(){
+ if(!S.skillProject)S.skillProject=S.projects[0]?.id||null;
+ if(!S.skillProject){S.skills=[];S.packageAudit=[];return}
+ [S.skills,S.packageAudit]=await Promise.all([
+  api('/skills?project_id='+encodeURIComponent(S.skillProject)),
+  api('/projects/'+encodeURIComponent(S.skillProject)+'/package-installs')]);
+}
+function skillsView(){
+ if(!S.projects.length)return heading('DESIGN','Skills UX/UI','Crie primeiro um projeto.');
+ const options=S.projects.map(p=>'<option value="'+esc(p.id)+'" '+(p.id===S.skillProject?'selected':'')+'>'+esc(p.name)+'</option>').join('');
+ let result=heading('FERRAMENTAS','Skills UX/UI','Padrões de design que orientam os agentes e catálogo seguro de bibliotecas.');
+ result+='<div class="workspace-toolbar"><label for="skills-project">Projeto:</label><select id="skills-project" class="field">'+options+'</select></div>';
+ result+=S.skills.map(skill=>'<section class="panel"><div class="panel-head"><h3>'+esc(skill.name)+'</h3><span class="status '+(skill.enabled?'completed':'failed')+'">'+(skill.enabled?'Ativa':'Desativada')+'</span></div><div class="panel-body"><p>'+esc(skill.description)+'</p><p class="page-desc">'+skill.tools.map(esc).join(' · ')+'</p><button class="btn btn-primary btn-sm" data-action="toggle-skill" data-id="'+esc(skill.id)+'" data-enabled="'+(!skill.enabled)+'">'+(skill.enabled?'Desativar Skill':'Ativar Skill neste projeto')+'</button><p class="page-desc">Inclui guias do shadcn/ui; não executa automaticamente sua CLI ou um servidor MCP.</p>'+skill.docs.map(u=>'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(u)+'</a>').join(' · ')+'</div></section>').join('');
+ result+='<section class="panel"><div class="panel-head"><h3>Instalações registradas</h3></div><div class="panel-body"><p class="page-desc">O Arquiteto precisa de autorização explícita nesta conversa. Somente pacotes do catálogo, sem scripts de instalação npm e sem comandos livres.</p>'+S.packageAudit.map(x=>'<p class="page-desc">'+esc(x.manager)+' '+esc(x.packages)+' — '+esc(x.status)+'</p>').join('')+'</div></section>';
+ return result;
 }
 function workspaceView(){
  const options=S.projects.map(p=>`<option value="${esc(p.id)}" ${S.workspaceProject===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
@@ -157,24 +177,343 @@ function history(){return `${heading('REGISTROS','Histórico de execuções','Co
 function settings(){return `${heading('PREFERÊNCIAS','Configurações','Personalize a aparência e gerencie a sessão.')}
  <div class="grid2"><section class="panel"><div class="panel-head"><h3>Aparência</h3></div><div class="panel-body"><p class="page-desc" style="margin-bottom:15px">Alterne entre os temas da interface.</p><button class="btn" data-action="theme">◐ Mudar para tema ${S.theme==='dark'?'claro':'escuro'}</button></div></section><section class="panel"><div class="panel-head"><h3>Sua conta</h3></div><div class="panel-body"><p>${esc(S.me.email)}</p><p class="page-desc" style="margin-bottom:15px">Os dados ficam na instância em execução. Faça backup da pasta data/, incluindo a chave de criptografia.</p><button class="btn btn-danger" data-action="logout">Sair da conta</button></div></section></div>`}
 function workflows(){return `${heading('AUTOMAÇÃO','Fluxos de trabalho','Monte grafos de agentes e aprovações. Execução serial ou paralela conforme as dependências.',`<button class="btn btn-primary" data-action="add-workflow">＋ Criar fluxo</button>`)}<div class="hint">Motor funcional: blocos de agente e aprovação humana, dependências, paralelismo e checkpoints. Condições avançadas, ferramentas externas e ações irreversíveis ainda não são executadas.</div><section class="panel"><div class="panel-head"><h3>Fluxos disponíveis</h3><small>${S.workflows.length} salvo(s)</small></div>${S.workflows.map(w=>`<div class="workflow-card"><div><strong>⌁ ${esc(w.name)}</strong><p>${esc(w.description||'Sem descrição')} · ${w.definition.nodes.length} blocos · v${w.version}</p></div><div class="action-group"><button class="btn btn-sm" data-action="edit-workflow" data-id="${w.id}">Editar</button><button class="btn btn-sm btn-primary" data-action="use-workflow" data-id="${w.id}">Usar no chat →</button></div></div>`).join('')||'<div class="empty"><div class="empty-icon">⌁</div><strong>Crie seu primeiro fluxo</strong>Conecte trabalhadores e adicione etapas de aprovação.</div>'}</section>`}
-function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><textarea id="chat-input" rows="2" placeholder="Descreva a tarefa que deseja executar..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>As tarefas usam suas próprias chaves de API e podem gerar cobranças dos provedores.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+
+function chatProjectId(){
+ return S.currentConvo
+  ? S.conversations.find(c=>c.id===S.currentConvo)?.project_id||null
+  : S.projectForNext||null;
+}
+function chatContextBar(){
+ const pid=chatProjectId();
+ const options=S.projects.map(p=>
+  '<option value="'+esc(p.id)+'" '+(pid===p.id?'selected':'')+'>'+esc(p.name)+'</option>').join('');
+ return '<div class="chat-context-bar" aria-label="Contexto da conversa">'
+  +'<div class="chat-context-field"><label for="chat-project">▤ Projeto</label>'
+  +'<select class="field" id="chat-project" aria-label="Projeto desta conversa">'
+  +'<option value="">Sem projeto</option>'+options+'</select></div>'
+  +'<div class="chat-context-field chat-context-skills"><span class="chat-context-label">✦ Skills do projeto</span>'
+  +'<div id="chat-skill-list" class="chat-skill-list" aria-live="polite">'
+  +(pid?'Carregando Skills…':'Selecione um projeto para usar Skills.')+'</div></div>'
+  +'<span class="chat-context-note">Skills são compartilhadas por projeto. Trocar de projeto após iniciar o chat abre uma conversa nova e preserva o histórico.</span>'
+  +'</div>';
+}
+function renderChatSkills(){
+ const el=$('#chat-skill-list');if(!el)return;
+ const pid=chatProjectId();
+ if(!pid){el.innerHTML='<span class="chat-context-empty">Nenhum projeto selecionado</span>';return}
+ if(!S.chatSkills.length){el.innerHTML='<span class="chat-context-empty">Nenhuma Skill disponível</span>';return}
+ el.innerHTML=S.chatSkills.map(skill=>
+    '<label class="chat-skill-chip '+(skill.enabled?'active':'')+'" title="'+esc(skill.description)+'">'
+    +'<input type="checkbox" class="chat-skill-toggle" data-skill-id="'+esc(skill.id)+'" '
+    +(skill.enabled?'checked ':'')+(S.currentRun?'disabled ':'')+'/>'
+    +'<span>'+esc(skill.name)+'</span><small>'+(skill.enabled?'Ativa':'Inativa')+'</small></label>'
+ ).join('');
+}
+async function refreshChatContext(){
+ const cid=S.currentConvo,pid=chatProjectId();
+ if(!pid){S.chatSkills=[];S.delegation=null;S.chatRuntime=null;renderChatSkills();updateRuntimeControls();return}
+ const requests=[api('/skills?project_id='+encodeURIComponent(pid))];
+ if(cid)requests.push(api('/conversations/'+encodeURIComponent(cid)+'/architect-delegation'));
+ const result=await Promise.all(requests);
+ if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==cid)return;
+ S.chatSkills=result[0];S.delegation=cid?result[1]:null;
+ renderChatSkills();
+ const btn=$('#architect-permission');if(btn)btn.textContent=S.delegation?.enabled?
+   '✓ Arquiteto autorizado':'Arquiteto: sem delegação';
+}
+async function selectChatProject(projectId){
+ const old=chatProjectId();
+ const select=$('#chat-project');
+ if(projectId===old)return;
+ if(S.currentRun){
+   if(select)select.value=old||'';
+   toast('Conclua ou cancele a execução antes de trocar de projeto.');
+   return;
+ }
+ // Draft text is not part of the existing chat history.
+ const draft=$('#chat-input')?.value||'';
+ try{
+   if(!S.currentConvo){
+     S.projectForNext=projectId;
+   }else{
+     const cid=S.currentConvo;
+     const messages=await api('/conversations/'+encodeURIComponent(cid)+'/messages');
+     const hasRuns=S.runs.some(r=>r.conversation_id===cid);
+     if(messages.length||hasRuns){
+       const allowed=await askChatPermission({
+         title:'Deseja abrir uma nova conversa para trocar de projeto?',
+         details:'Esta conversa já possui histórico. O projeto escolhido abrirá uma nova conversa; '
+          +'as autorizações e as propostas da conversa anterior não serão transferidas.',
+         confirmLabel:'✓ Criar nova conversa',denyLabel:'Negar'
+       });
+       if(!allowed){if(select)select.value=old||'';return}
+       const created=await api('/conversations','POST',
+         {title:'Nova conversa',project_id:projectId});
+       S.conversations.unshift(created);
+       S.currentConvo=created.id;
+     }else{
+       const updated=await api('/conversations/'+encodeURIComponent(cid)+'/project',
+                          'POST',{project_id:projectId});
+       const c=S.conversations.find(c=>c.id===cid);if(c)Object.assign(c,updated);
+     }
+     S.projectForNext=null;
+   }
+   S.delegation=null;S.chatSkills=[];S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];S.streams={};
+   disconnect();
+   await renderPage();
+   const input=$('#chat-input');if(input){input.value=draft;input.focus()}
+   toast(projectId?'Projeto selecionado para a conversa.':'Conversa sem projeto selecionado.');
+ }catch(error){
+   if(select)select.value=old||'';
+   toast(error.message);
+ }
+}
+async function toggleChatSkill(skillId,enabled){
+ if(S.currentRun){toast('Não altere Skills durante uma execução.');renderChatSkills();return}
+ const pid=chatProjectId();if(!pid){toast('Selecione um projeto primeiro.');return}
+ const skill=S.chatSkills.find(s=>s.id===skillId);
+ if(!skill)return;
+ try{
+   const result=await api('/projects/'+encodeURIComponent(pid)+'/skills/'+encodeURIComponent(skillId),
+                     'POST',{enabled});
+   skill.enabled=Boolean(result.enabled);
+   renderChatSkills();
+   toast(skill.name+(skill.enabled?' ativada':' desativada')+' para este projeto.');
+ }catch(error){renderChatSkills();toast(error.message)}
+}
+
+function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div id="chat-pending-banner" class="chat-pending-banner" hidden></div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Descreva a tarefa ou digite / para comandos..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+
+/* Fast project-scoped review inbox inside the chat, independent of old run history. */
+function chatPendingPaths(){
+ return [...new Set(S.chatPendingReviews.flatMap(p=>(p.files||[]).map(f=>f.path)))];
+}
+function renderChatPendingBanner(){
+ const root=$('#chat-pending-banner');if(!root)return;
+ const pid=chatProjectId();
+ if(!pid||pid!==S.pendingReviewProject||!S.chatPendingReviews.length){
+  root.hidden=true;root.innerHTML='';return;
+ }
+ const paths=chatPendingPaths();
+ root.hidden=false;
+ root.innerHTML='<div class="chat-pending-summary"><strong>⚠ Revisão pendente</strong>'
+  +'<span>'+S.chatPendingReviews.length+' proposta(s) · '+paths.length+
+   ' arquivo(s) aguardando aprovação</span></div>'
+  +'<div class="chat-pending-paths">'+paths.slice(0,4).map(p=>'<code>'+esc(p)+'</code>').join('')
+  +(paths.length>4?'<span>+'+(paths.length-4)+' outros</span>':'')+'</div>'
+  +'<div class="chat-pending-actions"><button class="btn btn-primary btn-sm" data-action="chat-review-open">'
+  +'◫ Revisar no chat</button><button class="btn btn-sm" data-action="chat-review-refresh" title="Recarregar propostas">'
+  +'↻</button></div>';
+}
+async function loadChatPendingReviews(){
+ const pid=chatProjectId(),seq=++S.pendingReviewSeq;
+ if(!pid){
+  S.chatPendingReviews=[];S.pendingReviewProject=null;
+  S.chatReviewId=null;S.chatReviewPreview=null;renderChatPendingBanner();return;
+ }
+ try{
+  const result=await api('/projects/'+encodeURIComponent(pid)+'/workspace/pending');
+  if(seq!==S.pendingReviewSeq||S.page!=='chat'||chatProjectId()!==pid)return;
+  S.chatPendingReviews=Array.isArray(result.proposals)?result.proposals:[];
+  S.pendingReviewProject=pid;
+  renderChatPendingBanner();
+ }catch(ex){
+  if(seq!==S.pendingReviewSeq||S.page!=='chat'||chatProjectId()!==pid)return;
+  S.chatPendingReviews=[];S.pendingReviewProject=null;renderChatPendingBanner();
+  // A workspace may not be prepared for a newly selected project.
+  if(!/Prepare primeiro|não está preparada/.test(ex.message))toast('Não foi possível consultar propostas: '+ex.message);
+ }
+}
+function chatProposalDiffHtml(diff){
+ return String(diff||'').split('\n').map(line=>{
+  const type=line.startsWith('+++')||line.startsWith('---')?'meta':
+             line.startsWith('+')?'added':line.startsWith('-')?'removed':
+             line.startsWith('@@')?'hunk':'context';
+  return '<span class="chat-diff-'+type+'">'+esc(line)+'</span>';
+ }).join('\n');
+}
+function removeChatReview(){
+ const old=$('#chat-review-panel');if(old)old.remove();
+ S.chatReviewId=null;S.chatReviewPreview=null;
+}
+function renderChatProposalReview(){
+ const preview=S.chatReviewPreview;
+ if(!preview)return;
+ const root=$('#chat-transcript');if(!root)return;
+ const existing=$('#chat-review-panel');if(existing)existing.remove();
+ const pending=S.chatPendingReviews;
+ const multi=preview.files.length>1;
+ const stale=preview.files.some(f=>f.stale);
+ const truncated=preview.files.some(f=>f.diff_truncated);
+ const blocked=stale||truncated||preview.status!=='pending';
+ const choices=pending.map(p=>{
+  const files=(p.files||[]).map(f=>f.path).join(', ');
+  return '<button type="button" class="chat-review-choice '+(p.id===preview.id?'selected':'')+
+   '" data-action="chat-review-select" data-id="'+esc(p.id)+'" title="'+esc(files)+'">'+
+   esc(files.slice(0,95))+(files.length>95?'…':'')+'</button>';
+ }).join('');
+ const detail=preview.files.map(file=>
+  '<section class="chat-review-file"><div class="chat-review-file-title"><strong>'+esc(file.path)+'</strong>'
+   +'<small>'+(file.action==='delete'?'Excluir':file.replace?'Substituir arquivo':'Criar arquivo')+
+   '</small></div>'+
+   (file.stale?'<p class="chat-review-warning">⚠ Este arquivo foi modificado após a proposta. '
+     +'Recrie a proposta para evitar sobrescrever alterações recentes.</p>':'')+
+   (file.diff_truncated?'<p class="chat-review-warning">⚠ O diff completo excede o limite '
+     +'da visualização. A aprovação no chat está desabilitada.</p>':'')+
+   '<pre class="chat-review-diff" tabindex="0" aria-label="Comparação antes e depois de '+esc(file.path)+'">'+
+     chatProposalDiffHtml(file.diff)+'</pre></section>'
+ ).join('');
+ root.insertAdjacentHTML('beforeend',
+  '<article class="chat-message chat-review-message" id="chat-review-panel"><div class="msg-avatar">▧</div>'+
+  '<div class="message-content"><div class="msg-author">Central IA · Revisão dos arquivos</div>'+
+  '<div class="chat-review-card"><div class="chat-review-head"><strong>Confira as diferenças antes de decidir</strong>'+
+  '<button class="btn btn-sm" data-action="chat-review-close">✕ Fechar</button></div>'+
+  '<p>Proposta de '+esc(preview.agent||'trabalhador IA')+
+   '. <strong>+</strong> indica adição e <strong>−</strong> indica remoção. '+
+   (multi?'Esta proposta contém '+preview.files.length+' arquivos e será decidida por inteiro.':'')+'</p>'+
+  '<div class="chat-review-choices">'+choices+'</div>'+
+  detail+
+  (blocked?
+   '<p class="chat-review-warning">Aprovação indisponível: '+
+    (stale?'arquivo alterado após a proposta. ':'' )+
+    (truncated?'diff incompleto. ':'')+
+    (preview.status!=='pending'?'proposta já decidida.':'')+
+    'Atualize a revisão.</p>':
+   '<label class="chat-review-confirm">Para aplicar os arquivos revisados, digite <strong>APLICAR</strong>'+
+   '<input class="field" id="chat-review-confirmation" type="text" autocomplete="off" spellcheck="false" '+
+   'placeholder="APLICAR" aria-label="Confirmação APLICAR"/></label>')+
+  '<div class="chat-review-controls"><button class="btn btn-primary btn-sm" data-action="chat-review-approve" '+
+   (blocked?'disabled ':'')+'>✓ Aprovar e aplicar</button>'+
+  '<button class="btn btn-sm btn-danger" data-action="chat-review-reject" '+
+   (preview.status!=='pending'?'disabled ':'')+'>✕ Rejeitar proposta</button></div>'+
+  '<div class="chat-review-message-status" role="status" aria-live="polite"></div>'+
+  '</div></div></article>');
+ scrollChat();
+}
+async function openChatProposalReview(id){
+ const pid=chatProjectId(),convo=S.currentConvo;
+ if(!pid){toast('Selecione um projeto.');return}
+ if(S.pendingReviewProject!==pid)await loadChatPendingReviews();
+ const chosen=id||S.chatPendingReviews[0]?.id;
+ if(!chosen){appendEvent('✓ Este projeto não tem propostas aguardando revisão.');return}
+ if(!S.chatPendingReviews.some(p=>p.id===chosen)){toast('Proposta não está mais pendente. Atualize as revisões.');return}
+ const preview=await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+   encodeURIComponent(chosen)+'?full=true');
+ if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==convo)return;
+ if(preview.status!=='pending'){await loadChatPendingReviews();return}
+ S.chatReviewId=chosen;S.chatReviewPreview=preview;
+ renderChatProposalReview();
+}
+async function decideChatProposal(approved){
+ const pid=chatProjectId(),convo=S.currentConvo,preview=S.chatReviewPreview;
+ if(!pid||!preview||S.chatReviewBusy)return;
+ if(S.currentRun){toast('Aguarde a execução atual terminar antes de decidir propostas.');return}
+ if(approved){
+  const typed=$('#chat-review-confirmation')?.value.trim();
+  if(typed!=='APLICAR'){toast('Digite APLICAR exatamente para confirmar a gravação.');return}
+ }
+ S.chatReviewBusy=true;
+ const card=$('#chat-review-panel');
+ if(card)card.querySelectorAll('button').forEach(b=>b.disabled=true);
+ try{
+  // Read current server-side preview again before taking any irreversible action.
+  const latest=await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+    encodeURIComponent(preview.id)+'?full=true');
+  if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==convo)return;
+  if(latest.status!=='pending'||latest.files.some(f=>f.stale||f.diff_truncated)||
+     JSON.stringify(latest.files)!==JSON.stringify(preview.files)){
+   toast('O diff mudou ou está incompleto. Atualize a proposta antes de decidir.');
+   await loadChatPendingReviews();
+   await openChatProposalReview(preview.id);
+   return;
+  }
+  await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+    encodeURIComponent(preview.id)+'/decision','POST',
+    {approved,confirmation:approved?'APLICAR':''});
+  removeChatReview();
+  appendEvent((approved?'✓ Proposta aplicada após revisão: ':'✕ Proposta rejeitada: ')+
+    latest.files.map(f=>f.path).join(', '));
+  await loadChatPendingReviews();
+  if(S.chatPendingReviews.length)await openChatProposalReview();
+  else appendEvent('✓ Não há mais propostas pendentes neste projeto.');
+ }catch(ex){
+  toast('Não foi possível decidir a proposta: '+ex.message);
+  const msg=$('#chat-review-panel .chat-review-message-status');
+  if(msg)msg.textContent='⚠ '+ex.message+' Atualize os diffs antes de tentar novamente.';
+  await loadChatPendingReviews();
+ }finally{
+  S.chatReviewBusy=false;
+  const active=$('#chat-review-panel');if(active)active.querySelectorAll('button').forEach(b=>b.disabled=false);
+ }
+}
+
 async function enterChat(){
  $('#chat-mode').onchange=e=>{S.mode=e.target.value;if(S.mode!=='manual'){S.selectedAgent='';$('#chat-agent').value=''}};$('#chat-agent').onchange=e=>{S.selectedAgent=e.target.value;S.mode=e.target.value?'manual':'auto';$('#chat-mode').value=S.mode};
- $('#chat-send').onclick=sendMessage;$('#chat-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}};
+ $('#chat-project').onchange=e=>selectChatProject(e.target.value||null);
+ $('#chat-skill-list').onchange=e=>{const box=e.target.closest('.chat-skill-toggle');if(box)toggleChatSkill(box.dataset.skillId,box.checked)};
+ $('#chat-send').onclick=sendMessage;setupSlashCommands();
  $('#file-upload').onchange=async e=>{const f=e.target.files[0];if(!f)return;const body=new FormData();body.append('file',f);try{const result=await api('/uploads/text','POST',body);S.attached.push(result);$('#attached-label').textContent=result.name+(result.truncated?' (trecho inicial)':'');toast('Anexo carregado: '+result.name)}catch(ex){toast(ex.message)}};
- if(S.currentConvo)await showMessages(S.currentConvo);else showWelcome();
+ try{await refreshChatContext()}catch(ex){S.chatSkills=[];renderChatSkills();toast(ex.message)}
+ await loadChatRuntime();
+ if(S.currentConvo)await showMessages(S.currentConvo);
+ else showWelcome();
+ await loadChatPendingReviews();
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
-async function showMessages(cid){const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
+async function showMessages(cid){cancelChatDecisions();removeChatReview();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
 function messageHTML(role,agent,content,stepId=''){return `<article class="chat-message ${role==='user'?'user':''}" ${stepId?`data-step="${esc(stepId)}"`:''}><div class="msg-avatar">${role==='user'?'☺':'✳'}</div><div class="message-content"><div class="msg-author">${esc(role==='user'?'Você':agent)}</div><div class="msg-body">${markdown(content)}</div></div></article>`}
 function appendMessage(role,agent,content,stepId){let root=$('#chat-transcript');if(!root)return;const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();root.insertAdjacentHTML('beforeend',messageHTML(role,agent,content,stepId));scrollChat()}
 function scrollChat(){const root=$('#chat-transcript');if(root)root.scrollTop=root.scrollHeight}
 async function ensureConvo(){if(S.currentConvo)return S.currentConvo;const c=await api('/conversations','POST',{title:'Nova conversa',project_id:S.projectForNext||null});S.projectForNext=null;S.conversations.unshift(c);S.currentConvo=c.id;const list=$('#convos');if(list)list.insertAdjacentHTML('afterbegin',`<button class="conversation active" data-action="switch-convo" data-id="${c.id}">▧ <span>Nova conversa</span></button>`);return c.id}
 async function sendMessage(){const input=$('#chat-input');let prompt=input?.value.trim();if(!prompt)return;
+ const local=parseSlashCommand(prompt);
+ if(local.isSlash){
+   if(!local.command){toast(local.reason||'Comando inválido. Digite /ajuda.');return}
+   if(S.attached.length){toast('Remova os anexos antes de usar um comando local.');return}
+   hideSlashMenu();
+   const send=$('#chat-send');if(send)send.disabled=true;
+   try{
+     await executeSlashCommand(local.command);
+     if(input)input.value='';
+   }catch(ex){toast(ex.message||'Falha ao executar o comando.')}
+   finally{if(send)send.disabled=Boolean(S.currentRun);if(input)input.focus()}
+   return;
+ }
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
+ if(chatProjectId()&&isLocalBuildDiagnostic(prompt)){
+   if(S.attached.length){toast('Remova anexos antes de analisar um diagnóstico local.');return}
+   if(input)input.value='';
+   appendMessage('user','Você',prompt.slice(0,4500));
+   appendEvent('⊙ Erro de compilação reconhecido. Lendo arquivos reais da pasta autorizada e executando QA estático.');
+   await runQualityChecks();return;
+ }
  const attachments=S.attached.map(f=>`\n\nArquivo: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('');
- prompt+=attachments;input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
- try{const cid=await ensureConvo();appendMessage('user','Você',prompt);const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});S.selectedWorkflow='';S.currentRun=res.id;S.lastSeq=0;S.streams={};S.runSteps=[];$('#chat-cancel').hidden=false;$('#chat-send').disabled=true;const convo=S.conversations.find(c=>c.id===cid);if(convo&&convo.title==='Nova conversa'){convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title}watchRun(res.id)}catch(ex){toast(ex.message);$('#chat-send').disabled=false}}
+ prompt+=attachments;
+ const send=$('#chat-send');if(send)send.disabled=true;
+ try{
+   const cid=await ensureConvo();
+   const data={conversation_id:cid,prompt,mode:S.mode,agent_ids:S.mode==='manual'&&S.selectedAgent?[S.selectedAgent]:[],workflow_id:S.selectedWorkflow||null};
+   const res=await api('/runs','POST',data,{headers:{'Idempotency-Key':crypto.randomUUID()}});
+   // Only show a user bubble after the server accepted the run.
+   appendMessage('user','Você',prompt);
+   if(input)input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
+   S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;
+   S.selectedWorkflow='';S.currentRun=res.id;S.offeredApprovals.clear();renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];
+   $('#chat-cancel').hidden=false;if(send)send.disabled=true;
+   const convo=S.conversations.find(c=>c.id===cid);
+   if(convo&&convo.title==='Nova conversa'){
+     convo.title=prompt.slice(0,60);$('#chat-title').textContent=convo.title;
+     const b=$(`[data-action="switch-convo"][data-id="${cid}"] span`);if(b)b.textContent=convo.title
+   }
+   watchRun(res.id);
+ }catch(ex){
+   // Preserve typed prompt and attachments for editing/resubmission.
+   toast(ex.message);if(send)send.disabled=false;
+   if(/Fluxo UX\/UI não iniciado|Trabalhadores/.test(ex.message)){
+     appendEvent('⚠ '+ex.message+' Abra a aba Trabalhadores para corrigir o agente mencionado.');
+   }
+ }
+}
 function disconnect(){S.source?.close();S.source=null}
 async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`);S.runSteps=run.steps||[];showSteps()}catch{};
  const src=new EventSource(`/api/runs/${rid}/events?after=${S.lastSeq}`);S.source=src;
@@ -194,34 +533,185 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
    if(el){el.querySelector('.msg-body').innerHTML=markdown(S.streams[d.step_id].text);scrollChat()}
   }
   if(msg.event==='step_reset'){if(S.streams[d.step_id]){S.streams[d.step_id].text='';const el=$(`[data-step="${CSS.escape(d.step_id)}"] .msg-body`);if(el)el.innerHTML='<span style="color:var(--muted)">↻ Retentativa do modelo...</span>'}}
-  if(msg.event==='run_created'){S.runSteps=d.plan.map(p=>({id:p.id,name:p.name,status:'queued',kind:p.kind}));showSteps()}
+  if(msg.event==='run_created'){S.runSteps=d.plan.map(p=>({id:p.id,name:p.name,status:'queued',kind:p.kind}));showSteps();if(d.ui_implementation)appendEvent('🎨 Fluxo UX/UI Studio Pro ativado: Arquiteto, Designer e três tarefas de Frontend, com revisão final.')}
   if(msg.event==='step_status'){const s=S.runSteps.find(s=>s.id===d.id);if(s)Object.assign(s,d);showSteps()}
   if(msg.event==='model_selected'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.model=d.model;s.provider=d.provider;showSteps()}}
-  if(msg.event==='approval_requested'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.status='awaiting_approval';showSteps()}}
+  if(msg.event==='approval_requested'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.status='awaiting_approval';showSteps()}void offerStepApproval(d.step_id)}
   if(msg.event==='provider_error')appendEvent('⚠ '+d.provider+': '+d.message);
   if(msg.event==='failover')appendEvent('↻ '+d.message);
   if(msg.event==='provider_suspended')appendEvent('⏸ '+d.provider+': temporariamente suspenso ('+d.category+').');
   if(msg.event==='provider_recovered')appendEvent('✓ '+d.provider+': recuperado com sucesso.');
   if(msg.event==='provider_probe')appendEvent('↻ Verificando recuperação de '+d.provider+'...');
   if(msg.event==='run_failed'){appendEvent('Falha: '+d.error);finishRun(false)}
+  if(msg.event==='ui_skill_activated'){
+   appendEvent('✓ Skill UI/UX Studio Pro ativada para este projeto a pedido do usuário.');
+   try{if(chatProjectId()===d.project_id){S.chatSkills=await api('/skills?project_id='+encodeURIComponent(d.project_id));renderChatSkills()}}catch{}
+  }
   if(msg.event==='workspace_prepared'){S.workspaceRunProject=d.project_id;appendEvent('📁 Pasta criada/autorizada: '+d.folder+(d.starter_files?' · '+d.starter_files+' arquivos iniciais gravados.':''))}
   if(msg.event==='workspace_files_created'){appendEvent('✓ Novos arquivos dos trabalhadores gravados automaticamente. Abra Arquivos para conferir.')}
-  if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações em arquivos existentes exigem aprovação. Confira Projetos → Arquivos.')}
+  if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações pendentes: use Revisar no chat para conferir os diffs e decidir.');void loadChatPendingReviews()}
   if(msg.event==='workspace_retry_started'){appendEvent('↻ '+d.agent+': tentando entregar um arquivo completo em formato estruturado...')}
   if(msg.event==='workspace_retry_succeeded'){appendEvent('✓ '+d.agent+': arquivo estruturado validado. Aguardando gravação segura.')}
   if(msg.event==='workspace_retry_failed'){appendEvent('⚠ '+d.agent+': nova tentativa sem arquivo válido ('+d.message+').')}
+  if(msg.event==='qa_failed'){appendEvent('⚠ Testador IA bloqueou aprovação automática:\n'+(d.issues||[]).join('\n'))}
   if(msg.event==='workspace_stage_error'){appendEvent('⚠ Arquivos não aplicados: '+d.message)}
-  if(msg.event==='run_completed'){await loadAll();appendEvent('Tarefa concluída. Confira os arquivos reais em Projetos → Arquivos.');await finishRun(true)}
+  if(msg.event==='workspace_summary_warning'){appendEvent('⚠ Relatório do projeto: '+d.message+' ('+d.code+' / '+d.type+').')}
+  if(msg.event==='architect_approved'){appendEvent('✓ Arquiteto autorizado aprovou '+d.count+' alteração(ões) após revisão.')}
+  if(msg.event==='architect_package_install'){appendEvent((d.ok?'✓':'⚠')+' Pacotes: '+(d.manager||'')+' '+(d.packages||[]).join(', ')+(d.ok?' instalados.':' não instalados.'))}
+  if(msg.event==='architect_delegation_changed'){S.delegation=d;appendEvent(d.enabled?'Autonomia delegada ao Arquiteto nesta conversa.':'Autonomia do Arquiteto revogada.');const b=$('#architect-permission');if(b)b.textContent=d.enabled?'✓ Arquiteto autorizado':'Arquiteto: autorizar'}
+  if(msg.event==='run_completed'){await loadAll();appendEvent('Tarefa concluída. As propostas pendentes estão disponíveis para revisão aqui no chat.');await finishRun(true)}
   if(msg.event==='run_status'&&d.status==='cancelled'){appendEvent('Execução cancelada.');finishRun(false)}
  };
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
 }
+
+
+async function offerStepApproval(stepId){
+ const runId=S.currentRun,convo=S.currentConvo,project=chatProjectId();
+ if(!runId||!stepId||S.offeredApprovals.has(stepId))return;
+ if(S.page!=='chat'||!$('#chat-transcript'))return;
+ const step=S.runSteps.find(s=>s.id===stepId);
+ if(!step||step.status!=='awaiting_approval')return;
+ S.offeredApprovals.add(stepId);
+ try{
+  const approved=await askChatPermission({
+   title:'Deseja aprovar a etapa "'+step.name+'"?',
+   details:'Esta etapa de fluxo requer uma decisão sua antes de prosseguir. '
+    +'Revise as instruções e os resultados no painel de execução.',
+   note:'Confirmar aprova somente esta etapa de fluxo. Não autoriza '
+    +'substituição de arquivos pendentes nem instalação de pacotes por conta própria.',
+   confirmLabel:'✓ Aprovar etapa',denyLabel:'Negar etapa'
+  });
+  if(approved===null || S.currentRun!==runId||S.currentConvo!==convo||chatProjectId()!==project)return;
+  await api('/runs/'+encodeURIComponent(runId)+'/steps/'+encodeURIComponent(stepId)+
+   '/approval','POST',{approved});
+  appendEvent(approved?'✓ Etapa "'+step.name+'" aprovada pelo usuário.':
+   '✕ Etapa "'+step.name+'" rejeitada pelo usuário.');
+ }catch(ex){appendEvent('⚠ Não foi possível registrar a decisão da etapa: '+ex.message)}
+ finally{S.offeredApprovals.delete(stepId)}
+}
+
+/* Every permission request is rendered inside the CURRENT conversation.
+   Decisions are human clicks, not LLM output, and expire on navigation. */
+function cancelChatDecisions(){
+ for(const [id,entry] of S.chatDecisions){
+  const card=Array.from(document.querySelectorAll('[data-chat-consent]'))
+   .find(el=>el.dataset.chatConsent===id);
+  if(card){
+   card.querySelectorAll('.chat-permission-actions button').forEach(btn=>btn.disabled=true);
+   const status=card.querySelector('.chat-permission-result');
+   if(status)status.textContent='Autorização encerrada por mudança de contexto.';
+  }
+  entry.resolve(null);
+ }
+ S.chatDecisions.clear();
+}
+function askChatPermission({title,details='',note='',confirmLabel='Confirmar',denyLabel='Negar'}){
+ const root=$('#chat-transcript');
+ if(S.page!=='chat'||!root)return Promise.resolve(false);
+ // Allow independent human approval cards to coexist for parallel workflow steps.
+ const id=String(++S.nextDecision);
+ const convo=S.currentConvo,pid=chatProjectId();
+ const text=String(details||'').slice(0,2400);
+ const card='<article class="chat-message chat-permission" data-chat-consent="'+id+'">'
+  +'<div class="msg-avatar">✳</div><div class="message-content">'
+  +'<div class="msg-author">Central IA · Autorização necessária</div>'
+  +'<section class="chat-permission-card"><strong>'+esc(title)+'</strong>'
+  +(text?'<p>'+esc(text)+'</p>':'')
+  +(note?'<small>'+esc(note)+'</small>':'')
+  +'<div class="chat-permission-actions">'
+  +'<button type="button" class="btn btn-sm btn-primary" data-action="chat-consent-yes" data-id="'+id+'">'+esc(confirmLabel)+'</button>'
+  +'<button type="button" class="btn btn-sm" data-action="chat-consent-no" data-id="'+id+'">'+esc(denyLabel)+'</button>'
+  +'</div><div class="chat-permission-result" role="status" aria-live="polite"></div></section>'
+  +'</div></article>';
+ const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();
+ root.insertAdjacentHTML('beforeend',card);scrollChat();
+ return new Promise(resolve=>S.chatDecisions.set(id,{resolve,convo,pid}));
+}
+function decideChatPermission(id,allowed){
+ const entry=S.chatDecisions.get(String(id));
+ if(!entry)return;
+ S.chatDecisions.delete(String(id));
+ const current=S.page==='chat'&&entry.convo===S.currentConvo&&entry.pid===chatProjectId();
+ const granted=Boolean(allowed&&current);
+ const card=Array.from(document.querySelectorAll('[data-chat-consent]'))
+  .find(el=>el.dataset.chatConsent===String(id));
+ if(card){
+  card.querySelectorAll('.chat-permission-actions button').forEach(btn=>btn.disabled=true);
+  const status=card.querySelector('.chat-permission-result');
+  if(status)status.textContent=granted?'✓ Autorizado. Executando ação...':
+    '✕ Negado. Nenhuma ação autorizada foi executada.';
+ }
+ entry.resolve(current?granted:null);
+}
+async function submitRepairRun(issueSnapshot,workerSnapshot,sourceConversation,sourceProject){
+ if(S.currentRun){toast('Conclua a execução atual antes de solicitar uma correção.');return}
+ if(S.page!=='chat'||S.currentConvo!==sourceConversation||chatProjectId()!==sourceProject){
+  toast('O contexto da conversa mudou. Execute /testar novamente.');return;
+ }
+ // Recheck actual on-disk QA diagnostics after human decision. Never reuse a
+ // stale report from a different project or files modified in the meantime.
+ const latest=await api('/conversations/'+encodeURIComponent(sourceConversation)+'/quality');
+ const actual=latest.issues||[];
+ if(JSON.stringify(actual)!==JSON.stringify(issueSnapshot)){
+  appendEvent('⚠ Os arquivos ou diagnósticos de QA mudaram. Execute /testar novamente para confirmar a correção.');
+  return;
+ }
+ const currentWorkers=chooseRepairWorkers(actual,S.agents);
+ const workerIds=workerSnapshot.map(a=>a.id);
+ if(currentWorkers.length!==workerIds.length||currentWorkers.some((a,i)=>a.id!==workerIds[i])){
+  appendEvent('⚠ A equipe de correção mudou. Execute /testar novamente.');
+  return;
+ }
+ const prompt=repairPrompt(actual,currentWorkers);
+ if(!prompt){appendEvent('Nenhum trabalhador compatível para corrigir os problemas.');return}
+ const mode=currentWorkers.length>1?'team':'manual';
+ const res=await api('/runs','POST',{
+  conversation_id:sourceConversation,prompt,mode,agent_ids:workerIds
+ },{headers:{'Idempotency-Key':crypto.randomUUID()}});
+ // Only after successful acceptance does the user message enter chat.
+ appendMessage('user','Você','Autorizo '+currentWorkers.map(a=>a.name).join(' e ')+
+   ' a preparar propostas de correção para os erros encontrados pelo Testador IA.');
+ S.workspaceRunProject=sourceProject;
+ S.currentRun=res.id;S.lastSeq=0;S.streams={};S.runSteps=[];
+ S.offeredApprovals.clear();
+ renderChatSkills();
+ $('#chat-cancel').hidden=false;
+ $('#chat-send').disabled=true;
+ appendEvent('▶ Correção encaminhada para '+currentWorkers.map(a=>a.name).join(' e ')+
+  '. Alterações de arquivos existentes seguirão o fluxo normal de revisão e aprovação.');
+ watchRun(res.id);
+}
+async function proposeQaRepair(issues){
+ const sourceConversation=S.currentConvo,sourceProject=chatProjectId();
+ if(!sourceConversation||!sourceProject||!issues?.length)return;
+ const workers=chooseRepairWorkers(issues,S.agents);
+ if(!workers.length){
+  appendEvent('Não há um Frontend IA/Backend IA ativo compatível com esses erros. '
+    +'Habilite o trabalhador na aba Trabalhadores e execute /testar novamente.');
+  return;
+ }
+ const label=workers.map(a=>a.name).join(' e ');
+ const accepted=await askChatPermission({
+  title:'Deseja que '+label+' execute a correção?',
+  details:'O Testador IA identificou '+issues.length+' problema(s). O(s) trabalhador(es) '
+   +'preparará(ão) arquivos completos para corrigir os erros relatados.',
+  note:'Confirmar inicia uma tarefa de IA e pode consumir créditos do provedor. '
+   +'Não é autorização para aplicar alterações pendentes nem para executar comandos.',
+  confirmLabel:'✓ Confirmar correção',denyLabel:'Negar'
+ });
+ if(!accepted)return;
+ try{await submitRepairRun(issues,workers,sourceConversation,sourceProject)}
+ catch(ex){appendEvent('⚠ Não foi possível iniciar a correção: '+ex.message);toast(ex.message)}
+}
+
 function appendEvent(message){const root=$('#chat-transcript');if(!root)return;root.insertAdjacentHTML('beforeend',`<div class="chat-event">${esc(message)}</div>`);scrollChat()}
-async function finishRun(ok){disconnect();S.currentRun=null;const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
+async function finishRun(ok){disconnect();S.currentRun=null;renderChatSkills();const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
  // The final consolidated answer is persisted; use it as canonical conversation history.
  if(ok&&S.currentConvo){await showMessages(S.currentConvo)}
+ await loadChatPendingReviews();
 }
-function showSteps(){const root=$('#chat-steps');if(!root)return;root.innerHTML=S.runSteps.map(s=>`<div class="step-line ${esc(s.status)}"><div><strong>${esc(s.name)}</strong><small>${labelStatus(s.status)}${s.model?' · '+esc(s.model):''}</small>${s.status==='awaiting_approval'?`<div class="approval-card"><p>Este bloco requer confirmação explícita.</p><button class="btn btn-primary" data-action="approve" data-id="${esc(s.id)}">Aprovar</button><button class="btn" data-action="reject" data-id="${esc(s.id)}">Rejeitar</button></div>`:''}</div></div>`).join('')||'<div class="right-tip">Aguardando nova tarefa.</div>'}
+function showSteps(){const root=$('#chat-steps');if(!root)return;root.innerHTML=S.runSteps.map(s=>`<div class="step-line ${esc(s.status)}"><div><strong>${esc(s.name)}</strong><small>${labelStatus(s.status)}${s.model?' · '+esc(s.model):''}</small>${s.status==='awaiting_approval'?'<div class="approval-card"><p>Decisão solicitada no Chat IA.</p></div>':''}</div></div>`).join('')||'<div class="right-tip">Aguardando nova tarefa.</div>'}
 function modal(title,description,content,onSubmit,saveLabel='Salvar alterações'){
  const back=document.createElement('div');back.className='modal-back';back.innerHTML=`<div class="modal"><h2>${esc(title)}</h2><p>${esc(description)}</p><form id="modal-form">${content}<div id="modal-error" class="form-error"></div><div class="modal-actions"><button class="btn" type="button" data-close>Cancelar</button><button class="btn btn-primary" type="submit">${esc(saveLabel)}</button></div></form></div>`;
  document.body.append(back);back.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>back.remove());back.onclick=e=>{if(e.target===back)back.remove()};
@@ -239,7 +729,7 @@ function addProvider(id){const p=S.providers.find(x=>x.id===id);const opts=['ope
  },p?'Salvar provedor':'Conectar API');
 }
 function addAgent(id){const a=S.agents.find(x=>x.id===id);const options=`<option value="">Automático — qualquer provedor ativo</option>${S.providers.map(p=>`<option value="${p.id}" ${a?.provider_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}`;
- const body=`<div class="form-grid">${field('name','Nome do trabalhador',a?.name||'','text','required minlength="2"')}${field('avatar','Avatar (caractere)',a?.avatar||'✦')}</div>${field('specialty','Especialidade',a?.specialty||'custom')}
+ const body=`<div class="form-grid">${field('name','Nome do trabalhador',a?.name||'','text','required minlength="2"')}${field('avatar','Avatar (caractere)',a?.avatar||'✦')}</div>${field('specialty','Especialidade (código ou descrição)',a?.specialty||'custom')}<small class="page-desc">Para coordenar agentes, use <code>architecture</code>, <code>frontend</code> ou <code>design</code>. Os nomes padrão também são reconhecidos quando a especialidade é descritiva.</small>
  <div class="form-row"><label class="form-label">Instruções de sistema</label><textarea class="field" name="instructions" required minlength="4" rows="5">${esc(a?.instructions||'Você é um assistente especialista. Entregue resultados concretos e verificáveis.')}</textarea></div>
  <div class="form-grid"><div class="form-row"><label class="form-label">Provedor preferencial</label><select class="field" name="provider_id">${options}</select></div>${field('model','Modelo específico (opcional)',a?.model||'')}</div><label class="checkbox-row"><input type="checkbox" name="enabled" ${a?.enabled===false?'':'checked'}> Ativo</label>`;
  modal(a?'Configurar trabalhador':'Novo trabalhador','A identidade do agente é definida pelas instruções e pela especialidade.',body,async f=>{
@@ -270,21 +760,63 @@ async function handleAction(action,id,el){
  if(action==='delete-provider'){if(!confirm('Excluir este provedor? As credenciais serão apagadas.'))return;await api(`/providers/${id}`,'DELETE');await loadAll();renderPage()}
  if(action==='add-agent')addAgent();if(action==='edit-agent')addAgent(id);
  if(action==='add-project')addProject();
- if(action==='project-chat'){S.projectForNext=id;S.currentConvo=null;goto('chat')}
+ if(action==='project-chat'){S.projectForNext=id;S.currentConvo=null;S.delegation=null;goto('chat')}
  if(action==='project-files'){S.workspaceProject=id;goto('workspace')}
  if(action==='workspace-refresh'){await renderPage()}
+ if(action==='toggle-skill'){
+   await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
+   await renderPage();toast('Skill atualizada neste projeto.');
+ }
+ if(action==='chat-review-open'){await openChatProposalReview();return}
+ if(action==='chat-review-select'){await openChatProposalReview(id);return}
+ if(action==='chat-review-refresh'){await loadChatPendingReviews();return}
+ if(action==='chat-review-close'){removeChatReview();return}
+ if(action==='chat-review-approve'){await decideChatProposal(true);return}
+ if(action==='chat-review-reject'){await decideChatProposal(false);return}
+ if(action==='chat-consent-yes'){decideChatPermission(id,true);return}
+ if(action==='chat-consent-no'){decideChatPermission(id,false);return}
+ if(action==='runtime-quality')await runQualityChecks();
+ if(action==='runtime-details')showRuntimeDetails();
+ if(action==='runtime-authorize')await authorizeRuntime();
+ if(action==='runtime-start')await startRuntime();
+ if(action==='runtime-preview')await previewRuntime();
+ if(action==='runtime-stop')await stopRuntime();
+ if(action==='architect-delegation'){
+   if(!S.currentConvo && chatProjectId())await ensureConvo();
+   if(!S.currentConvo || !chatProjectId()){toast('Selecione primeiro um projeto nesta conversa.');return}
+   const enabled=!(S.delegation?.enabled);
+   if(enabled){
+     const permitted=await askChatPermission({
+       title:'Deseja conceder autonomia ao Arquiteto IA neste projeto?',
+       details:'O Arquiteto poderá revisar e aprovar alterações comuns de código, '
+         +'além de instalar pacotes permitidos pelo catálogo via npm/pip. '
+         +'Isso pode executar software de terceiros no seu computador.',
+       note:'A permissão fica limitada a esta conversa. Exclusões, arquivos sensíveis '
+         +'e comandos livres continuam bloqueados.',
+       confirmLabel:'✓ Autorizar Arquiteto',denyLabel:'Negar'
+     });
+     if(!permitted)return;
+   }
+   S.delegation=await api('/conversations/'+S.currentConvo+'/architect-delegation','POST',{enabled});
+   const b=$('#architect-permission');if(b)b.textContent=enabled?'✓ Arquiteto autorizado':'Arquiteto: sem delegação';
+   toast(enabled?'Autonomia registrada nesta conversa.':'Autonomia revogada.');
+ }
  if(action==='workspace-create'){await api(`/projects/${S.workspaceProject}/workspace`,'POST');await renderPage();toast('Pasta do projeto criada.')}
- if(action==='workspace-chat'){S.projectForNext=S.workspaceProject;S.currentConvo=null;goto('chat');toast('Chat vinculado ao projeto. Peça aos agentes para criar arquivos e depois revise as propostas.')}
+ if(action==='workspace-chat'){S.projectForNext=S.workspaceProject;S.currentConvo=null;S.delegation=null;goto('chat');toast('Chat vinculado ao projeto. Peça aos agentes para criar arquivos e depois revise as propostas.')}
  if(action==='workspace-new-file')await workspaceNewFile();
  if(action==='workspace-open-file')await workspaceOpenFile(el.dataset.path);
  if(action==='workspace-review')await workspaceReview(id);
  if(action==='add-workflow')flowEditor();if(action==='edit-workflow')flowEditor(id);
- if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
- if(action==='new-chat'){disconnect();S.currentRun=null;S.currentConvo=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
- if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.runSteps=[];S.lastSeq=0;goto('chat')}
+ if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;S.projectForNext=null;S.delegation=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
+ if(action==='new-chat'){S.projectForNext=chatProjectId();disconnect();S.currentRun=null;S.currentConvo=null;S.delegation=null;S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
+ if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.projectForNext=null;S.delegation=null;S.chatRuntime=null;S.runSteps=[];S.lastSeq=0;goto('chat')}
  if(action==='open-run'){disconnect();S.currentConvo=el.dataset.convo;S.currentRun=null;goto('chat');const r=await api(`/runs/${id}`);if(['running','queued','awaiting_approval'].includes(r.status)){S.currentRun=id;watchRun(id);$('#chat-send').disabled=true;$('#chat-cancel').hidden=false}}
  if(action==='resume-run'){await api(`/runs/${id}/resume`,'POST');await loadAll();renderPage();toast('Execução retomada a partir dos checkpoints concluídos.')}
- if(action==='approve'||action==='reject'){if(!S.currentRun)return;await api(`/runs/${S.currentRun}/steps/${id}/approval`,'POST',{approved:action==='approve'});toast(action==='approve'?'Etapa aprovada.':'Etapa rejeitada.')}
+ if(action==='approve'||action==='reject'){
+    // Old approval links can still exist in cached pages. Re-route them through
+    // an in-chat question instead of approving from the sidebar directly.
+    await offerStepApproval(id);return;
+ }
 }
 document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[data-action],[data-suggest],.copy-code');if(!node)return;
  if(node.hasAttribute('data-page')){goto(node.dataset.page);return}
@@ -294,4 +826,301 @@ document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[
 });
 (async()=>{applyTheme();try{S.me=await api('/me');await loadAll();shell()}catch{authView()}})();
 
-document.addEventListener('change',e=>{if(e.target.id==='ws-project'){S.workspaceProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}});
+document.addEventListener('change',e=>{if(e.target.id==='ws-project'){S.workspaceProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}
+ if(e.target.id==='skills-project'){S.skillProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}});
+
+
+function updateRuntimeControls(){renderSlashMenu()}
+async function loadChatRuntime(){
+ const cid=S.currentConvo,pid=chatProjectId();
+ if(!cid||!pid){S.chatRuntime=null;updateRuntimeControls();return}
+ try{
+  const status=await api('/conversations/'+encodeURIComponent(cid)+'/runtime');
+  if(S.currentConvo===cid && chatProjectId()===pid)S.chatRuntime=status;
+ }catch{S.chatRuntime=null}
+ updateRuntimeControls();
+}
+async function authorizeRuntime(){
+ if(!chatProjectId()){toast('Selecione um projeto para autorizar.');return}
+ const cid=await ensureConvo();
+ const enabled=!(S.chatRuntime?.authorized);
+ if(enabled){
+  const permitted=await askChatPermission({
+   title:'Deseja autorizar a Central a iniciar os servidores React e FastAPI?',
+   details:'A execução iniciará o código e as dependências do projeto no seu computador, '
+    +'apenas nas portas locais 5173 e 8000. Não inclui instalação de pacotes nem comandos livres.',
+   note:'A autorização vale somente nesta conversa. Use /revogar para cancelar e parar os servidores.',
+   confirmLabel:'✓ Autorizar execução',denyLabel:'Negar'
+  });
+  if(!permitted)return false;
+ }
+ await api('/conversations/'+encodeURIComponent(cid)+'/runtime/access','POST',{enabled});
+ await loadChatRuntime();
+ appendEvent(enabled?'✓ Execução local autorizada nesta conversa.':
+   '✓ Autorização revogada. Processos iniciados pela Central serão interrompidos.');
+ toast(enabled?'Permissão de execução concedida nesta conversa.':'Permissão revogada.');
+ return true;
+}
+async function runQualityChecks(){
+ if(!chatProjectId()){toast('Selecione um projeto.');return}
+ const cid=await ensureConvo();
+ try{
+  const report=await api('/conversations/'+encodeURIComponent(cid)+'/quality');
+  const checked=report.checked_files||0;
+  if(report.issues?.length){
+   appendEvent('⚠ Testador IA encontrou '+report.issues.length+
+     ' problema(s) em '+checked+' arquivo(s):\n'+report.issues.map(x=>'• '+x).join('\n')+
+     '\nAprovação automática e início da prévia ficam bloqueados até a correção.');
+   toast('Testador IA: foram encontrados problemas. Consulte o chat.');
+   const handled=await offerDependencyInstall(report,cid);
+   if(!handled){
+    const codeProblems=report.issues.filter(x=>!x.includes('dependência npm'));
+    if(codeProblems.length)await proposeQaRepair(codeProblems);
+    else appendEvent('Dependências npm pendentes. A Central não as instalará sem autorização.');
+   }
+  }else{
+   appendEvent('✓ Testador IA: '+checked+' arquivo(s) verificados. '
+     +'Nenhum conflito direto de imports/exports React ou erro de sintaxe Python identificado. '
+     +'Isso não é um build ou teste de navegador.');
+   toast('Verificação estática concluída.');
+  }
+ }catch(err){toast('Não foi possível executar o Testador IA: '+err.message)}
+}
+
+const DIRECT_NPM_ALLOWLIST=new Set([
+ 'tailwindcss','@tailwindcss/vite','lucide-react','motion','clsx',
+ 'tailwind-merge','class-variance-authority','@radix-ui/react-slot',
+ '@radix-ui/react-dialog','@radix-ui/react-dropdown-menu','@playwright/test'
+]);
+async function offerDependencyInstall(report,conversationId){
+ const project=chatProjectId();
+ const missing=Array.isArray(report.missing_packages)?report.missing_packages:[];
+ const candidate=missing.find(x=>DIRECT_NPM_ALLOWLIST.has(x));
+ if(!candidate)return false;
+ const permitted=await askChatPermission({
+   title:'Deseja instalar '+candidate+' para corrigir a Loja Virtual?',
+   details:'O Testador IA encontrou um import que depende de '+candidate+
+     ', mas o pacote não está disponível no frontend. '
+     +'A Central instalará somente este pacote permitido dentro do projeto selecionado.',
+   note:'Isso executará npm install com scripts desativados, atualizará package.json, '
+     +'package-lock.json e node_modules. Nenhum arquivo React será sobrescrito por esta ação. '
+     +'Instalar bibliotecas de terceiros envolve riscos e depende da sua confirmação.',
+   confirmLabel:'✓ Instalar '+candidate,denyLabel:'Negar'
+ });
+ if(!permitted)return true; // no automatic install or agent fallback on denial
+ if(S.page!=='chat'||S.currentConvo!==conversationId||chatProjectId()!==project)return true;
+ try{
+   // Recheck the exact finding after the user clicks Confirmar.
+   const fresh=await api('/conversations/'+encodeURIComponent(conversationId)+'/quality');
+   if(!(fresh.missing_packages||[]).includes(candidate)){
+     appendEvent('⚠ A dependência já não consta como ausente. Execute /testar novamente.');
+     return true;
+   }
+   appendEvent('▶ Instalação autorizada: '+candidate+'. Executando npm seguro no projeto local.');
+   const done=await api('/conversations/'+encodeURIComponent(conversationId)+
+     '/dependencies/install','POST',{package:candidate});
+   if(!done.result?.ok){
+     appendEvent('⚠ Falha ao instalar '+candidate+': '+(done.result?.error||
+       done.result?.output||'Falha não especificada.'));
+     return true;
+   }
+   appendEvent('✓ Pacote '+candidate+' instalado pela Central. Executando QA novamente.');
+   if(S.currentConvo===conversationId&&chatProjectId()===project)await runQualityChecks();
+ }catch(ex){appendEvent('⚠ Instalação não concluída: '+ex.message)}
+ return true;
+}
+/** Recognizable build output is evidence to analyze, not an AI instruction. */
+function isLocalBuildDiagnostic(message){
+ return /\[(?:plugin:vite:[^\]]+)\]/i.test(message)||
+  /Failed to resolve import\s+["'][^"']+["']/i.test(message)||
+  /No matching export in\s+["'][^"']+/i.test(message)||
+  /Failed to load PostCSS config/i.test(message);
+}
+
+async function startRuntime(){
+ if(!chatProjectId()){toast('Selecione um projeto primeiro.');return}
+ const cid=await ensureConvo();
+ if(!S.chatRuntime?.authorized){
+  await authorizeRuntime();
+  if(!S.chatRuntime?.authorized)return;
+ }
+ try{
+  S.chatRuntime=await api('/conversations/'+encodeURIComponent(cid)+'/runtime/start','POST');
+  updateRuntimeControls();
+  if(!S.chatRuntime.running){
+    appendEvent('⚠ O processo não ficou ativo: '+(S.chatRuntime.message||'Inicialização incompleta.'));
+    toast('Os servidores não foram iniciados. Verifique o diagnóstico no chat.');
+    return;
+  }
+  appendEvent('✓ React e FastAPI estão respondendo em 127.0.0.1. Clique em Prévia.');
+  toast('Projeto iniciado e respondendo. A prévia está disponível.');
+ }catch(ex){
+  await loadChatRuntime();
+  appendEvent('⚠ Falha ao iniciar o projeto:\n'+ex.message);
+  toast('Falha na inicialização. Veja o erro no histórico do chat.');
+ }
+}
+async function stopRuntime(){
+ if(!S.currentConvo)return;
+ await api('/conversations/'+encodeURIComponent(S.currentConvo)+'/runtime/stop','POST');
+ const modal=$('#runtime-preview-modal');if(modal)modal.remove();
+ await loadChatRuntime();
+ appendEvent('■ Servidores locais interrompidos.');
+}
+function showRuntimeDetails(){
+ const failure=S.chatRuntime?.last_error||'Nenhuma falha registrada nesta conversa.';
+ const old=$('#runtime-detail-modal');if(old)old.remove();
+ const backdrop=document.createElement('div');backdrop.id='runtime-detail-modal';
+ backdrop.className='runtime-preview-back';
+ backdrop.innerHTML='<section class="runtime-detail-window" role="dialog" aria-modal="true" aria-label="Diagnóstico da execução">'
+  +'<h3>⚠ Diagnóstico — servidor local</h3>'
+  +'<p>Este registro mostra a falha recente ao iniciar React/Vite ou FastAPI. '
+  +'Os arquivos do projeto não foram modificados pelo iniciador.</p>'
+  +'<pre class="runtime-error-log">'+esc(failure)+'</pre>'
+  +'<div class="runtime-detail-buttons"><button class="btn" id="runtime-copy-error">Copiar diagnóstico</button>'
+  +'<button class="btn btn-primary" id="runtime-close-details">Fechar</button></div></section>';
+ document.body.append(backdrop);
+ backdrop.querySelector('#runtime-close-details').onclick=()=>backdrop.remove();
+ backdrop.querySelector('#runtime-copy-error').onclick=()=>navigator.clipboard.writeText(failure)
+    .then(()=>toast('Diagnóstico copiado.')).catch(()=>toast('Não foi possível copiar.'));
+ backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove()};
+}
+async function previewRuntime(){
+ await loadChatRuntime();
+ if(!S.chatRuntime?.running || S.chatRuntime?.frontend_url!=='http://127.0.0.1:5173/'){
+  toast('Inicie o projeto pela Central antes de visualizar.');return;
+ }
+ const old=$('#runtime-preview-modal');if(old)old.remove();
+ const overlay=document.createElement('div');overlay.id='runtime-preview-modal';
+ overlay.className='runtime-preview-back';
+ overlay.innerHTML='<div class="runtime-preview-window" role="dialog" aria-modal="true" aria-label="Prévia local">'
+   +'<div class="runtime-preview-header"><strong>◉ Prévia — Loja Virtual</strong>'
+   +'<span>127.0.0.1:5173</span><button class="btn btn-sm" id="runtime-new-tab">↗ Nova aba</button>'
+   +'<button class="btn btn-sm" id="runtime-close">✕ Fechar</button></div>'
+   +'<iframe src="http://127.0.0.1:5173/" title="Prévia React/Vite" '
+   +'sandbox="allow-scripts allow-forms allow-same-origin" referrerpolicy="no-referrer"></iframe>'
+   +'<p class="runtime-preview-note">A prévia mostra os arquivos salvos, não propostas ainda pendentes. '
+   +'O frontend depende do servidor FastAPI local.</p></div>';
+ document.body.append(overlay);
+ overlay.querySelector('#runtime-close').onclick=()=>overlay.remove();
+ overlay.querySelector('#runtime-new-tab').onclick=()=>window.open(
+    'http://127.0.0.1:5173/','_blank','noopener,noreferrer');
+ overlay.onclick=e=>{if(e.target===overlay)overlay.remove()};
+}
+
+
+/* Slash palette: every supported command maps to a fixed host action.
+   Unknown commands are never sent to a worker or interpreted as shell. */
+function hideSlashMenu(){
+ const menu=$('#chat-slash-menu'),input=$('#chat-input');
+ if(menu)menu.hidden=true;
+ if(input){input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant')}
+}
+function renderSlashMenu(){
+ const menu=$('#chat-slash-menu'),input=$('#chat-input');
+ if(!menu||!input)return;
+ const value=input.value.trimStart();
+ if(!/^\/[^\s]*$/.test(value)){hideSlashMenu();return}
+ const found=findSlashCommands(value);
+ if(!found.length){
+   menu.innerHTML='<div class="slash-empty">Comando não encontrado. Digite <strong>/ajuda</strong>.</div>';
+   menu.hidden=false;input.setAttribute('aria-expanded','true');
+   input.removeAttribute('aria-activedescendant');
+   return;
+ }
+ S.slashSelection=Math.max(0,Math.min(S.slashSelection,found.length-1));
+ menu.innerHTML='<div class="slash-menu-title">Comandos da Central IA <span>↑ ↓ · Enter · Esc</span></div>'+
+   found.map((cmd,index)=>'<button type="button" id="slash-option-'+index+
+     '" role="option" aria-selected="'+(index===S.slashSelection?'true':'false')+
+     '" class="slash-option '+(index===S.slashSelection?'active':'')+
+     '" data-slash="'+esc(cmd.name)+'"><span class="slash-glyph">'+esc(cmd.icon)+
+     '</span><span class="slash-info"><strong>/'+esc(cmd.name)+
+     '</strong><small>'+esc(cmd.description)+'</small></span></button>').join('');
+ menu.hidden=false;input.setAttribute('aria-expanded','true');
+ input.setAttribute('aria-activedescendant','slash-option-'+S.slashSelection);
+}
+function setupSlashCommands(){
+ const input=$('#chat-input'),menu=$('#chat-slash-menu');
+ if(!input||!menu)return;
+ input.addEventListener('input',()=>{S.slashSelection=0;renderSlashMenu()});
+ input.addEventListener('focus',renderSlashMenu);
+ input.addEventListener('keydown',event=>{
+   if(event.isComposing)return;
+   const options=findSlashCommands(input.value);
+   const active=menu.hidden===false&&options.length>0;
+   if(event.key==='Escape'&&!menu.hidden){
+     event.preventDefault();hideSlashMenu();return;
+   }
+   if(active&&(event.key==='ArrowDown'||event.key==='ArrowUp')){
+     event.preventDefault();S.slashSelection=(S.slashSelection+
+       (event.key==='ArrowDown'?1:-1)+options.length)%options.length;
+     renderSlashMenu();return;
+   }
+   if(active&&event.key==='Tab'){
+     event.preventDefault();input.value='/'+options[S.slashSelection].name;
+     hideSlashMenu();return;
+   }
+   if(active&&event.key==='Enter'&&!event.shiftKey){
+     event.preventDefault();input.value='/'+options[S.slashSelection].name;
+     hideSlashMenu();sendMessage();return;
+   }
+   if(event.key==='Enter'&&!event.shiftKey){
+     event.preventDefault();sendMessage();
+   }
+ });
+ menu.addEventListener('mousedown',event=>event.preventDefault());
+ menu.addEventListener('click',event=>{
+   const clicked=event.target.closest('[data-slash]');
+   if(!clicked)return;
+   input.value='/'+clicked.dataset.slash;
+   hideSlashMenu();sendMessage();
+ });
+}
+async function executeSlashCommand(command){
+ switch(command){
+  case 'ajuda':
+   appendEvent('Comandos da Central IA (locais, não enviados aos agentes):\n'+
+     SLASH_COMMANDS.map(c=>'/' + c.name + ' — ' + c.description).join('\n'));
+   return;
+  case 'testar':await runQualityChecks();return;
+  case 'revisar':await loadChatPendingReviews();await openChatProposalReview();return;
+  case 'iniciar':await startRuntime();return;
+  case 'previa':await previewRuntime();return;
+  case 'parar':await stopRuntime();return;
+  case 'autorizar':
+   await loadChatRuntime();
+   if(S.chatRuntime?.authorized){
+     appendEvent('✓ A execução local já está autorizada nesta conversa.');
+     return;
+   }
+   await authorizeRuntime();return;
+  case 'revogar':
+   await loadChatRuntime();
+   if(!S.chatRuntime?.authorized){appendEvent('Execução local já está sem autorização.');return}
+   await authorizeRuntime();appendEvent('Autorização de execução revogada.');return;
+  case 'diagnostico':
+   await loadChatRuntime();showRuntimeDetails();return;
+  case 'status':
+   await loadChatRuntime();
+   appendEvent(!chatProjectId()?'Selecione um projeto primeiro.':
+      '◎ Projeto: '+(S.projects.find(p=>p.id===chatProjectId())?.name||'Selecionado')+
+      '\nAutorização de execução: '+(S.chatRuntime?.authorized?'ativa':'não concedida')+
+      '\nServidores: '+(S.chatRuntime?.running?'em execução':'parados')+
+      (S.chatRuntime?.last_error?'\nÚltimo erro: '+S.chatRuntime.last_error:''));
+   return;
+  case 'arquiteto':
+   await handleAction('architect-delegation',null,null);return;
+  case 'projeto':{
+   const select=$('#chat-project');
+   if(select){select.focus();toast('Escolha o projeto no seletor acima do chat.')}
+   return;
+  }
+  case 'skills':{
+   const toggle=$('#chat-skill-list input[type=checkbox]');
+   if(toggle){toggle.focus();toast('Marque ou desmarque a Skill do projeto acima do chat.')}
+   else toast('Selecione um projeto para escolher Skills.');
+   return;
+  }
+  default:throw Error('Comando não reconhecido.');
+ }
+}

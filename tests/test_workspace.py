@@ -13,6 +13,7 @@ from central.workspace import Workspaces
 def setup(c, tmp_path):
     register(c)
     ENGINE.workspaces = Workspaces(ENGINE.db,root=tmp_path/'root')
+    ENGINE.skills.workspaces = ENGINE.workspaces
     r=c.post('/api/projects',json={'name':'Loja Virtual','description':'Testes'},headers=HEADERS)
     assert r.status_code==200,r.text
     return r.json()['id']
@@ -397,3 +398,229 @@ def test_architect_asks_for_app_file_then_repairs_from_workspace_context(tmp_pat
         assert file.read_text().endswith('old App content</main>}')
         assert decide(c,project,pending[0]['id']).status_code==200
         assert 'Cartão integrado' in file.read_text()
+
+
+
+def test_run_report_preserves_applied_files_when_full_explorer_info_is_unavailable(tmp_path,monkeypatch):
+    """A UIUX run cannot turn successful file creation into a generic Windows-folder failure."""
+    class CreatedFile:
+        async def stream(self, provider, key, model, system, messages):
+            yield '{"files":[{"path":"frontend/src/components/QualityMark.tsx",'
+            yield '"content":"export default function QualityMark(){return <span>Qualidade</span>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        ENGINE.client=CreatedFile()
+        conversation=c.post('/api/conversations',json={'project_id':project},
+                            headers=HEADERS).json()['id']
+        def explode(*args,**kwargs):
+            raise RuntimeError('old proposals cannot be decoded')
+        monkeypatch.setattr(ENGINE.workspaces,'info',explode)
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        response=c.post('/api/runs',json={'conversation_id':conversation,
+            'mode':'manual','agent_ids':[agent['id']],
+            'prompt':'Adicione um novo componente React ao frontend.'},headers=HEADERS)
+        assert response.status_code==200,response.text
+        run=wait_for(c,response.json()['id'])
+        assert run['status']=='completed',run.get('error')
+        output=run['output']
+        assert 'Resultado no Windows' in output
+        assert 'QualityMark.tsx' in output
+        assert 'Novos arquivos criados automaticamente' in output
+        assert 'Não foi possível consultar a pasta local' not in output
+        assert (folder/'frontend/src/components/QualityMark.tsx').exists()
+
+
+def test_run_report_keeps_proposals_when_file_count_scan_fails(tmp_path,monkeypatch):
+    """An unreadable or changing directory must not hide pending diffs from the user."""
+    class ChangedFile:
+        async def stream(self,provider,key,model,system,messages):
+            yield '{"files":[{"path":"frontend/src/App.tsx","content":"export default function App(){return <main>Modernizada</main>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        current=folder/'frontend/src/App.tsx';current.parent.mkdir(parents=True,exist_ok=True)
+        original='export default function App(){return <div>Original</div>}'
+        current.write_text(original)
+        ENGINE.client=ChangedFile()
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        calls=[0]
+        real_tree=ENGINE.workspaces.tree
+        def flaky_tree(*args,**kwargs):
+            calls[0]+=1
+            if calls[0]>=2:
+                raise PermissionError('Windows file temporarily inaccessible')
+            return real_tree(*args,**kwargs)
+        monkeypatch.setattr(ENGINE.workspaces,'tree',flaky_tree)
+        agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
+        response=c.post('/api/runs',json={'conversation_id':convo,'mode':'manual',
+            'agent_ids':[agent['id']],'prompt':'Atualize frontend/src/App.tsx mantendo as funcionalidades.'},
+            headers=HEADERS)
+        assert response.status_code==200,response.text
+        result=wait_for(c,response.json()['id'])
+        assert result['status']=='completed',result.get('error')
+        assert current.read_text()==original
+        assert 'contagem indisponível' in result['output']
+        assert 'Aguardando revisão e aprovação' in result['output']
+        assert 'frontend/src/App.tsx' in result['output']
+        assert 'Não foi possível consultar a pasta local' not in result['output']
+        events=ENGINE.db.all('SELECT event,payload FROM events WHERE run_id=?',
+                             (response.json()['id'],))
+        assert any(e['event']=='workspace_summary_warning' for e in events)
+        # Pending proposal survives the file-count failure and stays reviewable.
+        rows=ENGINE.db.all('SELECT * FROM workspace_proposals WHERE run_id=?',
+                           (response.json()['id'],))
+        assert len(rows)==1 and rows[0]['status']=='pending'
+
+
+
+def test_review_worker_runs_after_frontend_backend_and_never_stages_invalid_json(tmp_path):
+    """Reviewer is read-only even when model emits a broken file manifest."""
+    class ThreeWorkers:
+        def __init__(self):
+            self.checked_review=False
+
+        async def stream(self,provider,key,model,system,messages):
+            if system.startswith('Implemente frontend'):
+                yield '{"files":[{"path":"frontend/src/App.tsx",'
+                yield '"content":"export default function App(){return <main>Loja nova</main>}"}]}'
+            elif system.startswith('Projete e implemente APIs'):
+                yield '{"files":[{"path":"backend/routers/products.py",'
+                yield '"content":"def list_products(): return []\\n"}]}'
+            elif system.startswith('Analise verificações automáticas'):
+                yield 'Testador IA: diagnóstico de imports analisado, sem execução de build.'
+            elif system.startswith('Analise resultados criticamente'):
+                self.checked_review=True
+                assert 'SOMENTE DE LEITURA' in system
+                assert 'Finalize a resposta com UM bloco EXATO' not in system
+                assert 'central-files' not in system
+                assert 'central-packages' not in system
+                assert 'Frontend IA:' in messages[0]['content']
+                assert 'Backend IA:' in messages[0]['content']
+                # Malformed JSON must not be interpreted as a file to create.
+                yield '{"files":[{"path":"backend/unsafe-from-review.py","content":"incompleto'
+            else:
+                raise AssertionError('Trabalhador inesperado')
+
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        appfile=folder/'frontend/src/App.tsx'
+        appfile.parent.mkdir(parents=True,exist_ok=True)
+        appfile.write_text('export default function App(){return <p>Original</p>}')
+        convo=c.post('/api/conversations',json={'project_id':project},
+                     headers=HEADERS).json()['id']
+        agents=c.get('/api/agents').json()
+        selected=[next(a for a in agents if a['specialty']==role)['id']
+                  for role in ('frontend','backend','review')]
+        model=ThreeWorkers();ENGINE.client=model
+        run=c.post('/api/runs',json={'conversation_id':convo,'mode':'team',
+            'agent_ids':selected,'prompt':'Crie uma estrutura inicial de loja React com backend FastAPI '
+              'e divida entre Frontend, Backend e Revisor.'},headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed',result.get('error')
+        reviewer=next(s for s in result['steps'] if s['name']=='Revisor IA')
+        producers=[s for s in result['steps'] if s['name'] in ('Frontend IA','Backend IA')]
+        assert model.checked_review
+        assert len(producers)==2
+        tester=next(s for s in result['steps'] if s['name']=='Testador · QA de integração')
+        assert set(__import__('json').loads(tester['deps']))=={s['id'] for s in producers}
+        assert set(__import__('json').loads(reviewer['deps']))==({s['id'] for s in producers}|{tester['id']})
+        assert all(s['status']=='completed' for s in producers)
+        assert appfile.read_text()=='export default function App(){return <p>Original</p>}'
+        assert not (folder/'backend/unsafe-from-review.py').exists()
+        pending=[p for p in c.get(f'/api/projects/{project}/workspace').json()['proposals']
+                 if p['status']=='pending']
+        assert {part['path'] for p in pending for part in p['files']} == {
+            'frontend/src/App.tsx','backend/routers/products.py'}
+        assert 'O JSON dos arquivos veio incompleto/inválido' not in result['output']
+        assert 'Revisor IA:' in result['output']
+        assert 'Essa saída foi ignorada' in result['output']
+        assert 'Aguardando revisão e aprovação' in result['output']
+
+
+def test_reviewer_cannot_stage_well_formed_manifest_in_project(tmp_path):
+    """A reviewer is not authorized to write files even if it produces valid JSON."""
+    class Reviewer:
+        async def stream(self,provider,key,model,system,messages):
+            yield '{"files":[{"path":"frontend/src/Injected.tsx",'
+            yield '"content":"export default function Injected(){return <h1>No</h1>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        convo=c.post('/api/conversations',json={'project_id':project},
+                     headers=HEADERS).json()['id']
+        reviewer=next(a for a in c.get('/api/agents').json() if a['specialty']=='review')
+        ENGINE.client=Reviewer()
+        run=c.post('/api/runs',json={'conversation_id':convo,'mode':'manual',
+                     'agent_ids':[reviewer['id']],
+                     'prompt':'Revise a arquitetura de frontend e backend sem executar comandos.'},
+                     headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed'
+        assert not (folder/'frontend/src/Injected.tsx').exists()
+        assert c.get(f'/api/projects/{project}/workspace').json()['proposals']==[]
+
+
+
+def test_chat_pending_reviews_project_scoped_and_decision_refresh(tmp_path):
+    """Chat should see only true pending proposals, not old approved/rejected ones."""
+    with TestClient(app) as owner, TestClient(app) as other:
+        project=setup(owner,tmp_path); folder=prepare(owner,project)
+        register(other)
+        first=stage(owner,project,'frontend/src/components/LoadingSpinner.tsx',
+                    'export const LoadingSpinner = () => <span/>')
+        second=stage(owner,project,'frontend/src/main.tsx','import "./index.css";')
+        third=stage(owner,project,'frontend/src/index.css','body {margin: 0}')
+        ids=[x.json()['id'] for x in (first,second,third)]
+        assert all(x.status_code==200 for x in (first,second,third))
+        link=f'/api/projects/{project}/workspace/pending'
+        assert other.get(link).status_code==404
+        result=owner.get(link)
+        assert result.status_code==200,result.text
+        assert result.json()['project_id']==project
+        assert {p['id'] for p in result.json()['proposals']}==set(ids)
+        assert {p['files'][0]['path'] for p in result.json()['proposals']}=={
+            'frontend/src/components/LoadingSpinner.tsx',
+            'frontend/src/main.tsx','frontend/src/index.css'}
+        assert all(p['status']=='pending' for p in result.json()['proposals'])
+        assert not (folder/'frontend/src/main.tsx').exists()
+        # The same API used by the in-chat button requires APLICAR.
+        denied=owner.post(f'/api/projects/{project}/workspace/proposals/{ids[0]}/decision',
+                     json={'approved':True,'confirmation':''},headers=HEADERS)
+        assert denied.status_code==422
+        assert {p['id'] for p in owner.get(link).json()['proposals']}==set(ids)
+        accepted=decide(owner,project,ids[0])
+        assert accepted.status_code==200 and accepted.json()['status']=='applied'
+        rejected=decide(owner,project,ids[1],approved=False)
+        assert rejected.status_code==200 and rejected.json()['status']=='rejected'
+        remaining=owner.get(link).json()['proposals']
+        assert [x['id'] for x in remaining]==[ids[2]]
+        assert not (folder/'frontend/src/index.css').exists()
+        assert other.get(f'/api/projects/{project}/workspace/proposals/{ids[2]}').status_code==404
+
+
+def test_full_diff_in_chat_requires_up_to_date_proposal(tmp_path):
+    """The chat can show a complete diff; stale sources cannot be silently applied."""
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        file=folder/'frontend/src/App.tsx'
+        file.parent.mkdir(parents=True,exist_ok=True)
+        file.write_text('export default function App(){return <div>Original</div>}')
+        replacement=('export default function App(){return <main>Atualizado</main>}\n'
+                     + '// updated line\n'*2000)
+        response=stage(c,project,'frontend/src/App.tsx',replacement)
+        assert response.status_code==200,response.text
+        pid=response.json()['id']
+        base=f'/api/projects/{project}/workspace/proposals/{pid}'
+        default=c.get(base)
+        full=c.get(base,params={'full':'true'})
+        assert default.status_code==200 and full.status_code==200
+        assert default.json()['files'][0]['diff_truncated'] is True
+        assert full.json()['files'][0]['diff_truncated'] is False
+        assert len(full.json()['files'][0]['diff'])>24000
+        assert 'updated line' in full.json()['files'][0]['diff']
+        # Another editor changed the file while it was waiting for review.
+        file.write_text('externally modified')
+        stale=c.get(base,params={'full':'true'}).json()
+        assert stale['files'][0]['stale'] is True
+        assert decide(c,project,pid).status_code==409
+        assert file.read_text()=='externally modified'

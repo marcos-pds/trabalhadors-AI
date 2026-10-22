@@ -14,6 +14,9 @@ from .security import Security, password_hash, verify_password, require_owned
 from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .workspace import WorkspaceError
+from .roles import worker_role, role_source
+from .runtime import RuntimeManager
+from .quality import inspect_project
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -21,14 +24,26 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB = Database(DATA_DIR/'central.sqlite3')
 SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
+RUNTIME = RuntimeManager(DB, ENGINE.workspaces)
 
 
 @asynccontextmanager
 async def lifespan(app):
     ENGINE.shutting_down = False
+    # Backfill the dedicated QA role for existing accounts, without editing or
+    # deleting their customized agents or provider configuration.
+    for owner in DB.all('SELECT id FROM users'):
+        members=DB.all('SELECT name,specialty FROM agents WHERE user_id=?',(owner['id'],))
+        if not any(worker_role(a)=='testing' for a in members):
+            template=next(x for x in TEMPLATES if x[1]=='testing')
+            name,role,instructions,avatar=template
+            DB.execute('''INSERT INTO agents(id,user_id,name,specialty,instructions,avatar,created_at)
+                          VALUES(?,?,?,?,?,?,?)''',
+                       (uid(),owner['id'],name,role,instructions,avatar,utcnow()))
     ENGINE.resume_pending()
     yield
     ENGINE.shutting_down = True
+    RUNTIME.shutdown()
     pending = list(ENGINE.running.values())
     for task in pending:
         task.cancel()
@@ -228,7 +243,9 @@ class AgentIn(BaseModel):
 
 @app.get('/api/agents')
 def list_agents(user=Depends(current_user)):
-    return DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    agents=DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    return [dict(agent,resolved_role=worker_role(agent),role_source=role_source(agent))
+            for agent in agents]
 
 
 @app.post('/api/agents')
@@ -287,6 +304,12 @@ def prepare_workspace(pid:str,user=Depends(current_user)):
     return ENGINE.workspaces.initialize(user['id'],pid)
 
 
+@app.get('/api/projects/{pid}/workspace/pending')
+def pending_workspace_reviews(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return {'project_id':pid,'proposals':ENGINE.workspaces.pending_proposals(user['id'],pid)}
+
+
 @app.get('/api/projects/{pid}/workspace/file')
 def workspace_file(pid:str,path:str,user=Depends(current_user)):
     require_owned(DB,'projects',pid,user['id'])
@@ -304,9 +327,9 @@ def propose_workspace_files(pid:str,data:ChangesIn,user=Depends(current_user)):
 
 
 @app.get('/api/projects/{pid}/workspace/proposals/{proposal_id}')
-def preview_proposal(pid:str,proposal_id:str,user=Depends(current_user)):
+def preview_proposal(pid:str,proposal_id:str,full:bool=False,user=Depends(current_user)):
     require_owned(DB,'projects',pid,user['id'])
-    return ENGINE.workspaces.proposal(user['id'],pid,proposal_id)
+    return ENGINE.workspaces.proposal(user['id'],pid,proposal_id,full_diff=full)
 
 
 class ProposalDecision(BaseModel):
@@ -320,6 +343,48 @@ def decide_proposal(pid:str,proposal_id:str,data:ProposalDecision,user=Depends(c
     if data.approved and data.confirmation!='APLICAR':
         raise HTTPException(422,'Confirme explicitamente a operação com APLICAR.')
     return ENGINE.workspaces.decide(user['id'],pid,proposal_id,data.approved)
+
+
+
+@app.get('/api/skills')
+def skills_catalog(project_id:str|None=None,user=Depends(current_user)):
+    if project_id: require_owned(DB,'projects',project_id,user['id'])
+    return ENGINE.skills.catalog(user['id'],project_id)
+
+
+class SkillToggle(BaseModel):
+    enabled: bool
+
+
+@app.post('/api/projects/{pid}/skills/{skill_id}')
+def set_project_skill(pid:str,skill_id:str,data:SkillToggle,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.skills.enable(user['id'],pid,skill_id,data.enabled)
+
+
+@app.get('/api/projects/{pid}/package-installs')
+def project_package_installs(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return ENGINE.skills.installs(user['id'],pid)
+
+
+@app.get('/api/conversations/{cid}/architect-delegation')
+def architect_delegation(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    return ENGINE.skills.delegation(user['id'],cid)
+
+
+class ArchitectDelegationIn(BaseModel):
+    enabled: bool
+
+
+@app.post('/api/conversations/{cid}/architect-delegation')
+def change_architect_delegation(cid:str,data:ArchitectDelegationIn,
+                                request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return ENGINE.skills.set_delegation(user['id'],cid,data.enabled)
 
 
 class ConversationIn(BaseModel):
@@ -337,6 +402,110 @@ def new_conversation(data:ConversationIn,user=Depends(current_user)):
     if data.project_id: require_owned(DB,'projects',data.project_id,user['id'])
     cid,now=uid(),utcnow()
     DB.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',(cid,user['id'],data.title,data.project_id,now,now))
+    return require_owned(DB,'conversations',cid,user['id'])
+
+
+
+@app.get('/api/conversations/{cid}/quality')
+def inspect_chat_project(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    project=RUNTIME.access(user['id'],cid)['project_id']
+    return inspect_project(ENGINE.workspaces,user['id'],project)
+
+
+class ExplicitDependencyInstallIn(BaseModel):
+    package: str = Field(min_length=1,max_length=80)
+
+
+@app.post('/api/conversations/{cid}/dependencies/install')
+async def install_missing_dependency(cid:str,data:ExplicitDependencyInstallIn,
+                                     request:Request,user=Depends(current_user)):
+    """A fresh deterministic QA finding and user click are both required."""
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    project=RUNTIME.access(user['id'],cid)['project_id']
+    from .skills import NPM
+    if data.package not in NPM:
+        raise HTTPException(403,'Biblioteca não permitida para instalação pelo chat.')
+    report=inspect_project(ENGINE.workspaces,user['id'],project)
+    if data.package not in report.get('missing_packages',[]):
+        raise HTTPException(409,'Dependência não consta mais como ausente. Execute /testar novamente.')
+    result=await ENGINE.skills.install_explicit(user['id'],cid,project,data.package)
+    return {'result':result,'quality':inspect_project(ENGINE.workspaces,user['id'],project)}
+
+
+class RuntimeAccessIn(BaseModel):
+    enabled: bool
+
+
+@app.get('/api/conversations/{cid}/runtime')
+def local_runtime_status(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.status(user['id'],cid)
+
+
+@app.post('/api/conversations/{cid}/runtime/access')
+def local_runtime_access(cid:str,data:RuntimeAccessIn,
+                         request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.authorize(user['id'],cid,data.enabled)
+
+
+@app.post('/api/conversations/{cid}/runtime/start')
+def local_runtime_start(cid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.start(user['id'],cid)
+
+
+@app.post('/api/conversations/{cid}/runtime/stop')
+def local_runtime_stop(cid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.stop(user['id'],cid)
+
+
+class ConversationProjectIn(BaseModel):
+    project_id: str | None = None
+
+
+@app.post('/api/conversations/{cid}/project')
+def change_conversation_project(cid:str,data:ConversationProjectIn,
+                                request:Request,user=Depends(current_user)):
+    """Bind a draft chat to a project. Existing history remains immutable.
+
+    Once a message or run exists, switch project by opening a NEW conversation.
+    This prevents old runs, file proposals or architect authority from crossing
+    project boundaries.
+    """
+    require_csrf(request)
+    if data.project_id:
+        require_owned(DB,'projects',data.project_id,user['id'])
+    with DB.lock:
+        convo=require_owned(DB,'conversations',cid,user['id'])
+        if data.project_id==convo['project_id']:
+            return convo
+        used=DB.one('''SELECT 1 AS used FROM messages
+                       WHERE conversation_id=? AND user_id=? LIMIT 1''',
+                    (cid,user['id']))
+        runs=DB.one('''SELECT 1 AS used FROM runs
+                       WHERE conversation_id=? AND user_id=? LIMIT 1''',
+                    (cid,user['id']))
+        if used or runs:
+            raise HTTPException(409,'Esta conversa já possui histórico. Crie uma nova conversa para trocar de projeto.')
+        DB.execute('DELETE FROM architect_delegations WHERE conversation_id=? AND user_id=?',
+                   (cid,user['id']))
+        # Stop any server launched under the old project before changing
+        # this draft conversation's project association.
+        try:
+            RUNTIME.stop(user['id'],cid)
+        except WorkspaceError:
+            pass
+        DB.execute('DELETE FROM runtime_permissions WHERE conversation_id=? AND user_id=?',
+                   (cid,user['id']))
+        DB.execute('UPDATE conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=?',
+                   (data.project_id,utcnow(),cid,user['id']))
     return require_owned(DB,'conversations',cid,user['id'])
 
 
@@ -370,16 +539,35 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     if idempotency:
         existing=DB.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?',(user['id'],idempotency))
         if existing: return {'id':existing['id']}
-    now=utcnow()
-    DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
-    DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
-       (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
+    # Do not record the user's prompt until the run was accepted. Otherwise
+    # each 422 (e.g. disabled UI workers) adds another duplicate user bubble.
     try:
         workspace_prepared = ENGINE.workspaces.prepare_chat(user['id'],data.conversation_id,data.prompt)
+        delegated = ENGINE.skills.instruction(user['id'],data.conversation_id,data.prompt)
+        # An explicit request to USE the named local Skill activates its instructions
+        # for this project. This never grants Architect permissions or runs packages.
+        skill_activated = None
+        linked = DB.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                        (data.conversation_id,user['id']))
+        if (flow is None and linked and linked['project_id'] and
+            ENGINE.skills.explicitly_requested(data.prompt)):
+            skill_activated = ENGINE.skills.enable(user['id'],linked['project_id'],
+                                                   'ux-ui-studio-pro',True)
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency)
+        now=utcnow()
+        DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                   (uid(),convo['id'],user['id'],'user',None,data.prompt,now))
+        DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=? AND user_id=?',
+           (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],
+            convo['id'],user['id']))
         if workspace_prepared:
             ENGINE.emit(run_id,'workspace_prepared',workspace_prepared)
+        if skill_activated:
+            ENGINE.emit(run_id,'ui_skill_activated',{'project_id':linked['project_id'],
+                                                    'skill_id':skill_activated['id']})
+        if delegated is not None:
+            ENGINE.emit(run_id,'architect_delegation_changed',delegated)
     except ValueError as exc: raise HTTPException(422,str(exc))
     return {'id':run_id}
 
