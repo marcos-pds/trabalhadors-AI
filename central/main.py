@@ -304,6 +304,12 @@ def prepare_workspace(pid:str,user=Depends(current_user)):
     return ENGINE.workspaces.initialize(user['id'],pid)
 
 
+@app.get('/api/projects/{pid}/workspace/pending')
+def pending_workspace_reviews(pid:str,user=Depends(current_user)):
+    require_owned(DB,'projects',pid,user['id'])
+    return {'project_id':pid,'proposals':ENGINE.workspaces.pending_proposals(user['id'],pid)}
+
+
 @app.get('/api/projects/{pid}/workspace/file')
 def workspace_file(pid:str,path:str,user=Depends(current_user)):
     require_owned(DB,'projects',pid,user['id'])
