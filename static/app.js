@@ -1,6 +1,6 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
 import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false};
+const S={me:null,page:'chat',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false,menuOpen:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -41,11 +41,41 @@ function authView(){
 }
 function shell(){
  applyTheme();
- $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
+ S.menuOpen=false;
+ $('#app').innerHTML=`<div class="shell">
+ <div class="drawer-backdrop" data-action="close-menu" aria-hidden="true"></div>
+ <aside class="sidebar" id="workspace-menu" role="dialog" aria-modal="true" aria-label="Menu da Central IA" aria-hidden="true">
+  <div class="drawer-header"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><button class="icon-btn" id="menu-close" data-action="close-menu" aria-label="Fechar menu">✕</button></div>
+  <div class="drawer-content">
+   <div class="side-label">CONVERSAS</div>
+   <button class="nav-link drawer-new-chat" data-action="new-chat"><span class="glyph">＋</span><span>Nova conversa</span></button>
+   <div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${esc(c.id)}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p class="drawer-empty">Suas conversas aparecerão aqui.</p>'}</div>
+   <div class="side-label">NAVEGAÇÃO</div>
+   ${nav('chat')}${nav('dashboard')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}
+   <div class="side-label">GESTÃO</div>
+   ${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}
+   ${S.page==='chat'?`<div class="side-label">PROJETO E SKILLS</div>${chatContextBar()}<div id="chat-pending-banner" class="chat-pending-banner" hidden></div>
+   <div class="side-label">CONFIGURAÇÕES DO CHAT</div>
+   <div class="drawer-tools"><label for="chat-mode">Modo de trabalho</label><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><label for="chat-agent">Trabalhador preferido</label><select id="chat-agent" class="field"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${esc(a.id)}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span></div>
+   <div class="side-label">EXECUÇÃO ATUAL</div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução.</div></div>`:''}
+  </div>
+  <div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair" aria-label="Sair">⎋</button></div></div>
+ </aside>
+ <main class="main"><header class="topbar"><div class="topbar-leading"><button id="menu-toggle" class="icon-btn menu-toggle" data-action="toggle-menu" aria-label="Abrir menu" aria-controls="workspace-menu" aria-expanded="false">☰</button><div class="topbar-brand"><span class="topbar-symbol">✳</span><div><strong id="chat-title">${S.page==='chat'?esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa'):esc(pages[S.page])}</strong><small>Central IA</small></div></div></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
  renderPage();
 }
+function setMenuOpen(open){
+ const root=$('.shell'),btn=$('#menu-toggle'),menu=$('#workspace-menu');
+ if(!root||!menu)return;
+ S.menuOpen=Boolean(open);
+ root.classList.toggle('menu-open',S.menuOpen);
+ btn?.setAttribute('aria-expanded',String(S.menuOpen));
+ btn?.setAttribute('aria-label',S.menuOpen?'Fechar menu':'Abrir menu');
+ menu.setAttribute('aria-hidden',String(!S.menuOpen));
+ if(S.menuOpen)$('#menu-close')?.focus();else btn?.focus();
+}
 function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${icon[page]}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
-function goto(page){if(S.page==='chat'&&page!=='chat')disconnect();S.page=page;shell()}
+function goto(page){if(S.page==='chat'&&page!=='chat')disconnect();S.page=page;S.menuOpen=false;shell()}
 async function loadAll(){
  const entries=await Promise.allSettled([api('/agents'),api('/providers'),api('/projects'),api('/conversations'),api('/workflows'),api('/runs')]);
  ['agents','providers','projects','conversations','workflows','runs'].forEach((key,i)=>{if(entries[i].status==='fulfilled')S[key]=entries[i].value});
