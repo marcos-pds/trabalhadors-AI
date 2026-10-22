@@ -62,7 +62,7 @@ function shell(){
   <div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair" aria-label="Sair">⎋</button></div></div>
  </aside>
  <main class="main"><header class="topbar"><div class="topbar-leading"><button id="menu-toggle" class="icon-btn menu-toggle" data-action="toggle-menu" aria-label="Abrir menu" aria-controls="workspace-menu" aria-expanded="false">☰</button><div class="topbar-brand"><span class="topbar-symbol">✳</span><div><strong id="chat-title">${S.page==='chat'?esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa'):esc(pages[S.page])}</strong><small>Central IA</small></div></div></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
- renderPage();
+ return renderPage();
 }
 function setMenuOpen(open){
  const root=$('.shell'),btn=$('#menu-toggle'),menu=$('#workspace-menu');
@@ -290,7 +290,7 @@ async function selectChatProject(projectId){
    }
    S.delegation=null;S.chatSkills=[];S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];S.streams={};
    disconnect();
-   await renderPage();
+   await shell();
    const input=$('#chat-input');if(input){input.value=draft;input.focus()}
    toast(projectId?'Projeto selecionado para a conversa.':'Conversa sem projeto selecionado.');
  }catch(error){
