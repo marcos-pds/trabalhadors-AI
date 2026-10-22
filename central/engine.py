@@ -53,7 +53,19 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
 
 def create_plan(agents):
     if not agents: return []
-    jobs = [{'id': uid(), 'agent_id': a['id'], 'name': a['name'], 'kind': 'agent', 'deps': [], 'instructions': ''} for a in agents]
+    jobs = [{'id': uid(), 'agent_id': a['id'], 'name': a['name'],
+             'kind': 'agent', 'deps': [], 'instructions': ''} for a in agents]
+    # A Reviewer cannot assess work that has not yet been delivered. Frontend
+    # and Backend may work in parallel; reviewers begin only after their steps.
+    producers = [job['id'] for job,agent in zip(jobs,agents) if worker_role(agent)!='review']
+    for job,agent in zip(jobs,agents):
+        if worker_role(agent)=='review':
+            job['deps'] = producers[:]
+            job['instructions'] = (
+                'REVIEW_ONLY. Analise os resultados das etapas anteriores. '
+                'Não entregue código, manifestos central-files, comandos nem solicite instalação. '
+                'Relate falhas de integração, arquivos e APIs conflitantes, riscos e verificações '
+                'pendentes. Seu parecer não substitui aprovação humana.')
     return jobs
 
 
@@ -357,6 +369,23 @@ class Engine:
                                        'Alterações pendentes permanecem disponíveis para revisão.')
                     if any('UI_STAGE_IMPLEMENT' in (p.get('instructions') or '') for p in json.loads(run['plan'])) and not changes['installed']:
                         summary.append('**Dependências:** nenhuma instalação registrada nesta execução.')
+                    reviewer_steps=[s for s in steps if s['kind']=='agent' and s['status']=='completed'
+                        and self.db.one('SELECT specialty FROM agents WHERE id=? AND user_id=?',
+                                         (s['agent_id'],run['user_id'])) is not None]
+                    reviewer_names=[]
+                    for reviewed in reviewer_steps:
+                        agent_row=self.db.one('SELECT name,specialty FROM agents WHERE id=? AND user_id=?',
+                                             (reviewed['agent_id'],run['user_id']))
+                        if agent_row and worker_role(agent_row)=='review':
+                            reviewer_names.append(reviewed['name'])
+                    if reviewer_names:
+                        summary.append('**Revisão IA:** parecer consultivo registrado nas etapas '
+                                       '('+', '.join(reviewer_names)+'). Não aprova ou grava arquivos.')
+                    paths_changed=set(applied+pending+approved_by_architect)
+                    if {'backend/main.py','backend/app.py'}.issubset(paths_changed):
+                        summary.append('**Atenção à integração:** foram propostas alterações em '
+                                       'backend/main.py e backend/app.py. Antes de aplicar, confirme '
+                                       'qual módulo inicializa o FastAPI e se /api/products continua disponível.')
                     if changes['errors']:
                         summary += ['**Avisos de geração:**'] + ['- '+x for x in changes['errors']]
                     summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
@@ -423,7 +452,18 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
-        system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt']+' '+(step['instructions'] or ''))
+        is_reviewer = worker_role(agent)=='review' or 'REVIEW_ONLY' in (step['instructions'] or '')
+        system += self.workspaces.prompt(
+            user,run['conversation_id'],
+            request=run['prompt']+' '+(step['instructions'] or ''),
+            generate_files=not is_reviewer)
+        if is_reviewer:
+            system += ('\\nAVALIAÇÃO DE SOMENTE LEITURA: não gere JSON de arquivos, '
+                       'não tente modificar arquivos, nem diga que o projeto foi testado. '
+                       'Descreva problemas encontrados e possíveis incompatibilidades '
+                       'entre o frontend React e a API FastAPI. '
+                       'Se as saídas anteriores estiverem truncadas, informe que '
+                       'a revisão é parcial, não invente resultados de testes.')
         system += self.skills.guide(user,run['conversation_id'],worker_role(agent))
         if worker_role(agent)=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
             from .skills import NPM, PIP
