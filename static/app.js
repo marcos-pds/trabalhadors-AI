@@ -1,11 +1,12 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
 import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
+import { uiSvg } from './ui-icons.mjs';
 const S={me:null,page:'chat',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false,menuOpen:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
 const fmtDate=s=>s?new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
-const icon={dashboard:'◫',chat:'▣',agents:'◈',workflows:'⌁',projects:'▤',workspace:'▧',skills:'✦',history:'◷',monitoring:'⌁',providers:'⬡',settings:'⚙'};
+const icon={dashboard:'dashboard',chat:'chat',agents:'agents',workflows:'workflows',projects:'projects',workspace:'workspace',skills:'skills',history:'history',monitoring:'monitoring',providers:'providers',settings:'settings'};
 const pages={dashboard:'Dashboard',chat:'Chat IA',agents:'Trabalhadores',workflows:'Fluxos',projects:'Projetos',workspace:'Arquivos',skills:'Skills UX/UI',history:'Histórico',monitoring:'Monitoramento',providers:'Provedores',settings:'Configurações'};
 let toastTimer=0;
 function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;let root=$('.toasts');if(!root){root=document.createElement('div');root.className='toasts';document.body.append(root)}root.append(el);setTimeout(()=>el.remove(),5200)}
@@ -45,11 +46,11 @@ function shell(){
  $('#app').innerHTML=`<div class="shell">
  <div class="drawer-backdrop" data-action="close-menu" aria-hidden="true"></div>
  <aside class="sidebar" id="workspace-menu" role="dialog" aria-modal="true" aria-label="Menu da Central IA" aria-hidden="true">
-  <div class="drawer-header"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><button class="icon-btn" id="menu-close" data-action="close-menu" aria-label="Fechar menu">✕</button></div>
+  <div class="drawer-header"><div class="brand"><div class="brand-mark">${uiSvg('sparkles',19)}</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><button class="icon-btn" id="menu-close" data-action="close-menu" aria-label="Fechar menu">${uiSvg('close',19)}</button></div>
   <div class="drawer-content">
    <div class="side-label">CONVERSAS</div>
-   <button class="nav-link drawer-new-chat" data-action="new-chat"><span class="glyph">＋</span><span>Nova conversa</span></button>
-   <div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${esc(c.id)}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p class="drawer-empty">Suas conversas aparecerão aqui.</p>'}</div>
+   <button class="nav-link drawer-new-chat" data-action="new-chat"><span class="glyph">${uiSvg('plus',19)}</span><span>Nova conversa</span></button>
+   <div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${esc(c.id)}">${uiSvg('chat',17)} <span>${esc(c.title)}</span></button>`).join('')||'<p class="drawer-empty">Suas conversas aparecerão aqui.</p>'}</div>
    <div class="side-label">NAVEGAÇÃO</div>
    ${nav('chat')}${nav('dashboard')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}
    <div class="side-label">GESTÃO</div>
@@ -61,7 +62,7 @@ function shell(){
   </div>
   <div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair" aria-label="Sair">⎋</button></div></div>
  </aside>
- <main class="main"><header class="topbar"><div class="topbar-leading"><button id="menu-toggle" class="icon-btn menu-toggle" data-action="toggle-menu" aria-label="Abrir menu" aria-controls="workspace-menu" aria-expanded="false">☰</button><div class="topbar-brand"><span class="topbar-symbol">✳</span><div><strong id="chat-title">${S.page==='chat'?esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa'):esc(pages[S.page])}</strong><small>Central IA</small></div></div></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
+ <main class="main"><header class="topbar"><div class="topbar-leading"><button id="menu-toggle" class="icon-btn menu-toggle" data-action="toggle-menu" aria-label="Abrir menu" aria-controls="workspace-menu" aria-expanded="false">${uiSvg('menu',21)}</button><div class="topbar-brand"><span class="topbar-symbol">${uiSvg('sparkles',21)}</span><div><strong id="chat-title">${S.page==='chat'?esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa'):esc(pages[S.page])}</strong><small>Central IA</small></div></div></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
  return renderPage();
 }
 function setMenuOpen(open){
@@ -74,7 +75,7 @@ function setMenuOpen(open){
  menu.setAttribute('aria-hidden',String(!S.menuOpen));
  if(S.menuOpen)$('#menu-close')?.focus();else btn?.focus();
 }
-function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${icon[page]}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
+function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${uiSvg(icon[page],18)}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
 function goto(page){if(S.page==='chat'&&page!=='chat')disconnect();S.page=page;S.menuOpen=false;shell()}
 async function loadAll(){
  const entries=await Promise.allSettled([api('/agents'),api('/providers'),api('/projects'),api('/conversations'),api('/workflows'),api('/runs')]);
@@ -312,7 +313,7 @@ async function toggleChatSkill(skillId,enabled){
  }catch(error){renderChatSkills();toast(error.message)}
 }
 
-function chat(){return `<div class="chat-layout"><section class="chat-center" aria-label="Conversa"><div class="chat-transcript" id="chat-transcript" role="log" aria-label="Mensagens da conversa"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Digite uma mensagem ou / para comandos..." aria-label="Mensagem"></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Anexar</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></section></div>`}
+function chat(){return `<div class="chat-layout"><section class="chat-center" aria-label="Conversa"><div class="chat-transcript" id="chat-transcript" role="log" aria-label="Mensagens da conversa"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Digite uma mensagem ou / para comandos..." aria-label="Mensagem"></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">${uiSvg('paperclip',16)} <span>Anexar</span></label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>${uiSvg('stop',15)} <span>Parar</span></button><button class="btn btn-primary btn-sm" id="chat-send" title="Enviar mensagem" aria-label="Enviar mensagem">${uiSvg('send',19)}</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></section></div>`}
 
 /* Fast project-scoped review inbox inside the chat, independent of old run history. */
 function chatPendingPaths(){
@@ -490,7 +491,7 @@ async function enterChat(){
  await loadChatPendingReviews();
  showSteps();
 }
-function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
+function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">${uiSvg('sparkles',30)}</div><h2>O que vamos criar hoje?</h2><p>Descreva uma ideia, desenvolva um projeto ou peça ajuda à sua equipe de agentes de IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">${uiSvg('dashboard',16)} <span>Criar interface</span></button><button data-suggest="Desenvolva uma API com autenticação e persistência">${uiSvg('code',16)} <span>Desenvolver API</span></button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">${uiSvg('search',16)} <span>Revisar projeto</span></button></div></div>`}
 async function showMessages(cid){cancelChatDecisions();removeChatReview();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
 function messageHTML(role,agent,content,stepId=''){return `<article class="chat-message ${role==='user'?'user':''}" ${stepId?`data-step="${esc(stepId)}"`:''}><div class="msg-avatar">${role==='user'?'☺':'✳'}</div><div class="message-content"><div class="msg-author">${esc(role==='user'?'Você':agent)}</div><div class="msg-body">${markdown(content)}</div></div></article>`}
 function appendMessage(role,agent,content,stepId){let root=$('#chat-transcript');if(!root)return;const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();root.insertAdjacentHTML('beforeend',messageHTML(role,agent,content,stepId));scrollChat()}
