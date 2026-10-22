@@ -1,5 +1,6 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0};
+import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -291,7 +292,7 @@ async function enterChat(){
  else showWelcome();
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
-async function showMessages(cid){const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
+async function showMessages(cid){cancelChatDecisions();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
 function messageHTML(role,agent,content,stepId=''){return `<article class="chat-message ${role==='user'?'user':''}" ${stepId?`data-step="${esc(stepId)}"`:''}><div class="msg-avatar">${role==='user'?'☺':'✳'}</div><div class="message-content"><div class="msg-author">${esc(role==='user'?'Você':agent)}</div><div class="msg-body">${markdown(content)}</div></div></article>`}
 function appendMessage(role,agent,content,stepId){let root=$('#chat-transcript');if(!root)return;const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();root.insertAdjacentHTML('beforeend',messageHTML(role,agent,content,stepId));scrollChat()}
 function scrollChat(){const root=$('#chat-transcript');if(root)root.scrollTop=root.scrollHeight}
@@ -388,6 +389,112 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
  };
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
 }
+
+/* Every permission request is rendered inside the CURRENT conversation.
+   Decisions are human clicks, not LLM output, and expire on navigation. */
+function cancelChatDecisions(){
+ for(const entry of S.chatDecisions.values())entry.resolve(false);
+ S.chatDecisions.clear();
+}
+function askChatPermission({title,details='',note='',confirmLabel='Confirmar',denyLabel='Negar'}){
+ const root=$('#chat-transcript');
+ if(S.page!=='chat'||!root)return Promise.resolve(false);
+ // Keep at most one actionable prompt at a time; old decisions are cancelled.
+ cancelChatDecisions();
+ const id=String(++S.nextDecision);
+ const convo=S.currentConvo,pid=chatProjectId();
+ const text=String(details||'').slice(0,2400);
+ const card='<article class="chat-message chat-permission" data-chat-consent="'+id+'">'
+  +'<div class="msg-avatar">✳</div><div class="message-content">'
+  +'<div class="msg-author">Central IA · Autorização necessária</div>'
+  +'<section class="chat-permission-card"><strong>'+esc(title)+'</strong>'
+  +(text?'<p>'+esc(text)+'</p>':'')
+  +(note?'<small>'+esc(note)+'</small>':'')
+  +'<div class="chat-permission-actions">'
+  +'<button type="button" class="btn btn-sm btn-primary" data-action="chat-consent-yes" data-id="'+id+'">'+esc(confirmLabel)+'</button>'
+  +'<button type="button" class="btn btn-sm" data-action="chat-consent-no" data-id="'+id+'">'+esc(denyLabel)+'</button>'
+  +'</div><div class="chat-permission-result" role="status" aria-live="polite"></div></section>'
+  +'</div></article>';
+ const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();
+ root.insertAdjacentHTML('beforeend',card);scrollChat();
+ return new Promise(resolve=>S.chatDecisions.set(id,{resolve,convo,pid}));
+}
+function decideChatPermission(id,allowed){
+ const entry=S.chatDecisions.get(String(id));
+ if(!entry)return;
+ S.chatDecisions.delete(String(id));
+ const current=S.page==='chat'&&entry.convo===S.currentConvo&&entry.pid===chatProjectId();
+ const granted=Boolean(allowed&&current);
+ const card=Array.from(document.querySelectorAll('[data-chat-consent]'))
+  .find(el=>el.dataset.chatConsent===String(id));
+ if(card){
+  card.querySelectorAll('.chat-permission-actions button').forEach(btn=>btn.disabled=true);
+  const status=card.querySelector('.chat-permission-result');
+  if(status)status.textContent=granted?'✓ Autorizado. Executando ação...':
+    '✕ Negado. Nenhuma ação autorizada foi executada.';
+ }
+ entry.resolve(granted);
+}
+async function submitRepairRun(issueSnapshot,workerSnapshot,sourceConversation,sourceProject){
+ if(S.currentRun){toast('Conclua a execução atual antes de solicitar uma correção.');return}
+ if(S.page!=='chat'||S.currentConvo!==sourceConversation||chatProjectId()!==sourceProject){
+  toast('O contexto da conversa mudou. Execute /testar novamente.');return;
+ }
+ // Recheck actual on-disk QA diagnostics after human decision. Never reuse a
+ // stale report from a different project or files modified in the meantime.
+ const latest=await api('/conversations/'+encodeURIComponent(sourceConversation)+'/quality');
+ const actual=latest.issues||[];
+ if(JSON.stringify(actual)!==JSON.stringify(issueSnapshot)){
+  appendEvent('⚠ Os arquivos ou diagnósticos de QA mudaram. Execute /testar novamente para confirmar a correção.');
+  return;
+ }
+ const currentWorkers=chooseRepairWorkers(actual,S.agents);
+ const workerIds=workerSnapshot.map(a=>a.id);
+ if(currentWorkers.length!==workerIds.length||currentWorkers.some((a,i)=>a.id!==workerIds[i])){
+  appendEvent('⚠ A equipe de correção mudou. Execute /testar novamente.');
+  return;
+ }
+ const prompt=repairPrompt(actual,currentWorkers);
+ if(!prompt){appendEvent('Nenhum trabalhador compatível para corrigir os problemas.');return}
+ const mode=currentWorkers.length>1?'team':'manual';
+ const res=await api('/runs','POST',{
+  conversation_id:sourceConversation,prompt,mode,agent_ids:workerIds
+ },{headers:{'Idempotency-Key':crypto.randomUUID()}});
+ // Only after successful acceptance does the user message enter chat.
+ appendMessage('user','Você','Autorizo '+currentWorkers.map(a=>a.name).join(' e ')+
+   ' a preparar propostas de correção para os erros encontrados pelo Testador IA.');
+ S.workspaceRunProject=sourceProject;
+ S.currentRun=res.id;S.lastSeq=0;S.streams={};S.runSteps=[];
+ renderChatSkills();
+ $('#chat-cancel').hidden=false;
+ $('#chat-send').disabled=true;
+ appendEvent('▶ Correção encaminhada para '+currentWorkers.map(a=>a.name).join(' e ')+
+  '. Alterações de arquivos existentes seguirão o fluxo normal de revisão e aprovação.');
+ watchRun(res.id);
+}
+async function proposeQaRepair(issues){
+ const sourceConversation=S.currentConvo,sourceProject=chatProjectId();
+ if(!sourceConversation||!sourceProject||!issues?.length)return;
+ const workers=chooseRepairWorkers(issues,S.agents);
+ if(!workers.length){
+  appendEvent('Não há um Frontend IA/Backend IA ativo compatível com esses erros. '
+    +'Habilite o trabalhador na aba Trabalhadores e execute /testar novamente.');
+  return;
+ }
+ const label=workers.map(a=>a.name).join(' e ');
+ const accepted=await askChatPermission({
+  title:'Deseja que '+label+' execute a correção?',
+  details:'O Testador IA identificou '+issues.length+' problema(s). O(s) trabalhador(es) '
+   +'preparará(ão) arquivos completos para corrigir os erros relatados.',
+  note:'Confirmar inicia uma tarefa de IA e pode consumir créditos do provedor. '
+   +'Não é autorização para aplicar alterações pendentes nem para executar comandos.',
+  confirmLabel:'✓ Confirmar correção',denyLabel:'Negar'
+ });
+ if(!accepted)return;
+ try{await submitRepairRun(issues,workers,sourceConversation,sourceProject)}
+ catch(ex){appendEvent('⚠ Não foi possível iniciar a correção: '+ex.message);toast(ex.message)}
+}
+
 function appendEvent(message){const root=$('#chat-transcript');if(!root)return;root.insertAdjacentHTML('beforeend',`<div class="chat-event">${esc(message)}</div>`);scrollChat()}
 async function finishRun(ok){disconnect();S.currentRun=null;renderChatSkills();const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
  // The final consolidated answer is persisted; use it as canonical conversation history.
@@ -449,6 +556,8 @@ async function handleAction(action,id,el){
    await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
    await renderPage();toast('Skill atualizada neste projeto.');
  }
+ if(action==='chat-consent-yes'){decideChatPermission(id,true);return}
+ if(action==='chat-consent-no'){decideChatPermission(id,false);return}
  if(action==='runtime-quality')await runQualityChecks();
  if(action==='runtime-details')showRuntimeDetails();
  if(action==='runtime-authorize')await authorizeRuntime();
@@ -519,6 +628,7 @@ async function runQualityChecks(){
      ' problema(s) em '+checked+' arquivo(s):\n'+report.issues.map(x=>'• '+x).join('\n')+
      '\nAprovação automática e início da prévia ficam bloqueados até a correção.');
    toast('Testador IA: foram encontrados problemas. Consulte o chat.');
+   await proposeQaRepair(report.issues);
   }else{
    appendEvent('✓ Testador IA: '+checked+' arquivo(s) verificados. '
      +'Nenhum conflito direto de imports/exports React ou erro de sintaxe Python identificado. '
