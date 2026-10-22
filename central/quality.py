@@ -8,6 +8,11 @@ import re
 from pathlib import PurePosixPath
 
 TS_FILES=('.tsx','.ts','.jsx','.js')
+# Style files and textual Vite assets can satisfy relative imports, but they
+# do not export TypeScript symbols. A proposed index.css must be visible in
+# the same-run overlay (even before it is approved/written to disk).
+ASSET_FILES=('.css','.scss','.sass','.less','.svg','.json')
+OVERLAY_FILES=TS_FILES+ASSET_FILES
 IMPORT=re.compile(
     r'\bimport\s+(?!\()(?P<spec>(?:type\s+)?(?:[\w$*{},\s]+?))\s+from\s+'
     r'(?P<quote>["\'])(?P<module>\.[^"\']+)(?P=quote)',re.M)
@@ -65,8 +70,9 @@ def _resolve(from_file,import_path):
         else:stack.append(part)
     normalized='/'.join(stack)
     if not normalized.startswith('frontend/'):return None
-    candidates=[normalized] if normalized.endswith(TS_FILES) else [
-        normalized+suffix for suffix in TS_FILES]+[
+    if normalized.endswith(OVERLAY_FILES):
+        return [normalized]
+    candidates=[normalized+suffix for suffix in TS_FILES]+[
         normalized+'/index'+suffix for suffix in TS_FILES]
     return candidates
 
@@ -77,10 +83,11 @@ def inspect_sources(read_file,changes):
     read_file(relative_path) -> str|None, with caller enforcing the sandbox.
     """
     by_path={path:content for path,content in changes.items()
-             if isinstance(content,str) and path.endswith(TS_FILES)}
+             if isinstance(content,str) and path.endswith(OVERLAY_FILES)}
     issues=[]
     seen=set()
     for file,source in by_path.items():
+        if not file.endswith(TS_FILES):continue
         for match in IMPORT.finditer(source):
             target=_resolve(file,match.group('module'))
             if target is None:continue
@@ -95,6 +102,10 @@ def inspect_sources(read_file,changes):
                 error=f'{file}: módulo relativo não encontrado: {match.group("module")}'
                 if error not in seen:seen.add(error);issues.append(error)
                 continue
+            # CSS modules/assets are handled by Vite plugins rather than
+            # TypeScript exports. Check only that the file exists; do not
+            # report a false missing "default" export from valid .module.css.
+            if resolved.endswith(ASSET_FILES):continue
             named,default=requested_symbols(match.group('spec'))
             exports,has_default=exported_symbols(module_source)
             missing=sorted(named-exports)
