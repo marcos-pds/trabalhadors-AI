@@ -1,0 +1,23 @@
+name: Exportar ZIP da Central IA
+on:
+  push:
+    branches:
+      - feat/gemini-visual-minimalista
+jobs:
+  export:
+    name: Gerar codigo-fonte ZIP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empacotar arquivos versionados
+        run: |
+          git archive --format=zip --output=Central-Trabalhadores-IA-Gemini.zip HEAD
+          unzip -t Central-Trabalhadores-IA-Gemini.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Central-Trabalhadores-IA-Gemini
+          path: Central-Trabalhadores-IA-Gemini.zip
+          if-no-files-found: error
+          retention-days: 3
