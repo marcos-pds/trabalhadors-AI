@@ -70,13 +70,7 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 }
 
 
-/* Manual local runtime controls inside Chat IA */
-.chat-runtime-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
- padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
-.chat-runtime-title{display:flex;flex-direction:column;gap:3px;flex:1;min-width:155px}
-.chat-runtime-title strong{font-size:12px}
-.chat-runtime-title small{font-size:10px;color:var(--muted)}
-.chat-runtime-bar .btn{white-space:nowrap}
+/* Ações locais ficam na paleta /, sem faixa extra de botões no chat. */
 .runtime-preview-back{position:fixed;inset:0;background:rgba(3,7,20,.85);z-index:400;
  display:flex;align-items:center;justify-content:center;padding:18px}
 .runtime-preview-window{display:flex;flex-direction:column;width:min(1320px,98vw);
@@ -88,8 +82,7 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 .runtime-preview-header span{color:var(--muted);font-size:11px}
 .runtime-preview-window iframe{flex:1;min-height:0;border:0;background:white;width:100%}
 .runtime-preview-note{font-size:11px;color:var(--muted);padding:9px 16px;margin:0}
-@media(max-width:780px){.chat-runtime-bar{padding:10px;gap:6px}
- .chat-runtime-title{flex-basis:100%}.runtime-preview-back{padding:5px}
+@media(max-width:780px){.runtime-preview-back{padding:5px}
  .runtime-preview-window{height:96vh;width:100%}.runtime-preview-header span{display:none}}
 
 
@@ -101,3 +94,33 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
  background:var(--bg);color:var(--text);border:1px solid var(--line);
  border-radius:8px;padding:16px;max-height:50vh;overflow:auto}
 .runtime-detail-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:15px}
+
+
+/* Slash command menu above the composer; available without adding toolbar height. */
+.chat-architect-status{font-size:10px;color:var(--muted);padding:5px 8px;
+ border:1px solid var(--line);border-radius:8px;white-space:nowrap}
+.chat-compose .composer-box{position:relative;overflow:visible}
+.chat-slash-menu{position:absolute;left:-1px;right:-1px;bottom:calc(100% + 9px);
+ z-index:60;max-height:min(330px,48vh);overflow-y:auto;background:var(--panel);
+ border:1px solid var(--line);border-radius:12px;padding:7px;
+ box-shadow:0 16px 45px #0008}
+.chat-slash-menu[hidden]{display:none!important}
+.slash-menu-title{display:flex;align-items:center;justify-content:space-between;gap:10px;
+ padding:8px 11px;font-weight:700;font-size:11px;color:var(--muted)}
+.slash-menu-title span{font-weight:400}
+.slash-option{width:100%;display:flex;align-items:center;gap:12px;
+ background:transparent;color:var(--text);border:0;border-radius:9px;
+ padding:10px 12px;text-align:left;cursor:pointer}
+.slash-option.active,.slash-option:hover,.slash-option:focus-visible{
+ background:var(--card);outline:1px solid var(--purple)}
+.slash-glyph{display:grid;place-items:center;width:28px;height:28px;
+ flex:0 0 28px;border-radius:7px;background:var(--card);color:var(--purple)}
+.slash-info{display:flex;min-width:0;flex-direction:column;gap:3px}
+.slash-info strong{font-size:13px}
+.slash-info small{font-size:11px;color:var(--muted);line-height:1.35;white-space:normal}
+.slash-empty{padding:15px;color:var(--muted);font-size:12px}
+.chat-compose kbd{font:inherit;border:1px solid var(--line);
+ border-radius:4px;padding:0 4px;color:var(--text)}
+@media(max-width:780px){.chat-slash-menu{max-height:42vh}
+ .slash-menu-title span{font-size:10px}
+ .slash-option{padding:9px 10px}}
