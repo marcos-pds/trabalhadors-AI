@@ -256,6 +256,19 @@ class Workspaces:
                 (pid,project_id,user_id,run_id,agent,'pending',json.dumps(staged,ensure_ascii=False),utcnow()))
             return self.proposal(user_id,project_id,pid)
 
+    def pending_proposals(self,user_id,project_id):
+        """Lightweight project-scoped review inbox, without traversing source files."""
+        self._folder(user_id,project_id)  # validate authorized workspace ownership
+        entries=self.db.all('''SELECT id,run_id,agent,manifest,created_at
+            FROM workspace_proposals WHERE user_id=? AND project_id=? AND status='pending'
+            ORDER BY created_at DESC,id DESC LIMIT 100''',(user_id,project_id))
+        return [{'id':e['id'],'run_id':e['run_id'],'agent':e['agent'],
+                 'status':'pending','created_at':e['created_at'],
+                 'files':[{'path':item['path'],'action':item['action'],
+                           'replace':item['base_sha256'] is not None}
+                          for item in json.loads(e['manifest'])]}
+                for e in entries]
+
     def list_proposals(self,user_id,project_id):
         entries=self.db.all('''SELECT id,run_id,agent,status,manifest,created_at,applied_at FROM workspace_proposals
             WHERE user_id=? AND project_id=? ORDER BY created_at DESC LIMIT ?''',(user_id,project_id,MAX_PROPOSALS))
@@ -273,11 +286,12 @@ class Workspaces:
             old=self._current(folder,change['path'])
             old_text=old.decode('utf-8') if old is not None else ''
             new_text=change['content'] if change['action']=='write' else ''
-            diff=''.join(difflib.unified_diff(old_text.splitlines(keepends=True),new_text.splitlines(keepends=True),
-                    fromfile='antes/'+change['path'],tofile='depois/'+change['path']))[:24000]
+            full_diff=''.join(difflib.unified_diff(old_text.splitlines(keepends=True),new_text.splitlines(keepends=True),
+                    fromfile='antes/'+change['path'],tofile='depois/'+change['path']))
             previews.append({'path':change['path'],'action':change['action'],
                 'replace':change['base_sha256'] is not None, 'stale':fingerprint(old)!=change['base_sha256'],
-                'diff':diff or '(sem alterações)'})
+                'diff':full_diff[:24000] or '(sem alterações)',
+                'diff_truncated':len(full_diff)>24000})
         return {'id':row['id'],'status':row['status'],'run_id':row['run_id'],
                 'agent':row['agent'],'files':previews,'created_at':row['created_at']}
 
