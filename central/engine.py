@@ -63,7 +63,7 @@ def create_plan(agents):
             job['deps'] = producers[:]
             job['instructions'] = (
                 'REVIEW_ONLY. Analise os resultados das etapas anteriores. '
-                'Não entregue código, manifestos central-files, comandos nem solicite instalação. '
+                'Não entregue código, arquivos para gravação, comandos nem solicite instalação. '
                 'Relate falhas de integração, arquivos e APIs conflitantes, riscos e verificações '
                 'pendentes. Seu parecer não substitui aprovação humana.')
     return jobs
