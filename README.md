@@ -357,3 +357,18 @@ A causa era o resolvedor `central/quality.py`: ele procurava exclusivamente mód
 A verificação continua detectando `import { LoadingSpinner }` contra um módulo com apenas `export default`. Propostas existentes continuam exigindo aprovação independente; corrigir o falso positivo **não as aplica**. Para validar, atualize a branch, revise as três propostas em **Projetos → Arquivos**, aplique somente os diffs corretos e use `/testar` novamente. Um relatório histórico de execução não é recalculado retroativamente.
 
 Quatro testes novos cobrem arquivos CSS propostos na mesma rodada, CSS ausente de fato, CSS modules e integração real do staging preservando arquivos existentes. Na CI: **88 passed, 1 warning** em Python, **9 tests passed** no Node.
+
+
+## Revisão de propostas diretamente no Chat IA
+
+Ao selecionar um projeto com propostas de arquivos aguardando decisão, o Chat IA exibe um **alerta persistente de revisão pendente** imediatamente abaixo de Projeto e Skills. O alerta apresenta a quantidade de propostas, os caminhos dos arquivos envolvidos e **Revisar no chat**, sem precisar navegar até Projetos → Arquivos. O mesmo fluxo pode ser aberto pelo comando **`/revisar`**.
+
+Dentro da própria conversa, a Central mostra uma proposta por vez, com a lista completa de arquivos daquela proposta e um **diff unificado** colorido (linhas adicionadas e removidas). A revisão permite alternar entre propostas do mesmo projeto. Uma proposta contendo múltiplos arquivos é **atômica**: aprovar ou rejeitar decide todos os arquivos daquele manifesto, não apenas o arquivo visualizado.
+
+Para **aprovar e aplicar**, é obrigatório inspecionar o diff e digitar exatamente `APLICAR` no cartão do chat. A Central recarrega o diff do servidor antes de aceitar a decisão e bloqueia a operação se o conteúdo ou o arquivo base mudou, se o diff foi truncado, se a proposta já foi decidida, ou se há uma execução em andamento. Para rejeitar, o botão **Rejeitar proposta** muda apenas o estado da proposta, sem tocar em arquivos reais. Os endpoints continuam validando dono do projeto, estado pendente, hash original dos arquivos e a confirmação de aprovação. Não há aprovação automática ao abrir o alerta.
+
+O alerta é atualizado ao abrir a conversa, quando um run termina, quando uma proposta nova é criada e após aprovar ou rejeitar. Mostra somente propostas **pendentes do projeto atualmente selecionado**, mesmo quando surgiram em outras conversas ligadas ao mesmo projeto. Decisões já tomadas não reaparecem após recarregar o chat. O histórico textual original não é alterado nem apagado. Em caso de diff maior que o limite de visualização (até 480 KB por arquivo solicitado), a aprovação no chat é bloqueada para evitar alterações não inspecionadas.
+
+Os arquivos da Loja Virtual no Windows continuam intactos até que um usuário aprove explicitamente cada proposta. A barra de alerta e o painel de diff usam HTML escapado para que texto/código gerado pelos agentes não execute JavaScript na interface.
+
+A API oferece `GET /api/projects/{pid}/workspace/pending` para consultar apenas os metadados das propostas pendentes sem percorrer todos os arquivos, e `GET /api/projects/{pid}/workspace/proposals/{id}?full=true` para obter o diff integral na revisão.
