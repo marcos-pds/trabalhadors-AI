@@ -11,6 +11,7 @@ from .health import ProviderHealth
 from .workspace import Workspaces, WorkspaceError
 from .skills import SkillsHub
 from .roles import worker_role, role_source
+from .quality import inspect_sources
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -162,7 +163,12 @@ def ui_execution_plan(agents, prompt, mode, agent_ids, skill_active):
            'UMA alteração completa para '+path+'. '
            'Priorize o arquivo existente '+path+' e NÃO escreva somente um plano. '
            +details+' Qualquer sobrescrita seguirá revisão/aprovação.'))
-    add('architecture','Arquiteto · Revisão de integração',frontend_steps,
+    quality=add('testing','Testador · Verificação de integração',frontend_steps,
+        'UI_STAGE_TEST. QA_ONLY. Inspecione as entregas do Frontend e o diagnóstico '
+        'estático fornecido pela Central. Verifique imports, exports, endpoints, '
+        'responsividade e possíveis erros. Não escreva arquivos, não execute '
+        'comandos e não afirme ter rodado um build real.')
+    add('architecture','Arquiteto · Revisão de integração',[quality],
         'UI_STAGE_REVIEW. Revise criticamente os artefatos de frontend entregues pelos '
         'trabalhadores. Identifique incongruências de import/props e dependências. '
         'Não recrie arquivos e não envie manifestos duplicados; a aprovação das '
@@ -248,6 +254,24 @@ class Engine:
                                  'kind':'agent','deps':[p['id'] for p in plan],
                                  'instructions':'Inspecione os resultados, revise a arquitetura e, somente se necessário, '
                                  'solicite instalação de dependências do catálogo usando central-packages.'})
+            # The dedicated Testador runs after all coding stages and before the
+            # Revisor; disabled QA workers are not silently re-enabled.
+            if ui_plan is None and mode=='team' and any(worker_role(a) in
+                     ('frontend','backend','code') for a in chosen):
+                tester=next((a for a in agents if worker_role(a)=='testing'),None)
+                if tester and not any(p['agent_id']==tester['id'] for p in plan):
+                    producers=[p['id'] for p in plan if any(a['id']==p['agent_id'] and
+                        worker_role(a) in ('frontend','backend','code') for a in agents)]
+                    check={'id':uid(),'agent_id':tester['id'],'name':'Testador · QA de integração',
+                           'kind':'agent','deps':producers,
+                           'instructions':'QA_ONLY. Revise imports/exports React, '
+                           'compatibilidade de API, código e diagnósticos automáticos. '
+                           'Não altere arquivos nem diga que executou build real.'}
+                    plan.append(check)
+                    for item in plan:
+                        agent=next((a for a in agents if a['id']==item.get('agent_id')),None)
+                        if agent and worker_role(agent)=='review':
+                            item['deps']=list(dict.fromkeys(item['deps']+[check['id']]))
             if ui_plan is None and len(chosen) > 1 and not any(worker_role(a)=='review' for a in chosen):
                 reviewer = next((a for a in agents if worker_role(a)=='review'), None)
                 if reviewer:
@@ -300,7 +324,11 @@ class Engine:
                     produced = [s for s in coding if self.workspaces._extract_files(s.get('output') or '')]
                     if not produced:
                         changes['errors'].append('Etapas UX/UI não entregaram arquivos completos. Plano não equivale a implementação.')
-                changes['architect_applied'] = await self._delegated_review(run,changes['pending'])
+                if changes.get('qa_issues'):
+                    changes['architect_applied']=[]
+                    self.emit(run_id,'qa_failed',{'issues':changes['qa_issues'][:10]})
+                else:
+                    changes['architect_applied'] = await self._delegated_review(run,changes['pending'])
                 changes['pending'] = [pid for pid in changes['pending'] if pid not in changes['architect_applied']]
                 if changes['architect_applied']:
                     self.emit(run_id,'architect_approved',{'count':len(changes['architect_applied']),
@@ -395,6 +423,10 @@ class Engine:
                         summary.append('**Atenção à integração:** foram propostas alterações em '
                                        'backend/main.py e backend/app.py. Antes de aplicar, confirme '
                                        'qual módulo inicializa o FastAPI e se /api/products continua disponível.')
+                    if changes.get('qa_issues'):
+                        summary.append('**Testador IA — incompatibilidades detectadas:** '
+                                       'nenhum arquivo com erro foi aprovado automaticamente.')
+                        summary += ['- '+x for x in changes['qa_issues']]
                     if changes['errors']:
                         summary += ['**Avisos de geração:**'] + ['- '+x for x in changes['errors']]
                     summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
@@ -461,12 +493,47 @@ class Engine:
         messages = [{'role':'user','content':run['prompt'] + ('\n\nResultados anteriores:\n'+context if context else '')}]
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
-        is_reviewer = worker_role(agent)=='review' or 'REVIEW_ONLY' in (step['instructions'] or '')
+        is_testing = worker_role(agent)=='testing' or 'QA_ONLY' in (step['instructions'] or '')
+        is_reviewer = (worker_role(agent)=='review' or 'REVIEW_ONLY' in
+                       (step['instructions'] or '') or is_testing)
         system += self.workspaces.prompt(
             user,run['conversation_id'],
             request=run['prompt']+' '+(step['instructions'] or ''),
             generate_files=not is_reviewer)
-        if is_reviewer:
+        if is_testing:
+            # The model receives a concrete QA report obtained without executing
+            # generated code. The deterministic check remains authoritative.
+            convo=self.db.one('SELECT project_id FROM conversations WHERE id=? AND user_id=?',
+                              (run['conversation_id'],user))
+            if convo and convo['project_id']:
+                current=self.db.all('SELECT output FROM steps WHERE run_id=? AND status=?',
+                                    (run['id'],'completed'))
+                overlay={}
+                for previous in current:
+                    try: items=self.workspaces._extract_files(previous['output'] or '') or []
+                    except WorkspaceError:continue
+                    for item in items:
+                        if isinstance(item,dict) and item.get('action','write')=='write' and (
+                              isinstance(item.get('content'),str)):
+                            overlay[item.get('path','')]=item['content']
+                folder=self.workspaces._folder(user,convo['project_id'])
+                def read_project_file(path):
+                    try:
+                        raw=self.workspaces._current(folder,path)
+                        return raw.decode('utf-8') if raw is not None else None
+                    except (WorkspaceError,OSError,UnicodeError):
+                        return None
+                issues=inspect_sources(read_project_file,overlay)
+                messages[0]['content']+=(
+                    '\n\nRELATÓRIO QA ESTÁTICO DA CENTRAL (não é compilação executada):\n'+
+                    ('\n'.join('- '+x for x in issues) if issues else
+                     'Não foram identificadas incompatibilidades DIRETAS de imports/exports. '
+                     'Isso não garante build TypeScript ou funcionamento no navegador.'))
+            system += ('\nTESTADOR IA: produza relatório de qualidade somente leitura, '
+                       'priorize falhas reproduzíveis da ferramenta QA e as '
+                       'incompatibilidades entre os arquivos produzidos. '
+                       'Não gere central-files, não escreva código nem simule testes.')
+        if is_reviewer and not is_testing:
             system += ('\nAVALIAÇÃO DE SOMENTE LEITURA: não gere JSON de arquivos, '
                        'não tente modificar arquivos, nem diga que o projeto foi testado. '
                        'Descreva problemas encontrados e possíveis incompatibilidades '
