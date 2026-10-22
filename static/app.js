@@ -1,6 +1,6 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
 import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0};
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set()};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -326,7 +326,7 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
    appendMessage('user','Você',prompt);
    if(input)input.value='';S.attached=[];$('#attached-label').textContent='Sem anexos';
    S.workspaceRunProject=S.conversations.find(c=>c.id===cid)?.project_id||null;
-   S.selectedWorkflow='';S.currentRun=res.id;renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];
+   S.selectedWorkflow='';S.currentRun=res.id;S.offeredApprovals.clear();renderChatSkills();S.lastSeq=0;S.streams={};S.runSteps=[];
    $('#chat-cancel').hidden=false;if(send)send.disabled=true;
    const convo=S.conversations.find(c=>c.id===cid);
    if(convo&&convo.title==='Nova conversa'){
@@ -364,7 +364,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='run_created'){S.runSteps=d.plan.map(p=>({id:p.id,name:p.name,status:'queued',kind:p.kind}));showSteps();if(d.ui_implementation)appendEvent('🎨 Fluxo UX/UI Studio Pro ativado: Arquiteto, Designer e três tarefas de Frontend, com revisão final.')}
   if(msg.event==='step_status'){const s=S.runSteps.find(s=>s.id===d.id);if(s)Object.assign(s,d);showSteps()}
   if(msg.event==='model_selected'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.model=d.model;s.provider=d.provider;showSteps()}}
-  if(msg.event==='approval_requested'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.status='awaiting_approval';showSteps()}}
+  if(msg.event==='approval_requested'){const s=S.runSteps.find(s=>s.id===d.step_id);if(s){s.status='awaiting_approval';showSteps()}void offerStepApproval(d.step_id)}
   if(msg.event==='provider_error')appendEvent('⚠ '+d.provider+': '+d.message);
   if(msg.event==='failover')appendEvent('↻ '+d.message);
   if(msg.event==='provider_suspended')appendEvent('⏸ '+d.provider+': temporariamente suspenso ('+d.category+').');
@@ -393,17 +393,51 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
 }
 
+
+async function offerStepApproval(stepId){
+ const runId=S.currentRun,convo=S.currentConvo,project=chatProjectId();
+ if(!runId||!stepId||S.offeredApprovals.has(stepId))return;
+ if(S.page!=='chat'||!$('#chat-transcript'))return;
+ const step=S.runSteps.find(s=>s.id===stepId);
+ if(!step||step.status!=='awaiting_approval')return;
+ S.offeredApprovals.add(stepId);
+ try{
+  const approved=await askChatPermission({
+   title:'Deseja aprovar a etapa "'+step.name+'"?',
+   details:'Esta etapa de fluxo requer uma decisão sua antes de prosseguir. '
+    +'Revise as instruções e os resultados no painel de execução.',
+   note:'Confirmar aprova somente esta etapa de fluxo. Não autoriza '
+    +'substituição de arquivos pendentes nem instalação de pacotes por conta própria.',
+   confirmLabel:'✓ Aprovar etapa',denyLabel:'Negar etapa'
+  });
+  if(S.currentRun!==runId||S.currentConvo!==convo||chatProjectId()!==project)return;
+  await api('/runs/'+encodeURIComponent(runId)+'/steps/'+encodeURIComponent(stepId)+
+   '/approval','POST',{approved});
+  appendEvent(approved?'✓ Etapa "'+step.name+'" aprovada pelo usuário.':
+   '✕ Etapa "'+step.name+'" rejeitada pelo usuário.');
+ }catch(ex){appendEvent('⚠ Não foi possível registrar a decisão da etapa: '+ex.message)}
+ finally{S.offeredApprovals.delete(stepId)}
+}
+
 /* Every permission request is rendered inside the CURRENT conversation.
    Decisions are human clicks, not LLM output, and expire on navigation. */
 function cancelChatDecisions(){
- for(const entry of S.chatDecisions.values())entry.resolve(false);
+ for(const [id,entry] of S.chatDecisions){
+  const card=Array.from(document.querySelectorAll('[data-chat-consent]'))
+   .find(el=>el.dataset.chatConsent===id);
+  if(card){
+   card.querySelectorAll('.chat-permission-actions button').forEach(btn=>btn.disabled=true);
+   const status=card.querySelector('.chat-permission-result');
+   if(status)status.textContent='Autorização encerrada por mudança de contexto.';
+  }
+  entry.resolve(false);
+ }
  S.chatDecisions.clear();
 }
 function askChatPermission({title,details='',note='',confirmLabel='Confirmar',denyLabel='Negar'}){
  const root=$('#chat-transcript');
  if(S.page!=='chat'||!root)return Promise.resolve(false);
- // Keep at most one actionable prompt at a time; old decisions are cancelled.
- cancelChatDecisions();
+ // Allow independent human approval cards to coexist for parallel workflow steps.
  const id=String(++S.nextDecision);
  const convo=S.currentConvo,pid=chatProjectId();
  const text=String(details||'').slice(0,2400);
@@ -468,6 +502,7 @@ async function submitRepairRun(issueSnapshot,workerSnapshot,sourceConversation,s
    ' a preparar propostas de correção para os erros encontrados pelo Testador IA.');
  S.workspaceRunProject=sourceProject;
  S.currentRun=res.id;S.lastSeq=0;S.streams={};S.runSteps=[];
+ S.offeredApprovals.clear();
  renderChatSkills();
  $('#chat-cancel').hidden=false;
  $('#chat-send').disabled=true;
@@ -503,7 +538,7 @@ async function finishRun(ok){disconnect();S.currentRun=null;renderChatSkills();c
  // The final consolidated answer is persisted; use it as canonical conversation history.
  if(ok&&S.currentConvo){await showMessages(S.currentConvo)}
 }
-function showSteps(){const root=$('#chat-steps');if(!root)return;root.innerHTML=S.runSteps.map(s=>`<div class="step-line ${esc(s.status)}"><div><strong>${esc(s.name)}</strong><small>${labelStatus(s.status)}${s.model?' · '+esc(s.model):''}</small>${s.status==='awaiting_approval'?`<div class="approval-card"><p>Este bloco requer confirmação explícita.</p><button class="btn btn-primary" data-action="approve" data-id="${esc(s.id)}">Aprovar</button><button class="btn" data-action="reject" data-id="${esc(s.id)}">Rejeitar</button></div>`:''}</div></div>`).join('')||'<div class="right-tip">Aguardando nova tarefa.</div>'}
+function showSteps(){const root=$('#chat-steps');if(!root)return;root.innerHTML=S.runSteps.map(s=>`<div class="step-line ${esc(s.status)}"><div><strong>${esc(s.name)}</strong><small>${labelStatus(s.status)}${s.model?' · '+esc(s.model):''}</small>${s.status==='awaiting_approval'?'<div class="approval-card"><p>Decisão solicitada no Chat IA.</p></div>':''}</div></div>`).join('')||'<div class="right-tip">Aguardando nova tarefa.</div>'}
 function modal(title,description,content,onSubmit,saveLabel='Salvar alterações'){
  const back=document.createElement('div');back.className='modal-back';back.innerHTML=`<div class="modal"><h2>${esc(title)}</h2><p>${esc(description)}</p><form id="modal-form">${content}<div id="modal-error" class="form-error"></div><div class="modal-actions"><button class="btn" type="button" data-close>Cancelar</button><button class="btn btn-primary" type="submit">${esc(saveLabel)}</button></div></form></div>`;
  document.body.append(back);back.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>back.remove());back.onclick=e=>{if(e.target===back)back.remove()};
@@ -598,7 +633,11 @@ async function handleAction(action,id,el){
  if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.projectForNext=null;S.delegation=null;S.chatRuntime=null;S.runSteps=[];S.lastSeq=0;goto('chat')}
  if(action==='open-run'){disconnect();S.currentConvo=el.dataset.convo;S.currentRun=null;goto('chat');const r=await api(`/runs/${id}`);if(['running','queued','awaiting_approval'].includes(r.status)){S.currentRun=id;watchRun(id);$('#chat-send').disabled=true;$('#chat-cancel').hidden=false}}
  if(action==='resume-run'){await api(`/runs/${id}/resume`,'POST');await loadAll();renderPage();toast('Execução retomada a partir dos checkpoints concluídos.')}
- if(action==='approve'||action==='reject'){if(!S.currentRun)return;await api(`/runs/${S.currentRun}/steps/${id}/approval`,'POST',{approved:action==='approve'});toast(action==='approve'?'Etapa aprovada.':'Etapa rejeitada.')}
+ if(action==='approve'||action==='reject'){
+    // Old approval links can still exist in cached pages. Re-route them through
+    // an in-chat question instead of approving from the sidebar directly.
+    await offerStepApproval(id);return;
+ }
 }
 document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[data-action],[data-suggest],.copy-code');if(!node)return;
  if(node.hasAttribute('data-page')){goto(node.dataset.page);return}
