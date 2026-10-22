@@ -458,13 +458,18 @@ class Engine:
             request=run['prompt']+' '+(step['instructions'] or ''),
             generate_files=not is_reviewer)
         if is_reviewer:
-            system += ('\\nAVALIAÇÃO DE SOMENTE LEITURA: não gere JSON de arquivos, '
+            system += ('\nAVALIAÇÃO DE SOMENTE LEITURA: não gere JSON de arquivos, '
                        'não tente modificar arquivos, nem diga que o projeto foi testado. '
                        'Descreva problemas encontrados e possíveis incompatibilidades '
                        'entre o frontend React e a API FastAPI. '
                        'Se as saídas anteriores estiverem truncadas, informe que '
                        'a revisão é parcial, não invente resultados de testes.')
-        system += self.skills.guide(user,run['conversation_id'],worker_role(agent))
+            if self.skills.guide(user,run['conversation_id'],'review'):
+                system += ('\nNa revisão UX/UI, confira acessibilidade, layout responsivo, '
+                           'preservação da API e dependências já presentes. '
+                           'Não solicite instalação; apenas reporte riscos.')
+        else:
+            system += self.skills.guide(user,run['conversation_id'],worker_role(agent))
         if worker_role(agent)=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
             from .skills import NPM, PIP
             system += ('\nAUTONOMIA EXPLICITAMENTE DELEGADA NESTA CONVERSA: o executor poderá '
