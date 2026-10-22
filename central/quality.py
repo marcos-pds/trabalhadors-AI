@@ -6,7 +6,6 @@ It never runs a shell, executes model code, or modifies the user's project.
 """
 import re
 from pathlib import PurePosixPath
-from .workspace import WorkspaceError, is_link_or_junction
 
 TS_FILES=('.tsx','.ts','.jsx','.js')
 IMPORT=re.compile(
@@ -119,6 +118,7 @@ def inspect_project(workspaces,user_id,project_id):
     import ast
     import os
     from pathlib import Path
+    from .workspace import WorkspaceError, is_link_or_junction
 
     folder=workspaces._folder(user_id,project_id)
     front=folder/'frontend/src'
