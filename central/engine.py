@@ -373,12 +373,19 @@ class Engine:
                         and self.db.one('SELECT specialty FROM agents WHERE id=? AND user_id=?',
                                          (s['agent_id'],run['user_id'])) is not None]
                     reviewer_names=[]
+                    malformed_reviews=[]
                     for reviewed in reviewer_steps:
                         agent_row=self.db.one('SELECT name,specialty FROM agents WHERE id=? AND user_id=?',
                                              (reviewed['agent_id'],run['user_id']))
                         if agent_row and worker_role(agent_row)=='review':
                             reviewer_names.append(reviewed['name'])
-                    if reviewer_names:
+                            if re.search(r'(?:`{3}central-files|\{\s*"files"\s*:)', reviewed['output'] or '',re.I):
+                                malformed_reviews.append(reviewed['name'])
+                    if malformed_reviews:
+                        summary.append('**Revisor IA:** devolveu conteúdo de arquivos em vez de um parecer '
+                                       '('+', '.join(malformed_reviews)+'). Essa saída foi ignorada; '
+                                       'não houve aprovação do Revisor. Solicite uma revisão textual.')
+                    elif reviewer_names:
                         summary.append('**Revisão IA:** parecer consultivo registrado nas etapas '
                                        '('+', '.join(reviewer_names)+'). Não aprova ou grava arquivos.')
                     paths_changed=set(applied+pending+approved_by_architect)
