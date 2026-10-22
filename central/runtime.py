@@ -44,6 +44,9 @@ class RuntimeManager:
     def authorize(self,user_id,conversation_id,enabled):
         project_id=self._conversation(user_id,conversation_id)
         self.workspaces._folder(user_id,project_id)
+        if not enabled:
+            # Revocation immediately closes servers started for this project.
+            self.stop(user_id,conversation_id)
         self.db.execute('''INSERT INTO runtime_permissions(conversation_id,user_id,project_id,
                           enabled,updated_at) VALUES(?,?,?,?,?)
                           ON CONFLICT(conversation_id) DO UPDATE SET
