@@ -434,6 +434,7 @@ async function handleAction(action,id,el){
    await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
    await renderPage();toast('Skill atualizada neste projeto.');
  }
+ if(action==='runtime-details')showRuntimeDetails();
  if(action==='runtime-authorize')await authorizeRuntime();
  if(action==='runtime-start')await startRuntime();
  if(action==='runtime-preview')await previewRuntime();
@@ -482,6 +483,7 @@ function runtimeControls(){
     auth?'Execução autorizada nesta conversa':'Execução exige autorização')+'</small></div>'
   +'<button class="btn btn-sm" data-action="runtime-authorize" '+(!pid?'disabled ':'')+'>'
   +(auth?'✓ Autorizado':'Autorizar execução')+'</button>'
+  +(runtime?.last_error?'<button class="btn btn-sm" data-action="runtime-details" title="Mostrar por que o último início falhou">⚠ Diagnóstico</button>':'')
   +'<button class="btn btn-sm btn-primary" data-action="runtime-start" '+(!pid||running?'disabled ':'')+'>▶ Iniciar</button>'
   +'<button class="btn btn-sm" data-action="runtime-preview" '+(!running?'disabled ':'')+'>◉ Prévia</button>'
   +'<button class="btn btn-sm" data-action="runtime-stop" '+(!running?'disabled ':'')+'>■ Parar</button>'
@@ -535,6 +537,24 @@ async function stopRuntime(){
  const modal=$('#runtime-preview-modal');if(modal)modal.remove();
  await loadChatRuntime();
  appendEvent('■ Servidores locais interrompidos.');
+}
+function showRuntimeDetails(){
+ const failure=S.chatRuntime?.last_error||'Nenhuma falha registrada nesta conversa.';
+ const old=$('#runtime-detail-modal');if(old)old.remove();
+ const backdrop=document.createElement('div');backdrop.id='runtime-detail-modal';
+ backdrop.className='runtime-preview-back';
+ backdrop.innerHTML='<section class="runtime-detail-window" role="dialog" aria-modal="true" aria-label="Diagnóstico da execução">'
+  +'<h3>⚠ Diagnóstico — servidor local</h3>'
+  +'<p>Este registro mostra a falha recente ao iniciar React/Vite ou FastAPI. '
+  +'Os arquivos do projeto não foram modificados pelo iniciador.</p>'
+  +'<pre class="runtime-error-log">'+esc(failure)+'</pre>'
+  +'<div class="runtime-detail-buttons"><button class="btn" id="runtime-copy-error">Copiar diagnóstico</button>'
+  +'<button class="btn btn-primary" id="runtime-close-details">Fechar</button></div></section>';
+ document.body.append(backdrop);
+ backdrop.querySelector('#runtime-close-details').onclick=()=>backdrop.remove();
+ backdrop.querySelector('#runtime-copy-error').onclick=()=>navigator.clipboard.writeText(failure)
+    .then(()=>toast('Diagnóstico copiado.')).catch(()=>toast('Não foi possível copiar.'));
+ backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove()};
 }
 async function previewRuntime(){
  await loadChatRuntime();
