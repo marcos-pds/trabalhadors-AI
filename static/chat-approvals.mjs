@@ -13,8 +13,8 @@ export function chooseRepairWorkers(issues, agents){
 }
 export function repairPrompt(issues,workers){
  if(!workers.length)return null;
- const safe=issues.filter(x=>typeof x==='string').slice(0,20)
-   .map(x=>x.replace(/[^\S\n]+/g,' ').slice(0,320));
+ const safe=issues.filter(x=>typeof x==='string').slice(0,16)
+   .map(x=>x.replace(/[^\S\n]+/g,' ').slice(0,240));
  return 'Corrija exclusivamente os problemas de QA do projeto local que se seguem. '+
   'Leia os arquivos reais necessários; preserve funcionalidades existentes e o backend FastAPI '+
   'quando não fizer parte dos erros. Atue somente na especialidade solicitada. '+
