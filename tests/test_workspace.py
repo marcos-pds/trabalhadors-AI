@@ -485,6 +485,8 @@ def test_review_worker_runs_after_frontend_backend_and_never_stages_invalid_json
             elif system.startswith('Projete e implemente APIs'):
                 yield '{"files":[{"path":"backend/routers/products.py",'
                 yield '"content":"def list_products(): return []\\n"}]}'
+            elif system.startswith('Analise verificações automáticas'):
+                yield 'Testador IA: diagnóstico de imports analisado, sem execução de build.'
             elif system.startswith('Analise resultados criticamente'):
                 self.checked_review=True
                 assert 'SOMENTE DE LEITURA' in system
