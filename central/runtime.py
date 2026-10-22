@@ -151,6 +151,9 @@ class RuntimeManager:
             if self.sessions:
                 raise WorkspaceError('Outro projeto já está em execução pela Central. Pare-o antes.',409)
             folder=self.workspaces._folder(user_id,permission['project_id'])
+            root=self.workspaces._root()
+            if is_link_or_junction(root):
+                raise WorkspaceError('Raiz autorizada do projeto não pode ser link/junção.',403)
             if is_link_or_junction(folder) or not folder.is_dir():
                 raise WorkspaceError('Pasta de projeto inexistente ou insegura.',403)
             commands=self._commands(folder)
