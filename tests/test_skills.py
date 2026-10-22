@@ -565,3 +565,114 @@ def test_unbound_project_explains_skill_issue_without_chat_ghost_message(tmp_pat
         assert 'não está vinculada a um projeto' in result.json()['detail']
         assert c.get(f'/api/conversations/{cid}/messages').json()==[]
         assert not [r for r in c.get('/api/runs').json() if r['conversation_id']==cid]
+
+
+
+def test_modified_specialties_keep_default_agent_roles_without_rewriting_database(tmp_path, monkeypatch):
+    """Regression for screenshot: UI shows three available names but their freeform
+    specialty fields are descriptive Portuguese text, not canonical role identifiers.
+    The architect can coordinate the real 6-stage workflow with explicit delegation.
+    """
+    from central.roles import worker_role, role_source
+    from central.engine import ui_execution_plan
+    from test_workspace import add_provider
+    from central.main import ENGINE
+
+    descriptors={
+        'Arquiteto IA': 'Coordenar tarefas e resultados',
+        'Frontend IA': 'React, HTML, CSS e interfaces',
+        'Designer IA': 'UI/UX, estilos e experiências',
+    }
+    expected={'Arquiteto IA':'architecture','Frontend IA':'frontend','Designer IA':'design'}
+
+    class CompatWorkers:
+        async def stream(self,provider,key,model,system,messages):
+            if 'ARQUITETO REVISOR AUTORIZADO' in system:
+                yield '{"decision":"approve","reason":"Alteração revisada conforme a delegação."}'
+            elif 'UI_STAGE_PLANNING' in system:
+                ticks=chr(96)*3
+                yield 'Plano de execução real.\n'+ticks+'central-packages\n'
+                yield '{"manager":"npm","packages":["lucide-react"]}\n'+ticks
+            elif 'UI_STAGE_DESIGN' in system:
+                yield 'Design system premium, mobile-first e acessível.'
+            elif 'UI_STAGE_IMPLEMENT' in system:
+                import re
+                target=re.search(r'UMA alteração completa para ([\w./-]+)\.',system)
+                assert target is not None
+                name=target.group(1)
+                content=(':root{color:#293047}' if name.endswith('.css') else
+                         'export default function App(){return <main>Nova vitrine</main>}'
+                         if name.endswith('/App.tsx') else
+                         'export default function ProductCard(){return <article>Produto</article>}')
+                yield json.dumps({'files':[{'path':name,'content':content}]})
+            elif 'UI_STAGE_REVIEW' in system:
+                yield 'Revisado: preservar endpoint FastAPI.'
+            else:
+                raise AssertionError('Unexpected system role: '+system[:150])
+
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        for name,descriptive_specialty in descriptors.items():
+            agent=next(a for a in c.get('/api/agents').json() if a['name']==name)
+            ENGINE.db.execute('UPDATE agents SET specialty=? WHERE id=?',
+                              (descriptive_specialty,agent['id']))
+        agents=c.get('/api/agents').json()
+        for name,role in expected.items():
+            a=next(a for a in agents if a['name']==name)
+            assert a['enabled']==1
+            assert a['specialty']==descriptors[name]
+            assert a['resolved_role']==worker_role(a)==role
+            assert a['role_source']==role_source(a)=='name'
+        assert len([a for a in agents if a['name'] in descriptors])==3
+        frontend=folder/'frontend/src';(frontend/'components').mkdir(parents=True)
+        originals=['frontend/src/App.tsx','frontend/src/index.css',
+                   'frontend/src/components/ProductCard.tsx']
+        for name in originals:
+            (folder/name).write_text('old '+name)
+        backend=folder/'backend';backend.mkdir()
+        (backend/'main.py').write_text('preserve FastAPI')
+        cid=conversation(c,project)
+        assert c.post(f'/api/projects/{project}/skills/ux-ui-studio-pro',
+                      json={'enabled':True},headers=HEADERS).status_code==200
+        assert c.post(f'/api/conversations/{cid}/architect-delegation',
+                      json={'enabled':True},headers=HEADERS).json()['enabled'] is True
+        plan=ui_execution_plan(agents,
+            'Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
+            'O Arquiteto IA deve coordenar o Frontend IA e Designer IA.',
+            'auto',[],True)
+        assert plan is not None and len(plan)==6
+        calls=[]
+        def fake_install(self,owner,proj,manager,packages):
+            calls.append((manager,packages))
+            return {'ok':True,'manager':manager,'packages':packages,
+                    'exit_code':0,'output':'mock'}
+        monkeypatch.setattr(SkillsHub,'_install_sync',fake_install)
+        ENGINE.client=CompatWorkers()
+        prompt=('Modernize o UX/UI da Loja Virtual utilizando a Skill UI/UX Studio Pro. '
+                'O Arquiteto IA deve coordenar o Frontend IA e o Designer IA, '
+                'avaliar bibliotecas do catálogo e revisar alterações.')
+        r=c.post('/api/runs',json={'conversation_id':cid,'prompt':prompt,'mode':'auto'},
+                 headers=HEADERS)
+        assert r.status_code==200,r.text
+        done=wait_for(c,r.json()['id'],timeout=9)
+        assert done['status']=='completed',done.get('error')
+        assert len(done['steps'])==6
+        for name in originals:
+            assert (folder/name).read_text()!=('old '+name)
+        assert (backend/'main.py').read_text()=='preserve FastAPI'
+        assert len(ENGINE.db.all('SELECT * FROM architect_approval_log WHERE run_id=?',
+                                 (r.json()['id'],)))==3
+        assert calls==[('npm',['lucide-react'])]
+        # User profile is preserved, not rewritten to our canonical codes.
+        for name in descriptors:
+            a=next(a for a in c.get('/api/agents').json() if a['name']==name)
+            assert a['specialty']==descriptors[name]
+
+
+def test_custom_role_alias_never_overrides_conflicting_canonical_specialty():
+    from central.roles import worker_role,role_source
+    assert worker_role({'name':'Arquiteto IA','specialty':'backend'})=='backend'
+    assert role_source({'name':'Arquiteto IA','specialty':'backend'})=='canonical'
+    assert worker_role({'name':'Qualquer usuário','specialty':'texto livre'})=='texto livre'
+    assert worker_role({'name':'Designer IA','specialty':'UI/UX'})=='design'
+    assert worker_role({'name':'Frontend IA','specialty':'front-end'})=='frontend'
