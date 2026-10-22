@@ -363,6 +363,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='workspace_retry_started'){appendEvent('↻ '+d.agent+': tentando entregar um arquivo completo em formato estruturado...')}
   if(msg.event==='workspace_retry_succeeded'){appendEvent('✓ '+d.agent+': arquivo estruturado validado. Aguardando gravação segura.')}
   if(msg.event==='workspace_retry_failed'){appendEvent('⚠ '+d.agent+': nova tentativa sem arquivo válido ('+d.message+').')}
+  if(msg.event==='qa_failed'){appendEvent('⚠ Testador IA bloqueou aprovação automática:\n'+(d.issues||[]).join('\n'))}
   if(msg.event==='workspace_stage_error'){appendEvent('⚠ Arquivos não aplicados: '+d.message)}
   if(msg.event==='workspace_summary_warning'){appendEvent('⚠ Relatório do projeto: '+d.message+' ('+d.code+' / '+d.type+').')}
   if(msg.event==='architect_approved'){appendEvent('✓ Arquiteto autorizado aprovou '+d.count+' alteração(ões) após revisão.')}
@@ -434,6 +435,7 @@ async function handleAction(action,id,el){
    await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
    await renderPage();toast('Skill atualizada neste projeto.');
  }
+ if(action==='runtime-quality')await runQualityChecks();
  if(action==='runtime-details')showRuntimeDetails();
  if(action==='runtime-authorize')await authorizeRuntime();
  if(action==='runtime-start')await startRuntime();
@@ -484,6 +486,7 @@ function runtimeControls(){
   +'<button class="btn btn-sm" data-action="runtime-authorize" '+(!pid?'disabled ':'')+'>'
   +(auth?'✓ Autorizado':'Autorizar execução')+'</button>'
   +(runtime?.last_error?'<button class="btn btn-sm" data-action="runtime-details" title="Mostrar por que o último início falhou">⚠ Diagnóstico</button>':'')
+  +'<button class="btn btn-sm" data-action="runtime-quality" '+(!pid?'disabled ':'')+'title="Verificação estática de imports React e sintaxe Python sem executar comandos">⊙ Testar</button>'
   +'<button class="btn btn-sm btn-primary" data-action="runtime-start" '+(!pid||running?'disabled ':'')+'>▶ Iniciar</button>'
   +'<button class="btn btn-sm" data-action="runtime-preview" '+(!running?'disabled ':'')+'>◉ Prévia</button>'
   +'<button class="btn btn-sm" data-action="runtime-stop" '+(!running?'disabled ':'')+'>■ Parar</button>'
@@ -507,6 +510,25 @@ async function authorizeRuntime(){
  await api('/conversations/'+encodeURIComponent(cid)+'/runtime/access','POST',{enabled});
  await loadChatRuntime();
  toast(enabled?'Permissão de execução concedida nesta conversa.':'Permissão revogada.');
+}
+async function runQualityChecks(){
+ if(!chatProjectId()){toast('Selecione um projeto.');return}
+ const cid=await ensureConvo();
+ try{
+  const report=await api('/conversations/'+encodeURIComponent(cid)+'/quality');
+  const checked=report.checked_files||0;
+  if(report.issues?.length){
+   appendEvent('⚠ Testador IA encontrou '+report.issues.length+
+     ' problema(s) em '+checked+' arquivo(s):\n'+report.issues.map(x=>'• '+x).join('\n')+
+     '\nAprovação automática e início da prévia ficam bloqueados até a correção.');
+   toast('Testador IA: foram encontrados problemas. Consulte o chat.');
+  }else{
+   appendEvent('✓ Testador IA: '+checked+' arquivo(s) verificados. '
+     +'Nenhum conflito direto de imports/exports React ou erro de sintaxe Python identificado. '
+     +'Isso não é um build ou teste de navegador.');
+   toast('Verificação estática concluída.');
+  }
+ }catch(err){toast('Não foi possível executar o Testador IA: '+err.message)}
 }
 async function startRuntime(){
  if(!chatProjectId()){toast('Selecione um projeto primeiro.');return}
