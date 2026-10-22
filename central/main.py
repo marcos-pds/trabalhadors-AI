@@ -327,9 +327,9 @@ def propose_workspace_files(pid:str,data:ChangesIn,user=Depends(current_user)):
 
 
 @app.get('/api/projects/{pid}/workspace/proposals/{proposal_id}')
-def preview_proposal(pid:str,proposal_id:str,user=Depends(current_user)):
+def preview_proposal(pid:str,proposal_id:str,full:bool=False,user=Depends(current_user)):
     require_owned(DB,'projects',pid,user['id'])
-    return ENGINE.workspaces.proposal(user['id'],pid,proposal_id)
+    return ENGINE.workspaces.proposal(user['id'],pid,proposal_id,full_diff=full)
 
 
 class ProposalDecision(BaseModel):
