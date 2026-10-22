@@ -90,6 +90,9 @@ def test_architect_approves_normal_code_only_after_grant(tmp_path):
         project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
         source=folder/'frontend/src/App.tsx';source.parent.mkdir(parents=True,exist_ok=True)
         source.write_text('export default function App(){return <main>Original</main>}')
+        card=folder/'frontend/src/components/ProductCard.tsx'
+        card.parent.mkdir(parents=True,exist_ok=True)
+        card.write_text('export default function ProductCard(){return <article/>}')
         cid=conversation(c,project)
         grant=c.post(f'/api/conversations/{cid}/architect-delegation',
                  json={'enabled':True},headers=HEADERS)
@@ -246,6 +249,7 @@ def test_modernization_with_manual_architect_creates_real_worker_tasks_and_appro
         (frontend/'App.tsx').write_text('export default function App(){return <p>Antiga loja</p>}')
         (frontend/'index.css').write_text('body{background:white}')
         (frontend/'components/ProductCard.tsx').write_text('export default function ProductCard(){return <div>Produto</div>}')
+        (frontend/'api.ts').write_text('export function getProducts(){return Promise.resolve([])}')
         backend=folder/'backend';backend.mkdir()
         (backend/'main.py').write_text("print('backend preservado')")
         c.post(f'/api/projects/{p}/skills/ux-ui-studio-pro',
