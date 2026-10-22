@@ -125,3 +125,42 @@ test('human workflow steps require inline consent and stale cards cannot decide 
  assert.ok(!source.includes('if(enabled&&!confirm(\'Autorizar a Central'));
  assert.ok(source.includes('Deseja abrir uma nova conversa para trocar de projeto?'));
 });
+
+
+test('chat review supports /revisar and always surfaces pending project proposals',async()=>{
+ const {parseSlashCommand,findSlashCommands}=await moduleUnderTest();
+ assert.equal(parseSlashCommand('/revisar').command,'revisar');
+ assert.equal(parseSlashCommand('/revisão').command,'revisar');
+ assert.ok(findSlashCommands('/rev').some(c=>c.name==='revisar'));
+ const js=fs.readFileSync('static/app.js','utf8');
+ assert.ok(js.includes('id="chat-pending-banner"'));
+ assert.ok(js.includes('async function loadChatPendingReviews()'));
+ assert.ok(js.includes("api('/projects/'+encodeURIComponent(pid)+'/workspace/pending')"));
+ assert.ok(js.includes("data-action=\"chat-review-open\""));
+ assert.ok(js.includes("case 'revisar':await loadChatPendingReviews();await openChatProposalReview();return;"));
+ assert.ok(js.includes("if(msg.event==='workspace_proposals')"));
+ assert.ok(js.includes("await loadChatPendingReviews();"));
+ assert.ok(js.includes('async function openChatProposalReview(id)'));
+ assert.ok(js.includes('renderChatProposalReview()'));
+ assert.ok(js.includes("async function decideChatProposal(approved)"));
+});
+
+test('the inline reviewer refuses stale or incomplete diff and requires APLICAR',()=>{
+ const s=fs.readFileSync('static/app.js','utf8');
+ const begin=s.indexOf('async function decideChatProposal(approved){');
+ const part=s.slice(begin,s.indexOf('async function enterChat(){',begin));
+ assert.ok(part.includes("if(typed!=='APLICAR')"));
+ assert.ok(part.includes("JSON.stringify(latest.files)!==JSON.stringify(preview.files)"));
+ assert.ok(part.includes("f.stale||f.diff_truncated"));
+ assert.ok(part.includes("if(S.currentRun)"));
+ assert.ok(part.includes("confirmation:approved?'APLICAR':''"));
+ assert.ok(part.includes("await loadChatPendingReviews()"));
+ assert.ok(part.includes("if(S.chatPendingReviews.length)await openChatProposalReview()"));
+ assert.ok(s.includes('data-action="chat-review-approve"'));
+ assert.ok(s.includes('data-action="chat-review-reject"'));
+ assert.ok(s.includes("chatProposalDiffHtml(file.diff)"));
+ assert.ok(s.includes("esc(line)"));
+ assert.ok(s.includes("preview.files.length>1"));
+ assert.ok(s.includes("Esta proposta contém"));
+ assert.ok(s.includes("S.page!=='chat'||chatProjectId()!==pid"));
+});
