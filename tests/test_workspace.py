@@ -469,3 +469,87 @@ def test_run_report_keeps_proposals_when_file_count_scan_fails(tmp_path,monkeypa
         rows=ENGINE.db.all('SELECT * FROM workspace_proposals WHERE run_id=?',
                            (response.json()['id'],))
         assert len(rows)==1 and rows[0]['status']=='pending'
+
+
+
+def test_review_worker_runs_after_frontend_backend_and_never_stages_invalid_json(tmp_path):
+    """Reviewer is read-only even when model emits a broken file manifest."""
+    class ThreeWorkers:
+        def __init__(self):
+            self.checked_review=False
+
+        async def stream(self,provider,key,model,system,messages):
+            if system.startswith('Implemente frontend'):
+                yield '{"files":[{"path":"frontend/src/App.tsx",'
+                yield '"content":"export default function App(){return <main>Loja nova</main>}"}]}'
+            elif system.startswith('Projete e implemente APIs'):
+                yield '{"files":[{"path":"backend/routers/products.py",'
+                yield '"content":"def list_products(): return []\\n"}]}'
+            elif system.startswith('Analise resultados criticamente'):
+                self.checked_review=True
+                assert 'SOMENTE DE LEITURA' in system
+                assert 'Finalize a resposta com UM bloco EXATO' not in system
+                assert 'central-files' not in system
+                assert 'central-packages' not in system
+                assert 'Frontend IA:' in messages[0]['content']
+                assert 'Backend IA:' in messages[0]['content']
+                # Malformed JSON must not be interpreted as a file to create.
+                yield '{"files":[{"path":"backend/unsafe-from-review.py","content":"incompleto'
+            else:
+                raise AssertionError('Trabalhador inesperado')
+
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        appfile=folder/'frontend/src/App.tsx'
+        appfile.parent.mkdir(parents=True,exist_ok=True)
+        appfile.write_text('export default function App(){return <p>Original</p>}')
+        convo=c.post('/api/conversations',json={'project_id':project},
+                     headers=HEADERS).json()['id']
+        agents=c.get('/api/agents').json()
+        selected=[next(a for a in agents if a['specialty']==role)['id']
+                  for role in ('frontend','backend','review')]
+        model=ThreeWorkers();ENGINE.client=model
+        run=c.post('/api/runs',json={'conversation_id':convo,'mode':'team',
+            'agent_ids':selected,'prompt':'Crie uma estrutura inicial de loja React com backend FastAPI '
+              'e divida entre Frontend, Backend e Revisor.'},headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed',result.get('error')
+        reviewer=next(s for s in result['steps'] if s['name']=='Revisor IA')
+        producers=[s for s in result['steps'] if s['name'] in ('Frontend IA','Backend IA')]
+        assert model.checked_review
+        assert len(producers)==2
+        assert set(__import__('json').loads(reviewer['deps']))=={s['id'] for s in producers}
+        assert all(s['status']=='completed' for s in producers)
+        assert appfile.read_text()=='export default function App(){return <p>Original</p>}'
+        assert not (folder/'backend/unsafe-from-review.py').exists()
+        pending=[p for p in c.get(f'/api/projects/{project}/workspace').json()['proposals']
+                 if p['status']=='pending']
+        assert {part['path'] for p in pending for part in p['files']} == {
+            'frontend/src/App.tsx','backend/routers/products.py'}
+        assert 'O JSON dos arquivos veio incompleto/inválido' not in result['output']
+        assert 'Revisão IA:' in result['output']
+        assert 'Aguardando revisão e aprovação' in result['output']
+
+
+def test_reviewer_cannot_stage_well_formed_manifest_in_project(tmp_path):
+    """A reviewer is not authorized to write files even if it produces valid JSON."""
+    class Reviewer:
+        async def stream(self,provider,key,model,system,messages):
+            yield '{"files":[{"path":"frontend/src/Injected.tsx",'
+            yield '"content":"export default function Injected(){return <h1>No</h1>}"}]}'
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project);add_provider(c,'fake',1)
+        convo=c.post('/api/conversations',json={'project_id':project},
+                     headers=HEADERS).json()['id']
+        reviewer=next(a for a in c.get('/api/agents').json() if a['specialty']=='review')
+        ENGINE.client=Reviewer()
+        run=c.post('/api/runs',json={'conversation_id':convo,'mode':'manual',
+                     'agent_ids':[reviewer['id']],
+                     'prompt':'Revise a arquitetura de frontend e backend sem executar comandos.'},
+                     headers=HEADERS)
+        assert run.status_code==200,run.text
+        result=wait_for(c,run.json()['id'])
+        assert result['status']=='completed'
+        assert not (folder/'frontend/src/Injected.tsx').exists()
+        assert c.get(f'/api/projects/{project}/workspace').json()['proposals']==[]
