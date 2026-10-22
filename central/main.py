@@ -413,6 +413,27 @@ def inspect_chat_project(cid:str,user=Depends(current_user)):
     return inspect_project(ENGINE.workspaces,user['id'],project)
 
 
+class ExplicitDependencyInstallIn(BaseModel):
+    package: str = Field(min_length=1,max_length=80)
+
+
+@app.post('/api/conversations/{cid}/dependencies/install')
+async def install_missing_dependency(cid:str,data:ExplicitDependencyInstallIn,
+                                     request:Request,user=Depends(current_user)):
+    """A fresh deterministic QA finding and user click are both required."""
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    project=RUNTIME.access(user['id'],cid)['project_id']
+    from .skills import NPM
+    if data.package not in NPM:
+        raise HTTPException(403,'Biblioteca não permitida para instalação pelo chat.')
+    report=inspect_project(ENGINE.workspaces,user['id'],project)
+    if data.package not in report.get('missing_packages',[]):
+        raise HTTPException(409,'Dependência não consta mais como ausente. Execute /testar novamente.')
+    result=await ENGINE.skills.install_explicit(user['id'],cid,project,data.package)
+    return {'result':result,'quality':inspect_project(ENGINE.workspaces,user['id'],project)}
+
+
 class RuntimeAccessIn(BaseModel):
     enabled: bool
 
