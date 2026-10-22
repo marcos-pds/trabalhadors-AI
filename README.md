@@ -346,3 +346,14 @@ Quando **`/testar`** encontra problemas concretos de imports/exports React ou si
 - A lista de propostas de substituição e exclusão de arquivos ainda precisa ser inspecionada no explorador **Projetos → Arquivos** para visualizar o diff integral e obter a confirmação `APLICAR` antes de gravar. Cartões de reparo não substituem essa inspeção.
 
 **Validação:** verificações Python e Node na CI, inclusive escolha de Frontend/Backend baseada no caminho diagnosticado, limites do prompt de correção, bloqueio de comandos inventados e uso de cartões de consentimento na interface. O teste de interação real com o navegador e modelos conectados ainda deve ser feito no Windows.
+
+
+### Corrigido: importação de CSS em propostas React/Vite
+
+Em uma correção iniciada pelo `/testar`, o Frontend IA preparou propostas para `frontend/src/components/LoadingSpinner.tsx`, `frontend/src/main.tsx` e `frontend/src/index.css`. O QA bloqueou a revisão porque dizia que `./index.css` não existia, apesar de o arquivo CSS estar incluído nas propostas da mesma execução.
+
+A causa era o resolvedor `central/quality.py`: ele procurava exclusivamente módulos `.ts/.tsx/.js/.jsx`, sem considerar propostas de `.css`. Agora arquivos de estilo e recursos textuais conhecidos participam da resolução de imports relativos tanto nas propostas ainda não aplicadas quanto no código que já está no disco. Os arquivos de estilo são verificados quanto à existência, mas não são tratados como módulos JavaScript com exports nomeados.
+
+A verificação continua detectando `import { LoadingSpinner }` contra um módulo com apenas `export default`. Propostas existentes continuam exigindo aprovação independente; corrigir o falso positivo **não as aplica**. Para validar, atualize a branch, revise as três propostas em **Projetos → Arquivos**, aplique somente os diffs corretos e use `/testar` novamente. Um relatório histórico de execução não é recalculado retroativamente.
+
+Quatro testes novos cobrem arquivos CSS propostos na mesma rodada, CSS ausente de fato, CSS modules e integração real do staging preservando arquivos existentes. Na CI: **88 passed, 1 warning** em Python, **9 tests passed** no Node.
