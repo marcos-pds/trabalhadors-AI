@@ -410,7 +410,7 @@ async function offerStepApproval(stepId){
     +'substituição de arquivos pendentes nem instalação de pacotes por conta própria.',
    confirmLabel:'✓ Aprovar etapa',denyLabel:'Negar etapa'
   });
-  if(S.currentRun!==runId||S.currentConvo!==convo||chatProjectId()!==project)return;
+  if(approved===null || S.currentRun!==runId||S.currentConvo!==convo||chatProjectId()!==project)return;
   await api('/runs/'+encodeURIComponent(runId)+'/steps/'+encodeURIComponent(stepId)+
    '/approval','POST',{approved});
   appendEvent(approved?'✓ Etapa "'+step.name+'" aprovada pelo usuário.':
@@ -430,7 +430,7 @@ function cancelChatDecisions(){
    const status=card.querySelector('.chat-permission-result');
    if(status)status.textContent='Autorização encerrada por mudança de contexto.';
   }
-  entry.resolve(false);
+  entry.resolve(null);
  }
  S.chatDecisions.clear();
 }
@@ -470,7 +470,7 @@ function decideChatPermission(id,allowed){
   if(status)status.textContent=granted?'✓ Autorizado. Executando ação...':
     '✕ Negado. Nenhuma ação autorizada foi executada.';
  }
- entry.resolve(granted);
+ entry.resolve(current?granted:null);
 }
 async function submitRepairRun(issueSnapshot,workerSnapshot,sourceConversation,sourceProject){
  if(S.currentRun){toast('Conclua a execução atual antes de solicitar uma correção.');return}
