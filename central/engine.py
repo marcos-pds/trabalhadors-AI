@@ -10,6 +10,7 @@ from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .workspace import Workspaces, WorkspaceError
 from .skills import SkillsHub
+from .roles import worker_role, role_source
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -44,10 +45,10 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
     if mode == 'manual': return candidates[:1]
     lower = prompt.lower()
     specialties = [name for name, words in KEYWORDS.items() if any(w in lower for w in words)]
-    filtered = [a for a in candidates if a['specialty'] in specialties]
+    filtered = [a for a in candidates if worker_role(a) in specialties]
     if mode == 'team' and not filtered:
-        filtered = [a for a in candidates if a['specialty'] in ('architecture','code','review')]
-    return filtered[:3] if filtered else [next((a for a in candidates if a['specialty']=='coordination'), candidates[0])]
+        filtered = [a for a in candidates if worker_role(a) in ('architecture','code','review')]
+    return filtered[:3] if filtered else [next((a for a in candidates if worker_role(a)=='coordination'), candidates[0])]
 
 
 def create_plan(agents):
@@ -96,11 +97,11 @@ def ui_execution_plan(agents, prompt, mode, agent_ids, skill_active):
     if not skill_active or not ui_implementation_request(prompt):
         return None
     enabled=[a for a in agents if a['enabled']]
-    by_role={a['specialty']:a for a in enabled}
+    by_role={worker_role(a):a for a in enabled}
     if not all(x in by_role for x in ('architecture','design','frontend')):
         return None
     chosen=[a for a in enabled if a['id'] in (agent_ids or [])]
-    delegated_architect=any(a['specialty']=='architecture' for a in chosen)
+    delegated_architect=any(worker_role(a)=='architecture' for a in chosen)
     explicit_coordination=bool(re.search(
         r'arquiteto(?:\s+ia)?.{0,100}coorden\w*.{0,100}frontend.{0,90}designer',
         prompt,re.I|re.S))
@@ -212,11 +213,11 @@ class Engine:
                 if not skill_active:
                     causes.append('a Skill UI/UX Studio Pro não está ativa para o projeto desta conversa')
                 names={'architecture':'Arquiteto IA','design':'Designer IA','frontend':'Frontend IA'}
-                all_agents=self.db.all('SELECT specialty,enabled FROM agents WHERE user_id=?',(user_id,))
+                all_agents=self.db.all('SELECT name,specialty,enabled FROM agents WHERE user_id=?',(user_id,))
                 for role,label in names.items():
-                    entries=[a for a in all_agents if a['specialty']==role]
+                    entries=[a for a in all_agents if worker_role(a)==role]
                     if not entries:
-                        causes.append(label+' não está cadastrado')
+                        causes.append(label+' não foi reconhecido (confira Especialidade: '+role+' em Trabalhadores → Configurar)')
                     elif not any(a['enabled'] for a in entries):
                         causes.append(label+' está desativado')
                 if not causes:
@@ -226,15 +227,15 @@ class Engine:
             # For delegated team projects, the Architect receives downstream context
             # and may request only cataloged dependencies; human remains the authority.
             grant = self.skills.delegation(user_id, conversation_id)
-            if ui_plan is None and grant['enabled'] and mode == 'team' and not any(a['specialty']=='architecture' for a in chosen):
-                architect = next((a for a in agents if a['specialty']=='architecture' and a['enabled']),None)
+            if ui_plan is None and grant['enabled'] and mode == 'team' and not any(worker_role(a)=='architecture' for a in chosen):
+                architect = next((a for a in agents if worker_role(a)=='architecture' and a['enabled']),None)
                 if architect:
                     plan.append({'id':uid(),'agent_id':architect['id'],'name':architect['name'],
                                  'kind':'agent','deps':[p['id'] for p in plan],
                                  'instructions':'Inspecione os resultados, revise a arquitetura e, somente se necessário, '
                                  'solicite instalação de dependências do catálogo usando central-packages.'})
-            if ui_plan is None and len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
-                reviewer = next((a for a in agents if a['specialty']=='review'), None)
+            if ui_plan is None and len(chosen) > 1 and not any(worker_role(a)=='review' for a in chosen):
+                reviewer = next((a for a in agents if worker_role(a)=='review'), None)
                 if reviewer:
                     plan.append({'id':uid(),'agent_id':reviewer['id'],'name':reviewer['name'],
                                  'kind':'agent','deps':[p['id'] for p in plan],'instructions':'Revise as entregas anteriores; reporte problemas concretos e ressalvas.'})
@@ -394,8 +395,8 @@ class Engine:
         system = agent['instructions'] + '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
         system += self.workspaces.prompt(user,run['conversation_id'],request=run['prompt']+' '+(step['instructions'] or ''))
-        system += self.skills.guide(user,run['conversation_id'],agent['specialty'])
-        if agent['specialty']=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
+        system += self.skills.guide(user,run['conversation_id'],worker_role(agent))
+        if worker_role(agent)=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
             from .skills import NPM, PIP
             system += ('\nAUTONOMIA EXPLICITAMENTE DELEGADA NESTA CONVERSA: o executor poderá '
                        'submeter alterações normais de código à revisão independente do Arquiteto. '
@@ -507,8 +508,9 @@ class Engine:
         """One independent Architect model decision per proposal, never a self-approved tool call."""
         grant=self.skills.delegation(run['user_id'],run['conversation_id'])
         if not grant['enabled'] or not proposals:return []
-        architect=self.db.one("""SELECT * FROM agents WHERE user_id=? AND specialty='architecture'
-                                  AND enabled=1 ORDER BY created_at LIMIT 1""",(run['user_id'],))
+        available=self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1 ORDER BY created_at',
+                              (run['user_id'],))
+        architect=next((a for a in available if worker_role(a)=='architecture'),None)
         if not architect:return []
         providers=self.health.rank(
             self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC',
@@ -574,7 +576,7 @@ class Engine:
     async def _repair_architect_package_output(self,run,step,agent,provider,model,output):
         """One bounded normalization attempt; never execute markdown shell examples."""
         if ('UI_STAGE_PLANNING' not in (step['instructions'] or '') or
-            agent['specialty']!='architecture' or run['budget_limit'] is not None or
+            worker_role(agent)!='architecture' or run['budget_limit'] is not None or
             not self.skills.delegation(run['user_id'],run['conversation_id'])['enabled']):
             return output
         from .skills import NPM, PIP, SkillsHub
@@ -635,7 +637,7 @@ class Engine:
             return output
         allowed = ('frontend', 'backend', 'code', 'design', 'architecture') if repair_edit else (
             'frontend', 'backend', 'code', 'design')
-        if agent['specialty'] not in allowed:
+        if worker_role(agent) not in allowed:
             return output
         try:
             if self.workspaces._extract_files(output):
@@ -651,7 +653,7 @@ class Engine:
             'aprovação antes de substituir. Não proponha exclusões. '
             if repair_edit else
             'Gere UM ÚNICO arquivo NOVO, pequeno, utilizável e completo '
-            'na sua especialidade (' + agent['specialty'] + '). '
+            'na sua especialidade (' + worker_role(agent) + '). '
             'Não modifique arquivos existentes sem necessidade. ')
         ask = (
             'ENTREGA TÉCNICA OBRIGATÓRIA. Sua primeira resposta não trouxe arquivos completos. '
