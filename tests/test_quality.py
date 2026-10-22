@@ -314,14 +314,15 @@ def test_dependency_install_requires_user_click_and_current_qa_evidence(tmp_path
         convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
         endpoint=f'/api/conversations/{convo}/dependencies/install'
         calls=[]
-        def safe_fake_install(user_id,pid,manager,packages):
+        from central.skills import SkillsHub
+        def safe_fake_install(self,user_id,pid,manager,packages):
             calls.append((pid,manager,packages))
             new=front/'node_modules/lucide-react'
             new.mkdir(parents=True)
             (new/'package.json').write_text('{"name":"lucide-react"}')
             manifest.write_text(json.dumps({'dependencies':{'react':'^18','lucide-react':'^0.5'}}))
             return {'ok':True,'manager':manager,'packages':packages,'exit_code':0,'output':'mocked install'}
-        monkeypatch.setattr(engine.skills,'_install_sync',safe_fake_install)
+        monkeypatch.setattr(SkillsHub,'_install_sync',safe_fake_install)
         assert c.post(endpoint,json={'package':'lucide-react'}).status_code==403
         assert c.post(endpoint,json={'package':'unapproved-library'},headers=HEADERS).status_code==403
         assert calls==[]
