@@ -68,3 +68,26 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
  .chat-skill-list{width:100%}
  .chat-context-note{font-size:10px}
 }
+
+
+/* Manual local runtime controls inside Chat IA */
+.chat-runtime-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+ padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+.chat-runtime-title{display:flex;flex-direction:column;gap:3px;flex:1;min-width:155px}
+.chat-runtime-title strong{font-size:12px}
+.chat-runtime-title small{font-size:10px;color:var(--muted)}
+.chat-runtime-bar .btn{white-space:nowrap}
+.runtime-preview-back{position:fixed;inset:0;background:rgba(3,7,20,.85);z-index:400;
+ display:flex;align-items:center;justify-content:center;padding:18px}
+.runtime-preview-window{display:flex;flex-direction:column;width:min(1320px,98vw);
+ height:min(850px,94vh);background:var(--panel);border:1px solid var(--line);
+ box-shadow:0 30px 90px #000b;border-radius:15px;overflow:hidden}
+.runtime-preview-header{display:flex;gap:12px;align-items:center;padding:12px 16px;
+ flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.runtime-preview-header strong{flex:1;font-size:14px}
+.runtime-preview-header span{color:var(--muted);font-size:11px}
+.runtime-preview-window iframe{flex:1;min-height:0;border:0;background:white;width:100%}
+.runtime-preview-note{font-size:11px;color:var(--muted);padding:9px 16px;margin:0}
+@media(max-width:780px){.chat-runtime-bar{padding:10px;gap:6px}
+ .chat-runtime-title{flex-basis:100%}.runtime-preview-back{padding:5px}
+ .runtime-preview-window{height:96vh;width:100%}.runtime-preview-header span{display:none}}
