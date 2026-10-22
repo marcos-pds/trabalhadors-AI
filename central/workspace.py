@@ -374,7 +374,7 @@ class Workspaces:
             # Review and architectural planning are not file-producing actions.
             # Never parse or stage a reviewer manifest even when its JSON is
             # incomplete: the reviewer should examine, not overwrite, code.
-            if worker_role({'name':step['worker_name'],'specialty':step['specialty']})=='review':
+            if worker_role({'name':step['worker_name'],'specialty':step['specialty']}) in ('review','testing'):
                 continue
             try:
                 files=self._extract_files(step['output'] or '')
