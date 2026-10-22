@@ -60,12 +60,20 @@ def create_plan(agents):
              'kind': 'agent', 'deps': [], 'instructions': ''} for a in agents]
     # A Reviewer cannot assess work that has not yet been delivered. Frontend
     # and Backend may work in parallel; reviewers begin only after their steps.
-    producers = [job['id'] for job,agent in zip(jobs,agents) if worker_role(agent)!='review']
+    producers=[job['id'] for job,agent in zip(jobs,agents) if
+               worker_role(agent) not in ('review','testing')]
+    test_steps=[job['id'] for job,agent in zip(jobs,agents) if worker_role(agent)=='testing']
     for job,agent in zip(jobs,agents):
-        if worker_role(agent)=='review':
-            job['deps'] = producers[:]
+        if worker_role(agent)=='testing':
+            job['deps']=producers[:]
+            job['instructions']=(
+                'QA_ONLY. Verifique entregas anteriores e diagnósticos automáticos. '
+                'Reporte falhas de imports/exports, build não executado, integração e '
+                'sintaxe sem gerar arquivos ou executar comandos.')
+        elif worker_role(agent)=='review':
+            job['deps']=producers+test_steps
             job['instructions'] = (
-                'REVIEW_ONLY. Analise os resultados das etapas anteriores. '
+                'REVIEW_ONLY. Analise os resultados das etapas anteriores e os testes. '
                 'Não entregue código, arquivos para gravação, comandos nem solicite instalação. '
                 'Relate falhas de integração, arquivos e APIs conflitantes, riscos e verificações '
                 'pendentes. Seu parecer não substitui aprovação humana.')
