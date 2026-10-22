@@ -16,7 +16,7 @@ from pathlib import Path
 from .database import uid, utcnow
 from .scaffolds import react_fastapi_files
 from .roles import worker_role
-from .quality import inspect_sources
+from .quality import inspect_sources, inspect_npm_imports
 
 MAX_FILE = 160_000
 MAX_FILES = 20
@@ -439,6 +439,16 @@ class Workspaces:
             except (WorkspaceError,UnicodeError,OSError):
                 return None
         qa_issues=inspect_sources(read_existing,overlay)
+        # A new component must declare its external npm imports. Installed files
+        # are checked separately by /testar; proposal validation stays read-only.
+        manifest_text=overlay.get('frontend/package.json') or read_existing('frontend/package.json')
+        if manifest_text:
+            try:
+                manifest=json.loads(manifest_text)
+                externals,_=inspect_npm_imports(overlay,manifest,check_installed=False)
+                qa_issues.extend(externals)
+            except (ValueError,TypeError):
+                qa_issues.append('frontend/package.json: JSON inválido.')
         # Validate all candidates BEFORE any disk write, across all workers.
         try:
             for name,files in tasks:
