@@ -186,13 +186,13 @@ A Central pode preparar uma subpasta privada para cada **Projeto** em `C:\Projet
 
 A aba **Skills UX/UI** permite ativar por projeto o guia interno **UI/UX Studio Pro**. Ele enriquece o contexto dos trabalhadores Frontend, Designer, Programador, Arquiteto e Revisor com práticas de UX, acessibilidade, design system, Tailwind 4, shadcn/ui, Lucide, Motion e testes visuais. É uma **skill local de instruções**, não um cliente MCP externo nem um instalador automático de shadcn/ui; não existem comandos arbitrários nem screenshots de Playwright nesta fase.
 
-### Delegar autoridade via chat ou botão
+### Delegar autoridade via comando no chat
 
-Abra uma conversa **vinculada a um projeto com pasta preparada** e use o botão **Arquiteto: autorizar**, confirmando a permissão; ou envie, como uma mensagem isolada e literal, o seguinte comando:
+Abra uma conversa **vinculada a um projeto com pasta preparada** e digite **`/arquiteto`**, confirmando a permissão; alternativamente envie, como uma mensagem isolada e literal, a declaração:
 
     Autorizo o Arquiteto IA a aprovar alterações e instalar pacotes permitidos neste projeto.
 
-A autorização fica persistida **somente naquela conversa/projeto**; outras conversas não herdam os poderes. Para revogar, clique novamente no botão ou envie:
+A autorização fica persistida **somente naquela conversa/projeto**; outras conversas não herdam os poderes. Para revogar, digite **`/arquiteto`** novamente ou envie:
 
     Revogo a autonomia do Arquiteto IA.
 
@@ -246,17 +246,41 @@ Se o Revisor ainda responder com um manifesto de arquivos em vez de um parecer, 
 Para projetos já existentes, pedidos de estrutura inicial que propõem substituir arquivos ou misturam novas estruturas de backend são mantidos como alterações pendentes. Antes de aplicar, confira o entrypoint `backend/main.py`, módulos auxiliares e o endpoint `/api/products`, bem como imports e props dos componentes React. A existência de propostas não comprova que o projeto compila ou funciona.
 
 
+
+### Paleta de comandos do Chat IA
+
+Digite uma barra `/` no campo de texto. A paleta de sugestões abre automaticamente **acima do campo**, com navegação por setas, `Enter` para escolher, `Tab` para completar e `Esc` para fechar. Também é possível clicar numa opção. Os comandos são locais e **não consomem tokens dos provedores**, não entram no histórico como solicitações à IA e não são interpretados como comandos do terminal.
+
+| Comando | Ação |
+| --- | --- |
+| `/ajuda` | Mostrar a lista atual de comandos |
+| `/testar` | Verificação estática do Testador IA, sem executar código |
+| `/iniciar` | Iniciar os servidores React/Vite e FastAPI, após autorização |
+| `/previa` | Abrir uma prévia real da aplicação local |
+| `/parar` | Encerrar os servidores iniciados pela Central |
+| `/autorizar` | Conceder autorização para execução local após confirmação |
+| `/revogar` | Revogar autorização de execução e encerrar servidores |
+| `/diagnostico` | Mostrar o último erro de inicialização com opção de copiar |
+| `/status` | Mostrar vínculo do projeto, autorização e estado dos servidores |
+| `/arquiteto` | Conceder/revogar a delegação de aprovação e instalação permitida |
+| `/projeto` | Focar o seletor de projeto da conversa |
+| `/skills` | Focar os controles de Skills do projeto |
+
+Os controles **Projeto** e **Skills do projeto** continuam visíveis no topo. Os comandos `/projeto` e `/skills` apenas focam esses controles; não trocam de projeto ou concedem permissões por conta própria.
+
+A barra de botões de runtime foi removida do layout, mas os endpoints de execução e suas verificações de permissão, CSRF, sandbox e catálogo de pacotes continuam os mesmos. Digitar `/iniciar npm install`, ou qualquer comando que não esteja no catálogo, é recusado e **não é encaminhado à IA**; não há interpretador de shell no chat. A autorização do Arquiteto é independente da autorização para executar os servidores, e ambas seguem exigindo confirmação do usuário.
+
 ## Executar e visualizar projetos diretamente no Chat IA
 
-No Chat IA, após selecionar um projeto, aparecem quatro controles: **Autorizar execução**, **Iniciar**, **Prévia** e **Parar**. A autorização é concedida pelo usuário autenticado com confirmação explícita e fica registrada apenas para a conversa e o projeto vinculados. Revogar a autorização encerra os processos que a Central iniciou. Mudar de projeto em um rascunho também interrompe os servidores e elimina a autorização anterior. Autorizar o Arquiteto IA não equivale a autorizar execução local.
+No Chat IA, após selecionar um projeto, digite **`/`** no campo de mensagem para abrir a paleta de comandos. Os antigos botões **Autorizar execução**, **Iniciar**, **Prévia** e **Parar** foram removidos e substituídos por **`/autorizar`**, **`/iniciar`**, **`/previa`** e **`/parar`**. A autorização é concedida pelo usuário autenticado com confirmação explícita e fica registrada apenas para a conversa e o projeto vinculados. Revogar a autorização encerra os processos que a Central iniciou. Mudar de projeto em um rascunho também interrompe os servidores e elimina a autorização anterior. Autorizar o Arquiteto IA não equivale a autorizar execução local.
 
-**Iniciar** abre dois processos locais com comandos predefinidos (sem shell e sem comandos gerados por modelos):
+**`/iniciar`** abre dois processos locais com comandos predefinidos (sem shell e sem comandos gerados por modelos):
 - FastAPI: usa `backend/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000` no Windows.
 - React/Vite: chama diretamente o executável do Vite `frontend/node_modules/vite/bin/vite.js` usando Node.js na porta fixa 5173, sem `npm run`, `npx` ou scripts de instalação.
-- Dependências e ambientes virtuais precisam estar previamente preparados em `frontend/node_modules` e `backend/.venv`. A Central **não instala dependências, altera arquivos de projeto, faz build ou publica o site** ao apertar Iniciar.
+- Dependências e ambientes virtuais precisam estar previamente preparados em `frontend/node_modules` e `backend/.venv`. A Central **não instala dependências, altera arquivos de projeto, faz build ou publica o site** ao executar `/iniciar`.
 - O frontend deve conversar com o FastAPI via `http://127.0.0.1:8000/api/products` conforme seu código. Se a porta 5173 ou 8000 estiver ocupada por servidores iniciados manualmente, a Central recusa o início e pede que sejam parados ou que sejam visualizados separadamente. Por segurança não assume a posse de servidores desconhecidos.
-- **Prévia** abre a aplicação React realmente servida pelo Vite em um iframe com sandbox, com opção **Nova aba**. A prévia é do código já aplicado no disco: propostas pendentes de aprovação não aparecem.
-- **Parar** encerra os processos iniciados por esta instância da Central. Eles também são encerrados no desligamento normal da Central. Permissões persistidas não iniciam servidores automaticamente após reiniciar o programa.
+- **`/previa`** abre a aplicação React realmente servida pelo Vite em um iframe com sandbox, com opção **Nova aba**. A prévia é do código já aplicado no disco: propostas pendentes de aprovação não aparecem.
+- **`/parar`** encerra os processos iniciados por esta instância da Central. Eles também são encerrados no desligamento normal da Central. Permissões persistidas não iniciam servidores automaticamente após reiniciar o programa.
 
 ### Segurança e limitações
 
@@ -267,9 +291,9 @@ O executor só reconhece estrutura de desenvolvimento React/Vite + FastAPI, vinc
 
 ### Diagnóstico de inicialização da prévia
 
-O botão Iniciar agora só confirma sucesso depois que FastAPI (porta 8000) e Vite (resposta HTTP local na porta 5173) estiverem ativos. Aguarda até 8 segundos e interrompe os processos lançados caso ocorra erro ou tempo limite. Não executa instalação de dependências nem corrige arquivos automaticamente.
+O comando `/iniciar` só confirma sucesso depois que FastAPI (porta 8000) e Vite (resposta HTTP local na porta 5173) estiverem ativos. Aguarda até 8 segundos e interrompe os processos lançados caso ocorra erro ou tempo limite. Não executa instalação de dependências nem corrige arquivos automaticamente.
 
-Se o Python ou o Vite encerrar rapidamente, a Central retorna um erro HTTP 422 com o nome do processo, código de saída e trecho limitado das mensagens do servidor. O Chat IA mostra o diagnóstico em uma mensagem, mantém a opção Iniciar para nova tentativa e oferece **Diagnóstico** para reabrir/copiar a mensagem após recarregar a conversa (durante a mesma sessão do servidor). Enquanto o serviço não estiver saudável, **Prévia** fica desabilitada. Se um servidor encerrar depois de iniciar, a próxima consulta de status invalida a prévia e guarda a falha. O stdout dos processos é consumido continuamente com buffer limitado para não bloquear subprocessos.
+Se o Python ou o Vite encerrar rapidamente, a Central retorna um erro HTTP 422 com o nome do processo, código de saída e trecho limitado das mensagens do servidor. O Chat IA mostra o diagnóstico em uma mensagem, mantém `/iniciar` para nova tentativa e oferece **`/diagnostico`** para reabrir/copiar a mensagem após recarregar a conversa (durante a mesma sessão do servidor). Enquanto o serviço não estiver saudável, `/previa` continua indisponível. Se um servidor encerrar depois de iniciar, a próxima consulta de status invalida a prévia e guarda a falha. O stdout dos processos é consumido continuamente com buffer limitado para não bloquear subprocessos.
 
 Causas comuns: Vite sem dependências de `node_modules`, backend com importação inválida, pacote uvicorn ausente no virtualenv ou incompatibilidade de código proposta anteriormente. Corrija somente após ler o diagnóstico; as alterações pendentes permanecem na revisão e nenhuma instalação é iniciada automaticamente.
 
@@ -278,7 +302,7 @@ Causas comuns: Vite sem dependências de `node_modules`, backend com importaçã
 
 Quando um servidor Vite encerra com código 1, as primeiras linhas normalmente explicam a causa (por exemplo, `Failed to load PostCSS config`, plugin Tailwind não instalado ou formato incompatível de `postcss.config.js`). O buffer anterior mostrava apenas as **últimas cinco linhas** e podia ocultar essa mensagem, exibindo apenas `at Array.map`, `at plugins` e `Node.js ...`.
 
-O diagnóstico do runtime agora preserva o início do log **e** o fim do stack trace, com retenção limitada. Use **Chat IA → ⚠ Diagnóstico → Copiar diagnóstico**, sem incluir arquivos contendo chaves de API. Não altere o arquivo de configuração de CSS por suposição: primeiro confira a mensagem completa e os arquivos `frontend/postcss.config.*`, `frontend/vite.config.ts`, `frontend/package.json` e eventuais configs ancestrais.
+O diagnóstico do runtime agora preserva o início do log **e** o fim do stack trace, com retenção limitada. Digite **`/diagnostico`** no Chat IA e escolha **Copiar diagnóstico**, sem incluir arquivos contendo chaves de API. Não altere o arquivo de configuração de CSS por suposição: primeiro confira a mensagem completa e os arquivos `frontend/postcss.config.*`, `frontend/vite.config.ts`, `frontend/package.json` e eventuais configs ancestrais.
 
 Para diagnosticar diretamente no Git Bash, sem modificar dependências:
 ```bash
@@ -304,7 +328,7 @@ O estágio de arquivos verifica imports relativos React/TypeScript em relação 
 Se houver incompatibilidade, **nenhum arquivo daquela rodada é aplicado automaticamente**, e a autorização delegada ao Arquiteto **não contorna** a falha. O relatório do chat exibe os caminhos e símbolos afetados; as propostas permanecem disponíveis para revisão e correção.
 
 ### Testar o projeto atual no Chat IA
-Use **⊙ Testar**, junto dos controles Autorizar / Iniciar / Prévia / Parar. Esta primeira versão executa **somente análise estática**, sem iniciar processos, e verifica imports/exports de React/TypeScript e sintaxe Python dos arquivos na pasta autorizada (até 120 arquivos). Retorna uma lista de erros no chat. Ao pressionar **Iniciar**, uma verificação estática semelhante é feita como pré-requisito, impedindo a execução de um projeto com incompatibilidade detectada.
+Digite **`/testar`** na conversa para verificar o projeto local, sem procurar botões na barra. Esta primeira versão executa **somente análise estática**, sem iniciar processos, e verifica imports/exports de React/TypeScript e sintaxe Python dos arquivos na pasta autorizada (até 120 arquivos). Retorna uma lista de erros no chat. Ao executar **`/iniciar`**, uma verificação estática semelhante é feita como pré-requisito, impedindo a execução de um projeto com incompatibilidade detectada.
 
 **Limitação deliberada:** isso não substitui o compilador TypeScript, `npm run build`, os testes `pytest` do próprio projeto ou testes de navegador com Playwright. Erros de tipagem avançada, runtime, integração HTTP, configurações PostCSS ou Tailwind podem não ser detectados pela verificação estática atual. Nenhum comando de testes é executado sem autorização específica para execução de código.
 
