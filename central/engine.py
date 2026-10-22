@@ -315,10 +315,22 @@ class Engine:
                 changes['pending'] or changes['auto_applied'] or changes['architect_applied'] or changes['installed'] or changes['errors'] or
                 any('UI_STAGE_IMPLEMENT' in (p.get('instructions') or '') for p in json.loads(run['plan']))):
                 try:
-                    workspace = self.workspaces.info(run['user_id'],convo['project_id'])
+                    # The report must not depend on enumerating thousands of
+                    # installed packages or on decoding unrelated old proposals.
+                    # Only the file explorer needs the full workspace.info().
+                    folder=self.workspaces._folder(run['user_id'],convo['project_id'])
                     summary = ['## Resultado no Windows',
-                               '**Pasta local:** `' + workspace['folder'] + '`',
-                               '**Arquivos existentes:** ' + str(len(workspace['files']))]
+                               '**Pasta local:** `' + str(folder) + '`']
+                    try:
+                        files=self.workspaces.tree(run['user_id'],convo['project_id'])
+                        summary.append('**Arquivos existentes (até 300 visíveis):** '+str(len(files)))
+
+                    except (OSError,WorkspaceError) as scan_exc:
+                        self.emit(run_id,'workspace_summary_warning',{
+                            'code':'file_scan_failed',
+                            'type':type(scan_exc).__name__,
+                            'message':'Não foi possível contar os arquivos. As propostas e aprovações estão preservadas.'})
+                        summary.append('**Arquivos existentes:** contagem indisponível (falha ao percorrer a pasta).')
                     applied = []
                     pending = []
                     approved_by_architect = []
@@ -340,8 +352,9 @@ class Engine:
                         summary.append('**Instalação autorizada:** '+install.get('manager','?')+
                                        ' ('+', '.join(install.get('packages') or [])+'): '+
                                        ('concluída' if install.get('ok') else 'falhou: '+install.get('error','Verifique o histórico.')))
-                    if not applied and not approved_by_architect and workspace['files']:
-                        summary.append('Os arquivos acima já existentes foram preservados. Nenhum arquivo gerado pela IA foi aplicado nesta execução.')
+                    if not applied and not approved_by_architect:
+                        summary.append('Nenhum arquivo gerado pela IA foi aplicado nesta execução. '
+                                       'Alterações pendentes permanecem disponíveis para revisão.')
                     if any('UI_STAGE_IMPLEMENT' in (p.get('instructions') or '') for p in json.loads(run['plan'])) and not changes['installed']:
                         summary.append('**Dependências:** nenhuma instalação registrada nesta execução.')
                     if changes['errors']:
@@ -349,9 +362,25 @@ class Engine:
                     summary.append('Abra **Projetos → Arquivos** para conferir os arquivos reais, editar ou aprovar alterações.')
                     summary.append('A saída técnica completa de cada agente continua registrada nas etapas da execução.')
                     output = '\n\n'.join(summary)
-                except Exception:
-                    output = ('Não foi possível consultar a pasta local ao concluir o projeto. '
-                              'Consulte **Projetos → Arquivos** e o histórico da execução.')
+                except Exception as report_exc:
+                    # Reporting problems must NEVER erase the verified stage
+                    # outcome, or falsely claim that files were not generated.
+                    self.emit(run_id,'workspace_summary_warning',{
+                        'code':'report_failed','type':type(report_exc).__name__,
+                        'message':'Falha ao gerar o relatório da pasta; o histórico das etapas permanece salvo.'})
+                    fallback=self.db.one('SELECT relative_path FROM project_workspaces '
+                       'WHERE project_id=? AND user_id=?',(convo['project_id'],run['user_id']))
+                    output=('## Resultado do projeto\n\n'
+                        + '**Pasta registrada:** '+(fallback['relative_path'] if fallback else '(não preparada)')
+                        + '\n\n**Arquivos novos aplicados:** '+str(len(changes.get('auto_applied',[])))
+                        + '\n\n**Alterações aprovadas pelo Arquiteto:** '+str(len(changes.get('architect_applied',[])))
+                        + '\n\n**Propostas aguardando revisão:** '+str(len(changes.get('pending',[])))
+                        + '\n\n**Aviso:** Não foi possível montar a listagem completa dos arquivos. '
+                          'O histórico das etapas e as propostas permanecem no banco da Central. '
+                          'Verifique **Projetos → Arquivos**. Código do erro: '
+                          +type(report_exc).__name__
+                        + ('\n\n**Avisos da geração:** '+'; '.join(changes.get('errors',[])[:3])
+                           if changes.get('errors') else ''))
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
