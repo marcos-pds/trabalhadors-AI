@@ -1,4 +1,4 @@
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false};
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -209,7 +209,7 @@ function renderChatSkills(){
 }
 async function refreshChatContext(){
  const cid=S.currentConvo,pid=chatProjectId();
- if(!pid){S.chatSkills=[];S.delegation=null;renderChatSkills();return}
+ if(!pid){S.chatSkills=[];S.delegation=null;S.chatRuntime=null;renderChatSkills();updateRuntimeControls();return}
  const requests=[api('/skills?project_id='+encodeURIComponent(pid))];
  if(cid)requests.push(api('/conversations/'+encodeURIComponent(cid)+'/architect-delegation'));
  const result=await Promise.all(requests);
@@ -253,7 +253,7 @@ async function selectChatProject(projectId){
      }
      S.projectForNext=null;
    }
-   S.delegation=null;S.chatSkills=[];S.lastSeq=0;S.runSteps=[];S.streams={};
+   S.delegation=null;S.chatSkills=[];S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];S.streams={};
    disconnect();
    await renderPage();
    const input=$('#chat-input');if(input){input.value=draft;input.focus()}
@@ -277,7 +277,7 @@ async function toggleChatSkill(skillId,enabled){
  }catch(error){renderChatSkills();toast(error.message)}
 }
 
-function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><button class="btn btn-sm" data-action="architect-delegation" id="architect-permission" title="Permissão apenas nesta conversa e projeto">Arquiteto: autorizar</button><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><textarea id="chat-input" rows="2" placeholder="Descreva a tarefa que deseja executar..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>As tarefas usam suas próprias chaves de API e podem gerar cobranças dos provedores.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><button class="btn btn-sm" data-action="architect-delegation" id="architect-permission" title="Permissão apenas nesta conversa e projeto">Arquiteto: autorizar</button><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div id="chat-runtime-tools">${runtimeControls()}</div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><textarea id="chat-input" rows="2" placeholder="Descreva a tarefa que deseja executar..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>As tarefas usam suas próprias chaves de API e podem gerar cobranças dos provedores.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
 async function enterChat(){
  $('#chat-mode').onchange=e=>{S.mode=e.target.value;if(S.mode!=='manual'){S.selectedAgent='';$('#chat-agent').value=''}};$('#chat-agent').onchange=e=>{S.selectedAgent=e.target.value;S.mode=e.target.value?'manual':'auto';$('#chat-mode').value=S.mode};
  $('#chat-project').onchange=e=>selectChatProject(e.target.value||null);
@@ -285,6 +285,7 @@ async function enterChat(){
  $('#chat-send').onclick=sendMessage;$('#chat-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}};
  $('#file-upload').onchange=async e=>{const f=e.target.files[0];if(!f)return;const body=new FormData();body.append('file',f);try{const result=await api('/uploads/text','POST',body);S.attached.push(result);$('#attached-label').textContent=result.name+(result.truncated?' (trecho inicial)':'');toast('Anexo carregado: '+result.name)}catch(ex){toast(ex.message)}};
  try{await refreshChatContext()}catch(ex){S.chatSkills=[];renderChatSkills();toast(ex.message)}
+ await loadChatRuntime();
  if(S.currentConvo)await showMessages(S.currentConvo);
  else showWelcome();
 }
@@ -433,6 +434,10 @@ async function handleAction(action,id,el){
    await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
    await renderPage();toast('Skill atualizada neste projeto.');
  }
+ if(action==='runtime-authorize')await authorizeRuntime();
+ if(action==='runtime-start')await startRuntime();
+ if(action==='runtime-preview')await previewRuntime();
+ if(action==='runtime-stop')await stopRuntime();
  if(action==='architect-delegation'){
    if(!S.currentConvo && chatProjectId())await ensureConvo();
    if(!S.currentConvo || !chatProjectId()){toast('Selecione primeiro um projeto nesta conversa.');return}
@@ -449,8 +454,8 @@ async function handleAction(action,id,el){
  if(action==='workspace-review')await workspaceReview(id);
  if(action==='add-workflow')flowEditor();if(action==='edit-workflow')flowEditor(id);
  if(action==='use-workflow'){S.selectedWorkflow=id;S.currentConvo=null;S.projectForNext=null;S.delegation=null;goto('chat');toast('Fluxo selecionado. Envie a tarefa para executá-lo.')}
- if(action==='new-chat'){S.projectForNext=chatProjectId();disconnect();S.currentRun=null;S.currentConvo=null;S.delegation=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
- if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.projectForNext=null;S.delegation=null;S.runSteps=[];S.lastSeq=0;goto('chat')}
+ if(action==='new-chat'){S.projectForNext=chatProjectId();disconnect();S.currentRun=null;S.currentConvo=null;S.delegation=null;S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];goto('chat')}
+ if(action==='switch-convo'){disconnect();S.currentRun=null;S.currentConvo=id;S.projectForNext=null;S.delegation=null;S.chatRuntime=null;S.runSteps=[];S.lastSeq=0;goto('chat')}
  if(action==='open-run'){disconnect();S.currentConvo=el.dataset.convo;S.currentRun=null;goto('chat');const r=await api(`/runs/${id}`);if(['running','queued','awaiting_approval'].includes(r.status)){S.currentRun=id;watchRun(id);$('#chat-send').disabled=true;$('#chat-cancel').hidden=false}}
  if(action==='resume-run'){await api(`/runs/${id}/resume`,'POST');await loadAll();renderPage();toast('Execução retomada a partir dos checkpoints concluídos.')}
  if(action==='approve'||action==='reject'){if(!S.currentRun)return;await api(`/runs/${S.currentRun}/steps/${id}/approval`,'POST',{approved:action==='approve'});toast(action==='approve'?'Etapa aprovada.':'Etapa rejeitada.')}
@@ -465,3 +470,79 @@ document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[
 
 document.addEventListener('change',e=>{if(e.target.id==='ws-project'){S.workspaceProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}
  if(e.target.id==='skills-project'){S.skillProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}});
+
+
+function runtimeControls(){
+ const pid=chatProjectId(),runtime=S.chatRuntime;
+ const running=Boolean(runtime?.running),auth=Boolean(runtime?.authorized);
+ return '<div class="chat-runtime-bar" aria-label="Executar projeto local">'
+  +'<div class="chat-runtime-title"><strong>▶ Projeto</strong><small>'
+  +(!pid?'Selecione um projeto':running?'React + FastAPI iniciados pela Central':
+    auth?'Execução autorizada nesta conversa':'Execução exige autorização')+'</small></div>'
+  +'<button class="btn btn-sm" data-action="runtime-authorize" '+(!pid?'disabled ':'')+'>'
+  +(auth?'✓ Autorizado':'Autorizar execução')+'</button>'
+  +'<button class="btn btn-sm btn-primary" data-action="runtime-start" '+(!pid||running?'disabled ':'')+'>▶ Iniciar</button>'
+  +'<button class="btn btn-sm" data-action="runtime-preview" '+(!running?'disabled ':'')+'>◉ Prévia</button>'
+  +'<button class="btn btn-sm" data-action="runtime-stop" '+(!running?'disabled ':'')+'>■ Parar</button>'
+  +'</div>';
+}
+function updateRuntimeControls(){const el=$('#chat-runtime-tools');if(el)el.innerHTML=runtimeControls()}
+async function loadChatRuntime(){
+ const cid=S.currentConvo,pid=chatProjectId();
+ if(!cid||!pid){S.chatRuntime=null;updateRuntimeControls();return}
+ try{
+  const status=await api('/conversations/'+encodeURIComponent(cid)+'/runtime');
+  if(S.currentConvo===cid && chatProjectId()===pid)S.chatRuntime=status;
+ }catch{S.chatRuntime=null}
+ updateRuntimeControls();
+}
+async function authorizeRuntime(){
+ if(!chatProjectId()){toast('Selecione um projeto para autorizar.');return}
+ const cid=await ensureConvo();
+ const enabled=!(S.chatRuntime?.authorized);
+ if(enabled&&!confirm('Autorizar a Central a EXECUTAR os servidores React/Vite e FastAPI deste projeto em seu computador? O código local e as dependências instaladas serão executados. Não haverá instalação de pacotes nem comandos livres. Você poderá revogar.'))return;
+ await api('/conversations/'+encodeURIComponent(cid)+'/runtime/access','POST',{enabled});
+ await loadChatRuntime();
+ toast(enabled?'Permissão de execução concedida nesta conversa.':'Permissão revogada.');
+}
+async function startRuntime(){
+ if(!chatProjectId()){toast('Selecione um projeto primeiro.');return}
+ const cid=await ensureConvo();
+ if(!S.chatRuntime?.authorized){
+  await authorizeRuntime();
+  if(!S.chatRuntime?.authorized)return;
+ }
+ S.chatRuntime=await api('/conversations/'+encodeURIComponent(cid)+'/runtime/start','POST');
+ updateRuntimeControls();
+ appendEvent('▶ Início solicitado. Use Prévia para abrir a loja local.');
+ toast('Servidores locais iniciados. Confira a prévia.');
+}
+async function stopRuntime(){
+ if(!S.currentConvo)return;
+ await api('/conversations/'+encodeURIComponent(S.currentConvo)+'/runtime/stop','POST');
+ const modal=$('#runtime-preview-modal');if(modal)modal.remove();
+ await loadChatRuntime();
+ appendEvent('■ Servidores locais interrompidos.');
+}
+async function previewRuntime(){
+ await loadChatRuntime();
+ if(!S.chatRuntime?.running || S.chatRuntime?.frontend_url!=='http://127.0.0.1:5173/'){
+  toast('Inicie o projeto pela Central antes de visualizar.');return;
+ }
+ const old=$('#runtime-preview-modal');if(old)old.remove();
+ const overlay=document.createElement('div');overlay.id='runtime-preview-modal';
+ overlay.className='runtime-preview-back';
+ overlay.innerHTML='<div class="runtime-preview-window" role="dialog" aria-modal="true" aria-label="Prévia local">'
+   +'<div class="runtime-preview-header"><strong>◉ Prévia — Loja Virtual</strong>'
+   +'<span>127.0.0.1:5173</span><button class="btn btn-sm" id="runtime-new-tab">↗ Nova aba</button>'
+   +'<button class="btn btn-sm" id="runtime-close">✕ Fechar</button></div>'
+   +'<iframe src="http://127.0.0.1:5173/" title="Prévia React/Vite" '
+   +'sandbox="allow-scripts allow-forms allow-same-origin" referrerpolicy="no-referrer"></iframe>'
+   +'<p class="runtime-preview-note">A prévia mostra os arquivos salvos, não propostas ainda pendentes. '
+   +'O frontend depende do servidor FastAPI local.</p></div>';
+ document.body.append(overlay);
+ overlay.querySelector('#runtime-close').onclick=()=>overlay.remove();
+ overlay.querySelector('#runtime-new-tab').onclick=()=>window.open(
+    'http://127.0.0.1:5173/','_blank','noopener,noreferrer');
+ overlay.onclick=e=>{if(e.target===overlay)overlay.remove()};
+}
