@@ -1,6 +1,6 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
 import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false};
+const S={me:null,page:'chat',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false,menuOpen:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -41,11 +41,41 @@ function authView(){
 }
 function shell(){
  applyTheme();
- $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><div class="side-label">PRINCIPAL</div>${nav('dashboard')}${nav('chat')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}<div class="side-label">GESTÃO</div>${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}<div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair">⎋</button></div></div></aside><main class="main"><header class="topbar"><div class="crumb">Workspace <span style="padding:0 9px">/</span> <strong id="top-title">${pages[S.page]}</strong></div><div class="top-actions"><span class="day">${new Date().toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span><span class="pill"><span class="dot"></span>Sistema online</span><button class="icon-btn" data-action="theme" title="Alternar tema">◐</button></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
- renderPage();
+ S.menuOpen=false;
+ $('#app').innerHTML=`<div class="shell">
+ <div class="drawer-backdrop" data-action="close-menu" aria-hidden="true"></div>
+ <aside class="sidebar" id="workspace-menu" role="dialog" aria-modal="true" aria-label="Menu da Central IA" aria-hidden="true">
+  <div class="drawer-header"><div class="brand"><div class="brand-mark">✳</div><div class="brand-label"><strong>Central IA</strong><small>WORKFORCE INTELLIGENCE</small></div></div><button class="icon-btn" id="menu-close" data-action="close-menu" aria-label="Fechar menu">✕</button></div>
+  <div class="drawer-content">
+   <div class="side-label">CONVERSAS</div>
+   <button class="nav-link drawer-new-chat" data-action="new-chat"><span class="glyph">＋</span><span>Nova conversa</span></button>
+   <div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${esc(c.id)}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p class="drawer-empty">Suas conversas aparecerão aqui.</p>'}</div>
+   <div class="side-label">NAVEGAÇÃO</div>
+   ${nav('chat')}${nav('dashboard')}${nav('agents')}${nav('workflows')}${nav('projects')}${nav('workspace')}${nav('skills')}
+   <div class="side-label">GESTÃO</div>
+   ${nav('history')}${nav('monitoring')}${nav('providers')}${nav('settings')}
+   ${S.page==='chat'?`<div class="side-label">PROJETO E SKILLS</div>${chatContextBar()}<div id="chat-pending-banner" class="chat-pending-banner" hidden></div>
+   <div class="side-label">CONFIGURAÇÕES DO CHAT</div>
+   <div class="drawer-tools"><label for="chat-mode">Modo de trabalho</label><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><label for="chat-agent">Trabalhador preferido</label><select id="chat-agent" class="field"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${esc(a.id)}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span></div>
+   <div class="side-label">EXECUÇÃO ATUAL</div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução.</div></div>`:''}
+  </div>
+  <div class="side-end"><div class="server-state"><span class="dot ${S.providers.length?'':'warning'}"></span>${S.providers.length?S.providers.filter(p=>p.enabled).length+' provedor(es) ativados':'Nenhum provedor conectado'}</div><div class="account"><span class="account-initial">${esc(S.me.email.charAt(0).toUpperCase())}</span><div class="email">${esc(S.me.email.split('@')[0])}<small>Minha conta</small></div><button class="icon-btn" data-action="logout" title="Sair" aria-label="Sair">⎋</button></div></div>
+ </aside>
+ <main class="main"><header class="topbar"><div class="topbar-leading"><button id="menu-toggle" class="icon-btn menu-toggle" data-action="toggle-menu" aria-label="Abrir menu" aria-controls="workspace-menu" aria-expanded="false">☰</button><div class="topbar-brand"><span class="topbar-symbol">✳</span><div><strong id="chat-title">${S.page==='chat'?esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa'):esc(pages[S.page])}</strong><small>Central IA</small></div></div></div></header><div id="content" class="${S.page==='chat'?'chat-root':'container'}"></div></main></div>`;
+ return renderPage();
+}
+function setMenuOpen(open){
+ const root=$('.shell'),btn=$('#menu-toggle'),menu=$('#workspace-menu');
+ if(!root||!menu)return;
+ S.menuOpen=Boolean(open);
+ root.classList.toggle('menu-open',S.menuOpen);
+ btn?.setAttribute('aria-expanded',String(S.menuOpen));
+ btn?.setAttribute('aria-label',S.menuOpen?'Fechar menu':'Abrir menu');
+ menu.setAttribute('aria-hidden',String(!S.menuOpen));
+ if(S.menuOpen)$('#menu-close')?.focus();else btn?.focus();
 }
 function nav(page){return `<button class="nav-link ${S.page===page?'active':''}" data-page="${page}"><span class="glyph">${icon[page]}</span><span>${pages[page]}</span>${page==='chat'?'<em>IA</em>':''}</button>`}
-function goto(page){if(S.page==='chat'&&page!=='chat')disconnect();S.page=page;shell()}
+function goto(page){if(S.page==='chat'&&page!=='chat')disconnect();S.page=page;S.menuOpen=false;shell()}
 async function loadAll(){
  const entries=await Promise.allSettled([api('/agents'),api('/providers'),api('/projects'),api('/conversations'),api('/workflows'),api('/runs')]);
  ['agents','providers','projects','conversations','workflows','runs'].forEach((key,i)=>{if(entries[i].status==='fulfilled')S[key]=entries[i].value});
@@ -260,7 +290,7 @@ async function selectChatProject(projectId){
    }
    S.delegation=null;S.chatSkills=[];S.chatRuntime=null;S.lastSeq=0;S.runSteps=[];S.streams={};
    disconnect();
-   await renderPage();
+   await shell();
    const input=$('#chat-input');if(input){input.value=draft;input.focus()}
    toast(projectId?'Projeto selecionado para a conversa.':'Conversa sem projeto selecionado.');
  }catch(error){
@@ -282,7 +312,7 @@ async function toggleChatSkill(skillId,enabled){
  }catch(error){renderChatSkills();toast(error.message)}
 }
 
-function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div id="chat-pending-banner" class="chat-pending-banner" hidden></div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Descreva a tarefa ou digite / para comandos..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+function chat(){return `<div class="chat-layout"><section class="chat-center" aria-label="Conversa"><div class="chat-transcript" id="chat-transcript" role="log" aria-label="Mensagens da conversa"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Digite uma mensagem ou / para comandos..." aria-label="Mensagem"></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Anexar</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></section></div>`}
 
 /* Fast project-scoped review inbox inside the chat, independent of old run history. */
 function chatPendingPaths(){
@@ -458,6 +488,7 @@ async function enterChat(){
  if(S.currentConvo)await showMessages(S.currentConvo);
  else showWelcome();
  await loadChatPendingReviews();
+ showSteps();
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
 async function showMessages(cid){cancelChatDecisions();removeChatReview();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
@@ -476,7 +507,7 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
      await executeSlashCommand(local.command);
      if(input)input.value='';
    }catch(ex){toast(ex.message||'Falha ao executar o comando.')}
-   finally{if(send)send.disabled=Boolean(S.currentRun);if(input)input.focus()}
+   finally{const currentSend=$('#chat-send');if(currentSend)currentSend.disabled=Boolean(S.currentRun);const next=$('#chat-input');if(next&&!S.menuOpen)next.focus()}
    return;
  }
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
@@ -751,6 +782,8 @@ function flowEditor(id){const original=S.workflows.find(w=>w.id===id);let nodes=
  back.querySelector('#flow-kind').onchange=e=>back.querySelector('#flow-agent').disabled=e.target.value==='approval';back.querySelector('#flow-sequential').onclick=()=>add(false);back.querySelector('#flow-parallel').onclick=()=>add(true);paint();
 }
 async function handleAction(action,id,el){
+ if(action==='toggle-menu'){setMenuOpen(!S.menuOpen);return}
+ if(action==='close-menu'){setMenuOpen(false);return}
  if(action==='theme'){S.theme=S.theme==='dark'?'light':'dark';localStorage.setItem('central-theme',S.theme);applyTheme();if(S.page==='settings')renderPage()}
  if(action==='logout'){disconnect();await api('/logout','POST');S.me=null;authView()}
  if(action==='refresh'){await loadAll();renderPage();toast('Informações atualizadas.')}
@@ -826,6 +859,17 @@ document.addEventListener('click',e=>{const node=e.target.closest('[data-page],[
 });
 (async()=>{applyTheme();try{S.me=await api('/me');await loadAll();shell()}catch{authView()}})();
 
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&S.menuOpen){e.preventDefault();setMenuOpen(false);return}
+ if(e.key!=='Tab'||!S.menuOpen)return;
+ const menu=$('#workspace-menu');
+ const items=Array.from(menu?.querySelectorAll('button,select,input:not([disabled])')||[])
+   .filter(x=>x.getClientRects().length&&!x.disabled);
+ if(!items.length)return;
+ const first=items[0],last=items[items.length-1];
+ if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+ else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+});
 document.addEventListener('change',e=>{if(e.target.id==='ws-project'){S.workspaceProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}
  if(e.target.id==='skills-project'){S.skillProject=e.target.value;renderPage().catch(ex=>toast(ex.message))}});
 
@@ -1111,16 +1155,34 @@ async function executeSlashCommand(command){
   case 'arquiteto':
    await handleAction('architect-delegation',null,null);return;
   case 'projeto':{
+   setMenuOpen(true);
    const select=$('#chat-project');
-   if(select){select.focus();toast('Escolha o projeto no seletor acima do chat.')}
+   if(select){select.focus();toast('Escolha o projeto no menu lateral.')}
    return;
   }
   case 'skills':{
+   setMenuOpen(true);
    const toggle=$('#chat-skill-list input[type=checkbox]');
-   if(toggle){toggle.focus();toast('Marque ou desmarque a Skill do projeto acima do chat.')}
+   if(toggle){toggle.focus();toast('Marque ou desmarque a Skill do projeto no menu lateral.')}
    else toast('Selecione um projeto para escolher Skills.');
    return;
   }
+  case 'nova':await handleAction('new-chat',null,null);return;
+  case 'conversas':{
+   setMenuOpen(true);
+   const target=$('#convos .conversation')||$('.drawer-new-chat');
+   target?.focus();return;
+  }
+  case 'dashboard':goto('dashboard');return;
+  case 'trabalhadores':goto('agents');return;
+  case 'fluxos':goto('workflows');return;
+  case 'projetos':goto('projects');return;
+  case 'arquivos':goto('workspace');return;
+  case 'historico':goto('history');return;
+  case 'monitoramento':goto('monitoring');return;
+  case 'provedores':goto('providers');return;
+  case 'configuracoes':goto('settings');return;
+  case 'tema':await handleAction('theme',null,null);return;
   default:throw Error('Comando não reconhecido.');
  }
 }

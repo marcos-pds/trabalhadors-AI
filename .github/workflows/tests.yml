@@ -3,10 +3,12 @@ on:
   push:
     branches:
       - feat/local-project-workspaces
+      - feat/chat-first-slash-integrated
   pull_request:
     branches:
       - main
       - feat/local-project-workspaces
+      - feat/uiux-skills-architect-autonomy
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -29,4 +31,4 @@ jobs:
           node --check static/app.js
           node --check static/slash-commands.mjs
       - name: Test chat slash commands
-        run: node --test tests/test_slash_commands.cjs
+        run: node --test tests/test_slash_commands.cjs tests/test_chat_first.cjs

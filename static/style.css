@@ -188,3 +188,85 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 @media(max-width:850px){.chat-pending-banner{padding:10px;align-items:flex-start}
  .chat-pending-actions{margin-left:0}.chat-pending-paths{flex-basis:100%}
  .chat-review-card{padding:10px}.chat-review-controls .btn{flex:1;min-width:140px}}
+
+/* UI chat-first integrada aos projetos locais e à paleta de comandos / */
+.shell{display:block;height:100dvh;min-height:0;overflow:hidden}
+.main{height:100dvh;min-width:0;overflow:hidden}
+.topbar{height:60px;min-height:60px;padding:0 24px;background:var(--bg);border-bottom:1px solid var(--line)}
+.topbar-leading{display:flex;align-items:center;gap:13px;min-width:0}
+.topbar-brand{display:flex;align-items:center;gap:11px;min-width:0}
+.topbar-brand>div{min-width:0}
+.topbar-brand strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.topbar-brand small{font-size:10px;color:var(--muted)}
+.topbar-symbol{font-size:23px;color:var(--purple)}
+.menu-toggle{font-size:23px;line-height:1;padding:7px 10px}
+.drawer-backdrop{position:fixed;inset:0;background:#0009;z-index:49;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s}
+.sidebar{position:fixed;z-index:50;left:0;top:0;bottom:0;width:min(345px,90vw);padding:0;background:var(--side);border-right:1px solid var(--line);box-shadow:15px 0 60px #0004;transform:translateX(-105%);visibility:hidden;transition:transform .23s,visibility .23s;display:flex;flex-direction:column}
+.shell.menu-open .sidebar{transform:translateX(0);visibility:visible}
+.shell.menu-open .drawer-backdrop{visibility:visible;opacity:1}
+.drawer-header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.drawer-header .brand{padding:0}
+.drawer-header .brand-label{display:block}
+.drawer-content{overflow-y:auto;flex:1;min-height:0;padding:8px 13px 18px}
+.drawer-content .side-label{display:block;padding:20px 12px 9px}
+.drawer-content .nav-link{display:flex;justify-content:flex-start;padding:11px 13px}
+.drawer-content .nav-link span:not(.glyph){display:inline}
+.drawer-content .nav-link em{display:inline;margin-left:auto}
+.drawer-content .conversation{font-size:12px}
+.drawer-empty{font-size:11px;color:var(--muted);padding:0 12px}
+.drawer-new-chat{color:var(--text);background:var(--card);border:1px solid var(--line)}
+.drawer-content .chat-context-bar{display:block;max-width:none;border:0;background:transparent;padding:0 11px 8px;height:auto}
+.drawer-content .chat-context-field{width:100%;min-width:0;margin-bottom:10px;max-width:none}
+.drawer-content .chat-context-field select{width:100%;min-width:0}
+.drawer-content .chat-context-skills{display:block;width:100%}
+.drawer-content .chat-skill-list{display:flex;flex-wrap:wrap;gap:5px;padding-top:8px}
+.drawer-content .chat-context-note{display:block;font-size:10px;line-height:1.5;margin:10px 0 0}
+.drawer-content .chat-pending-banner{margin:9px 11px 4px;padding:12px;max-width:none}
+.drawer-content .chat-pending-summary{flex-wrap:wrap}
+.drawer-content .chat-pending-paths{overflow-wrap:anywhere}
+.drawer-tools{padding:0 11px;display:grid;gap:8px}
+.drawer-tools label{font-size:11px;color:var(--muted);margin-top:5px}
+.drawer-tools .field{background:var(--panel);width:100%;max-width:none}
+.drawer-tools .chat-architect-status{display:block;line-height:1.5;margin-top:6px}
+.drawer-content #chat-steps{padding:2px 9px 14px}
+.drawer-content .right-tip{margin:2px 0}
+.sidebar .side-end{padding:12px 17px 14px}
+.sidebar .side-end .account .email,.sidebar .side-end .server-state{display:flex}
+.sidebar .side-end .account .email{display:block}
+.sidebar .side-end .account .icon-btn{display:inline-flex}
+.chat-root{width:100%}
+.chat-root .chat-layout{display:block;height:100%;min-height:0}
+.chat-center{height:100%;width:100%;min-height:0;display:flex;flex-direction:column}
+.chat-transcript{width:100%;min-height:0;flex:1;overflow-y:auto;padding:28px max(20px,calc((100% - 950px)/2)) 16px}
+.chat-welcome{max-width:650px;min-height:250px}
+.chat-welcome .spark{background:transparent;box-shadow:none;font-size:39px;margin-bottom:4px}
+.chat-welcome h2{font-size:30px}
+.chat-compose{padding:12px 20px 16px;border:0;background:var(--bg);flex-shrink:0}
+.composer-box{max-width:900px;border-radius:18px;background:var(--panel);overflow:visible;position:relative}
+.composer-box textarea{min-height:58px;font-size:14px}
+.composer-footer{padding:0 12px 11px}
+#attached-label{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-message{max-width:900px}
+.chat-message.user .msg-body{background:var(--card);border-color:var(--line)}
+.chat-slash-menu{z-index:8;max-height:min(420px,50dvh);overflow-y:auto}
+body.light .composer-box{box-shadow:0 8px 25px #1b274615}
+@media(max-width:880px){
+ .shell{display:block;grid-template-columns:none}
+ .sidebar{padding:0;width:min(345px,90vw)}
+ .drawer-header .brand{justify-content:flex-start}
+ .drawer-content .side-label,.drawer-header .brand-label{display:block}
+ .drawer-content .nav-link{justify-content:flex-start}
+ .sidebar .side-end .account{justify-content:flex-start}
+ .topbar{padding:0 14px}
+ .chat-transcript{padding:18px 20px}
+}
+@media(max-width:540px){
+ .chat-welcome h2{font-size:24px}
+ .chat-welcome{min-height:240px}
+ .chat-compose{padding:9px 11px 13px}
+ .composer-footer{gap:5px}
+ #attached-label{max-width:98px}
+ .chat-message{gap:7px}
+ .chat-message.user .message-content{max-width:85%}
+}
+@media(prefers-reduced-motion:reduce){.sidebar,.drawer-backdrop{transition:none}}

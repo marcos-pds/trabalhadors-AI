@@ -12,7 +12,19 @@ export const SLASH_COMMANDS = Object.freeze([
   {name:'status',description:'Verificar autorização e execução local',icon:'◎',aliases:[]},
   {name:'arquiteto',description:'Autorizar ou revogar a autonomia do Arquiteto IA',icon:'◇',aliases:[]},
   {name:'projeto',description:'Escolher o projeto da conversa',icon:'▤',aliases:[]},
-  {name:'skills',description:'Acessar as Skills do projeto',icon:'✦',aliases:['skill']}
+  {name:'skills',description:'Acessar as Skills do projeto',icon:'✦',aliases:['skill']},
+  {name:'nova',description:'Criar uma nova conversa',icon:'＋',aliases:['novo','new']},
+  {name:'conversas',description:'Abrir o histórico de conversas',icon:'▣',aliases:['chats']},
+  {name:'dashboard',description:'Abrir o painel geral',icon:'◫',aliases:['painel']},
+  {name:'trabalhadores',description:'Gerenciar os trabalhadores IA',icon:'◈',aliases:['agentes']},
+  {name:'fluxos',description:'Gerenciar os fluxos de trabalho',icon:'⌁',aliases:[]},
+  {name:'projetos',description:'Gerenciar os projetos',icon:'▤',aliases:[]},
+  {name:'arquivos',description:'Abrir os arquivos do projeto',icon:'▧',aliases:['files']},
+  {name:'historico',description:'Consultar o histórico de execuções',icon:'◷',aliases:['histórico']},
+  {name:'monitoramento',description:'Ver as métricas e execução dos provedores',icon:'◎',aliases:[]},
+  {name:'provedores',description:'Gerenciar provedores e modelos de IA',icon:'⬡',aliases:['modelos']},
+  {name:'configuracoes',description:'Abrir as configurações da Central',icon:'⚙',aliases:['configurações']},
+  {name:'tema',description:'Alternar entre tema claro e escuro',icon:'◐',aliases:[]}
 ]);
 
 export function normalizeSlash(value){
@@ -38,5 +50,5 @@ export function findSlashCommands(value){
   if(!/^\/[^\s]*$/.test(text))return [];
   const query=normalizeSlash(text.slice(1));
   return SLASH_COMMANDS.filter(c=>normalizeSlash(c.name).startsWith(query) ||
-    c.aliases.some(a=>normalizeSlash(a).startsWith(query))).slice(0,12);
+    c.aliases.some(a=>normalizeSlash(a).startsWith(query))).slice(0,30);
 }
