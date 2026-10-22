@@ -558,3 +558,69 @@ def test_reviewer_cannot_stage_well_formed_manifest_in_project(tmp_path):
         assert result['status']=='completed'
         assert not (folder/'frontend/src/Injected.tsx').exists()
         assert c.get(f'/api/projects/{project}/workspace').json()['proposals']==[]
+
+
+
+def test_chat_pending_reviews_project_scoped_and_decision_refresh(tmp_path):
+    """Chat should see only true pending proposals, not old approved/rejected ones."""
+    with TestClient(app) as owner, TestClient(app) as other:
+        project=setup(owner,tmp_path); folder=prepare(owner,project)
+        register(other)
+        first=stage(owner,project,'frontend/src/components/LoadingSpinner.tsx',
+                    'export const LoadingSpinner = () => <span/>')
+        second=stage(owner,project,'frontend/src/main.tsx','import "./index.css";')
+        third=stage(owner,project,'frontend/src/index.css','body {margin: 0}')
+        ids=[x.json()['id'] for x in (first,second,third)]
+        assert all(x.status_code==200 for x in (first,second,third))
+        link=f'/api/projects/{project}/workspace/pending'
+        assert other.get(link).status_code==404
+        result=owner.get(link)
+        assert result.status_code==200,result.text
+        assert result.json()['project_id']==project
+        assert {p['id'] for p in result.json()['proposals']}==set(ids)
+        assert {p['files'][0]['path'] for p in result.json()['proposals']}=={
+            'frontend/src/components/LoadingSpinner.tsx',
+            'frontend/src/main.tsx','frontend/src/index.css'}
+        assert all(p['status']=='pending' for p in result.json()['proposals'])
+        assert not (folder/'frontend/src/main.tsx').exists()
+        # The same API used by the in-chat button requires APLICAR.
+        denied=owner.post(f'/api/projects/{project}/workspace/proposals/{ids[0]}/decision',
+                     json={'approved':True,'confirmation':''},headers=HEADERS)
+        assert denied.status_code==422
+        assert {p['id'] for p in owner.get(link).json()['proposals']}==set(ids)
+        accepted=decide(owner,project,ids[0])
+        assert accepted.status_code==200 and accepted.json()['status']=='applied'
+        rejected=decide(owner,project,ids[1],approved=False)
+        assert rejected.status_code==200 and rejected.json()['status']=='rejected'
+        remaining=owner.get(link).json()['proposals']
+        assert [x['id'] for x in remaining]==[ids[2]]
+        assert not (folder/'frontend/src/index.css').exists()
+        assert other.get(f'/api/projects/{project}/workspace/proposals/{ids[2]}').status_code==404
+
+
+def test_full_diff_in_chat_requires_up_to_date_proposal(tmp_path):
+    """The chat can show a complete diff; stale sources cannot be silently applied."""
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        file=folder/'frontend/src/App.tsx'
+        file.parent.mkdir(parents=True,exist_ok=True)
+        file.write_text('export default function App(){return <div>Original</div>}')
+        replacement=('export default function App(){return <main>Atualizado</main>}\n'
+                     + '// updated line\n'*2000)
+        response=stage(c,project,'frontend/src/App.tsx',replacement)
+        assert response.status_code==200,response.text
+        pid=response.json()['id']
+        base=f'/api/projects/{project}/workspace/proposals/{pid}'
+        default=c.get(base)
+        full=c.get(base,params={'full':'true'})
+        assert default.status_code==200 and full.status_code==200
+        assert default.json()['files'][0]['diff_truncated'] is True
+        assert full.json()['files'][0]['diff_truncated'] is False
+        assert len(full.json()['files'][0]['diff'])>24000
+        assert 'updated line' in full.json()['files'][0]['diff']
+        # Another editor changed the file while it was waiting for review.
+        file.write_text('externally modified')
+        stale=c.get(base,params={'full':'true'}).json()
+        assert stale['files'][0]['stale'] is True
+        assert decide(c,project,pid).status_code==409
+        assert file.read_text()=='externally modified'
