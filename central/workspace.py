@@ -286,12 +286,13 @@ class Workspaces:
             old=self._current(folder,change['path'])
             old_text=old.decode('utf-8') if old is not None else ''
             new_text=change['content'] if change['action']=='write' else ''
-            full_diff=''.join(difflib.unified_diff(old_text.splitlines(keepends=True),new_text.splitlines(keepends=True),
+            diff_text=''.join(difflib.unified_diff(old_text.splitlines(keepends=True),new_text.splitlines(keepends=True),
                     fromfile='antes/'+change['path'],tofile='depois/'+change['path']))
+            limit=480000 if full_diff else 24000
             previews.append({'path':change['path'],'action':change['action'],
                 'replace':change['base_sha256'] is not None, 'stale':fingerprint(old)!=change['base_sha256'],
-                'diff':(full_diff[:480000] if full_diff else full_diff[:24000]) or '(sem alterações)',
-                'diff_truncated':len(full_diff)>(480000 if full_diff else 24000)})
+                'diff':diff_text[:limit] or '(sem alterações)',
+                'diff_truncated':len(diff_text)>limit})
         return {'id':row['id'],'status':row['status'],'run_id':row['run_id'],
                 'agent':row['agent'],'files':previews,'created_at':row['created_at']}
 
