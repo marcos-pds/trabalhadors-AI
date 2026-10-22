@@ -372,3 +372,22 @@ O alerta é atualizado ao abrir a conversa, quando um run termina, quando uma pr
 Os arquivos da Loja Virtual no Windows continuam intactos até que um usuário aprove explicitamente cada proposta. A barra de alerta e o painel de diff usam HTML escapado para que texto/código gerado pelos agentes não execute JavaScript na interface.
 
 A API oferece `GET /api/projects/{pid}/workspace/pending` para consultar apenas os metadados das propostas pendentes sem percorrer todos os arquivos, e `GET /api/projects/{pid}/workspace/proposals/{id}?full=true` para obter o diff integral na revisão.
+
+
+## Chat IA: ler problemas reais do projeto e corrigir dependências
+
+O Chat IA reconhece mensagens comuns do Vite (`Failed to resolve import`, `[plugin:vite:import-analysis]`, `No matching export`, `Failed to load PostCSS config`) coladas na conversa de um projeto selecionado, e direciona essas mensagens ao **Testador IA** em vez de supor um comando do terminal ou enviar o erro cegamente a um agente.
+
+O Testador lê os arquivos reais do projeto **somente dentro da pasta local autorizada** e, além dos imports/exports relativos já verificados, analisa imports externos em componentes `.ts/.tsx/.js/.jsx` com base no `frontend/package.json` e no diretório `frontend/node_modules` (sem importar nem executar os módulos). A API `GET /api/conversations/{cid}/quality` devolve `issues` e `missing_packages` com o nome dos pacotes externos ausentes. Pacotes declarados mas não instalados também são identificados. A validação de arquivos novos considera declarações de dependências antes de autoaprovação, sem executar `npm`.
+
+### Exemplo: `ProductCard.tsx` exige `lucide-react`
+
+Se `frontend/src/components/ProductCard.tsx` contém `import { ShoppingCart, Star } from "lucide-react"` e a dependência não está declarada ou instalada, `/testar` ou a colagem do erro Vite exibirá o diagnóstico. Para um pacote pertencente ao **catálogo explícito permitido**, o Chat IA perguntará:
+
+**“Deseja instalar lucide-react para corrigir a Loja Virtual?” → Confirmar / Negar**.
+
+Ao confirmar, o backend verifica novamente o projeto e a dependência ausente, executa apenas `npm install --ignore-scripts --no-audit --no-fund` com argumentos fixos na pasta `frontend` autorizada, registra a operação no histórico de instalações do projeto e repete o QA. O `package.json`, `package-lock.json` e `node_modules` podem ser modificados **apenas após essa autorização**, porque instalar pacotes exige mudar as dependências. A instalação de bibliotecas de terceiros ainda apresenta risco; o comando não possui acesso a uma ferramenta shell genérica.
+
+Se houver também erros de código, o Testador poderá solicitar confirmação para o Frontend/Backend IA **preparar propostas completas**, com o diff e revisão no chat. Não sobrescreve `App.tsx`, `ProductCard.tsx` nem arquivos do backend automaticamente ao autorizar uma instalação. Para tarefas de dependências, a Central passa `ProductCard.tsx` e `frontend/package.json` ao agente quando citados nos erros, respeitando os limites de tamanho e de segurança já existentes.
+
+**Limites atuais:** análise estática não é um compilador completo, não garante funcionamento no navegador e nem todas as dependências podem ser instaladas; pacotes fora do catálogo precisam de revisão específica. Logs desconhecidos continuam disponíveis no chat para investigação pelos agentes, e as alterações ainda precisam dos fluxos de aprovação já definidos. A pasta Windows privada do usuário não é alterada pelos commits no GitHub; deve-se atualizar a branch e testar localmente.
