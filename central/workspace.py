@@ -276,7 +276,7 @@ class Workspaces:
                      files=[{'path':f['path'],'action':f['action'],'replace':f['base_sha256'] is not None} for f in json.loads(e['manifest'])],
                      created_at=e['created_at'],applied_at=e['applied_at']) for e in entries]
 
-    def proposal(self,user_id,project_id,proposal_id):
+    def proposal(self,user_id,project_id,proposal_id,full_diff=False):
         row=self.db.one('''SELECT * FROM workspace_proposals
             WHERE id=? AND project_id=? AND user_id=?''',(proposal_id,project_id,user_id))
         if not row: raise WorkspaceError('Proposta não encontrada.',404)
@@ -290,8 +290,8 @@ class Workspaces:
                     fromfile='antes/'+change['path'],tofile='depois/'+change['path']))
             previews.append({'path':change['path'],'action':change['action'],
                 'replace':change['base_sha256'] is not None, 'stale':fingerprint(old)!=change['base_sha256'],
-                'diff':full_diff[:24000] or '(sem alterações)',
-                'diff_truncated':len(full_diff)>24000})
+                'diff':(full_diff[:480000] if full_diff else full_diff[:24000]) or '(sem alterações)',
+                'diff_truncated':len(full_diff)>(480000 if full_diff else 24000)})
         return {'id':row['id'],'status':row['status'],'run_id':row['run_id'],
                 'agent':row['agent'],'files':previews,'created_at':row['created_at']}
 
