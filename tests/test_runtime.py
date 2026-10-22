@@ -246,3 +246,37 @@ def test_live_process_without_reachable_http_is_not_reported_as_started(tmp_path
         status=c.get(f'/api/conversations/{cid}/runtime').json()
         assert not status['running']
         assert '8 segundos' in status['last_error']
+
+
+def test_running_server_that_exits_after_start_disables_preview_and_retains_error(tmp_path,monkeypatch):
+    """Screenshot regression: start may succeed initially then the Vite process exits."""
+    from central import runtime as module
+    import io
+    launched=[]
+    class LateExit(DummyProcess):
+        def __init__(self,argv,cwd):
+            super().__init__(argv,cwd)
+            self.stdout=io.BytesIO(b'Vite started and later exited.\n')
+    def fake_popen(argv,**kwargs):
+        proc=LateExit(argv,kwargs['cwd'])
+        launched.append(proc)
+        return proc
+    monkeypatch.setattr(module.subprocess,'Popen',fake_popen)
+    monkeypatch.setattr(module.shutil,'which',lambda name:'/usr/bin/node')
+    monkeypatch.setattr(RUNTIME,'_available',lambda _:True)
+    monkeypatch.setattr(RUNTIME,'_probe',lambda:True)
+    with TestClient(app) as c:
+        project,cid,root=configured(c,tmp_path)
+        c.post(f'/api/conversations/{cid}/runtime/access',headers=HEADERS,json={'enabled':True})
+        started=c.post(f'/api/conversations/{cid}/runtime/start',headers=HEADERS)
+        assert started.status_code==200
+        assert started.json()['running']
+        launched[1].exit_code=1
+        status=c.get(f'/api/conversations/{cid}/runtime').json()
+        assert status['running'] is False
+        assert status['frontend_url'] is None
+        assert 'frontend (código 1)' in status['last_error']
+        assert all(proc.terminated or proc.poll() is not None for proc in launched)
+        again=c.get(f'/api/conversations/{cid}/runtime').json()
+        assert again['last_error']==status['last_error']
+        assert RUNTIME.sessions=={}
