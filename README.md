@@ -247,28 +247,43 @@ Para projetos já existentes, pedidos de estrutura inicial que propõem substitu
 
 
 
-### Paleta de comandos do Chat IA
+### Chat principal e paleta de comandos da Central IA
 
-Digite uma barra `/` no campo de texto. A paleta de sugestões abre automaticamente **acima do campo**, com navegação por setas, `Enter` para escolher, `Tab` para completar e `Esc` para fechar. Também é possível clicar numa opção. Os comandos são locais e **não consomem tokens dos provedores**, não entram no histórico como solicitações à IA e não são interpretados como comandos do terminal.
+O aplicativo inicia diretamente no **Chat IA** com apenas a conversa e o campo de mensagem à vista. O botão **☰** abre um menu recolhível que contém todas as seções anteriores, o histórico de conversas, seleção do projeto, Skills, modo de agentes e o painel de execução. A navegação funciona no desktop e no celular; `Esc` fecha o menu. Isso apenas reorganiza a interface: projetos, permissões, arquivos, QA, agentes, histórico e runtime continuam com seus endpoints e verificações existentes.
+
+Digite uma barra `/` no campo de texto. A paleta de sugestões abre automaticamente **acima do campo**, com navegação por setas, `Enter` para executar o selecionado, `Tab` para completar e `Esc` para fechar. Também é possível clicar numa opção. Digite parte do nome para filtrar, como `/rev` ou `/pro`. Esses comandos são locais, não consomem tokens dos provedores e **não** são interpretados como comandos de terminal.
 
 | Comando | Ação |
 | --- | --- |
-| `/ajuda` | Mostrar a lista atual de comandos |
-| `/testar` | Verificação estática do Testador IA, sem executar código |
-| `/iniciar` | Iniciar os servidores React/Vite e FastAPI, após autorização |
-| `/previa` | Abrir uma prévia real da aplicação local |
-| `/parar` | Encerrar os servidores iniciados pela Central |
-| `/autorizar` | Conceder autorização para execução local após confirmação |
-| `/revogar` | Revogar autorização de execução e encerrar servidores |
-| `/diagnostico` | Mostrar o último erro de inicialização com opção de copiar |
-| `/status` | Mostrar vínculo do projeto, autorização e estado dos servidores |
-| `/arquiteto` | Conceder/revogar a delegação de aprovação e instalação permitida |
-| `/projeto` | Focar o seletor de projeto da conversa |
-| `/skills` | Focar os controles de Skills do projeto |
+| `/ajuda` | Mostrar o catálogo de comandos |
+| `/projeto` | Abrir menu e focar seletor de projeto |
+| `/skills` | Abrir menu e focar Skills do projeto |
+| `/arquiteto` | Solicitar/revogar a delegação do Arquiteto, com confirmação |
+| `/testar` | QA estático de imports React e sintaxe Python, sem executar projeto |
+| `/revisar` | Abrir a revisão de propostas no chat; aplicar requer confirmação `APLICAR` |
+| `/autorizar` | Solicitar autorização para executar servidores do projeto |
+| `/iniciar` | Iniciar React/Vite e FastAPI, mediante autorização |
+| `/previa` | Abrir a prévia da aplicação em execução |
+| `/parar` | Encerrar servidores iniciados pela Central |
+| `/revogar` | Revogar autorização de execução e interromper os servidores |
+| `/status` | Consultar autorização e status do runtime |
+| `/diagnostico` | Ver e copiar o último erro do runtime |
+| `/nova` | Iniciar uma nova conversa |
+| `/conversas` | Abrir o menu e focar o histórico de conversas |
+| `/dashboard` | Abrir o painel principal |
+| `/trabalhadores` | Abrir agentes (alias: `/agentes`) |
+| `/fluxos` | Abrir os fluxos de trabalho |
+| `/projetos` | Abrir o gerenciamento de projetos |
+| `/arquivos` | Abrir o workspace de arquivos |
+| `/historico` | Abrir o histórico de execuções |
+| `/monitoramento` | Abrir o monitoramento |
+| `/provedores` | Abrir provedores e modelos |
+| `/configuracoes` | Abrir as configurações |
+| `/tema` | Alternar tema claro/escuro |
 
-Os controles **Projeto** e **Skills do projeto** continuam visíveis no topo. Os comandos `/projeto` e `/skills` apenas focam esses controles; não trocam de projeto ou concedem permissões por conta própria.
+`/projeto` e `/skills` **apenas focam controles** do menu, não alteram associação ou permissões automaticamente. As ações de navegação apenas abrem as seções existentes; ações que modificam arquivos ou executam programas continuam com autorização e checagens do backend.
 
-A barra de botões de runtime foi removida do layout, mas os endpoints de execução e suas verificações de permissão, CSRF, sandbox e catálogo de pacotes continuam os mesmos. Digitar `/iniciar npm install`, ou qualquer comando que não esteja no catálogo, é recusado e **não é encaminhado à IA**; não há interpretador de shell no chat. A autorização do Arquiteto é independente da autorização para executar os servidores, e ambas seguem exigindo confirmação do usuário.
+Digitar `/iniciar npm install`, `/exec` ou qualquer nome não registrado no catálogo é recusado **sem envio à IA**. A Central não tem interpretador de comandos livre no chat. A permissão do Arquiteto é separada da permissão de executar o projeto, e nenhuma delas concede instalação irrestrita ou aprovação de arquivos sensíveis.
 
 ## Executar e visualizar projetos diretamente no Chat IA
 
