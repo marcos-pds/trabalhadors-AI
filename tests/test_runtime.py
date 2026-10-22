@@ -280,3 +280,52 @@ def test_running_server_that_exits_after_start_disables_preview_and_retains_erro
         again=c.get(f'/api/conversations/{cid}/runtime').json()
         assert again['last_error']==status['last_error']
         assert RUNTIME.sessions=={}
+
+
+
+def test_bounded_vite_log_preserves_first_postcss_error_after_long_traceback():
+    """Git Bash user pasted only Vite plugins()/processResult stack tail."""
+    from central.runtime import _BoundedProcessLog, RuntimeManager
+    log=_BoundedProcessLog()
+    log.append('VITE v5.4.21 ready')
+    log.append('Failed to load PostCSS config: Loading plugin failed: Cannot find module tailwindcss')
+    for i in range(130):
+        log.append('  at stack_frame_'+str(i)+' (file:///C:/frontend/node_modules/vite/dep.js)')
+    result=RuntimeManager._excerpt({'frontend':log},['frontend'])
+    assert result.startswith('[frontend]\nVITE v5.4.21 ready')
+    assert 'Failed to load PostCSS config' in result
+    assert 'Cannot find module tailwindcss' in result
+    assert 'stack_frame_129' in result
+    assert 'stack_frame_0' not in result
+    assert len(result)<=5800
+
+
+def test_vite_postcss_failure_returns_headline_not_just_last_five_stack_frames(tmp_path,monkeypatch):
+    """A Vite CSS plugin error shown in the user's Windows diagnostics remains actionable."""
+    from central import runtime as module
+    import io
+    class ViteBad(DummyProcess):
+        def __init__(self,argv,cwd):
+            super().__init__(argv,cwd)
+            if argv[0].endswith('node'):
+                self.exit_code=1
+                stream='Failed to load PostCSS config: Cannot find module "@tailwindcss/postcss"\n'
+                stream+=''.join(' at plugins function stack '+str(i)+'\n' for i in range(58))
+                self.stdout=io.BytesIO(stream.encode())
+            else:
+                self.stdout=io.BytesIO(b'FastAPI ready\n')
+    monkeypatch.setattr(module.subprocess,'Popen',
+                        lambda argv,**kwargs:ViteBad(argv,kwargs['cwd']))
+    monkeypatch.setattr(module.shutil,'which',lambda _: '/usr/bin/node')
+    monkeypatch.setattr(RUNTIME,'_available',lambda _:True)
+    monkeypatch.setattr(RUNTIME,'_probe',lambda:False)
+    with TestClient(app) as c:
+        project,cid,root=configured(c,tmp_path)
+        c.post(f'/api/conversations/{cid}/runtime/access',headers=HEADERS,json={'enabled':True})
+        result=c.post(f'/api/conversations/{cid}/runtime/start',headers=HEADERS)
+        assert result.status_code==422,result.text
+        assert 'Failed to load PostCSS config' in result.json()['detail']
+        assert 'Cannot find module' in result.json()['detail']
+        assert 'plugins function stack 57' in result.json()['detail']
+        status=c.get(f'/api/conversations/{cid}/runtime').json()
+        assert 'Failed to load PostCSS config' in status['last_error']
