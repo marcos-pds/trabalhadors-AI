@@ -244,3 +244,22 @@ Nos fluxos de múltiplos trabalhadores, o Revisor IA é executado depois das eta
 Se o Revisor ainda responder com um manifesto de arquivos em vez de um parecer, a conclusão distingue `resposta ignorada` de `revisão concluída`, sem descartar propostas válidas dos trabalhadores de código. Os resultados antigos e as propostas pendentes permanecem intactos; a correção só afeta novas execuções.
 
 Para projetos já existentes, pedidos de estrutura inicial que propõem substituir arquivos ou misturam novas estruturas de backend são mantidos como alterações pendentes. Antes de aplicar, confira o entrypoint `backend/main.py`, módulos auxiliares e o endpoint `/api/products`, bem como imports e props dos componentes React. A existência de propostas não comprova que o projeto compila ou funciona.
+
+
+## Executar e visualizar projetos diretamente no Chat IA
+
+No Chat IA, após selecionar um projeto, aparecem quatro controles: **Autorizar execução**, **Iniciar**, **Prévia** e **Parar**. A autorização é concedida pelo usuário autenticado com confirmação explícita e fica registrada apenas para a conversa e o projeto vinculados. Revogar a autorização encerra os processos que a Central iniciou. Mudar de projeto em um rascunho também interrompe os servidores e elimina a autorização anterior. Autorizar o Arquiteto IA não equivale a autorizar execução local.
+
+**Iniciar** abre dois processos locais com comandos predefinidos (sem shell e sem comandos gerados por modelos):
+- FastAPI: usa `backend/.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000` no Windows.
+- React/Vite: chama diretamente o executável do Vite `frontend/node_modules/vite/bin/vite.js` usando Node.js na porta fixa 5173, sem `npm run`, `npx` ou scripts de instalação.
+- Dependências e ambientes virtuais precisam estar previamente preparados em `frontend/node_modules` e `backend/.venv`. A Central **não instala dependências, altera arquivos de projeto, faz build ou publica o site** ao apertar Iniciar.
+- O frontend deve conversar com o FastAPI via `http://127.0.0.1:8000/api/products` conforme seu código. Se a porta 5173 ou 8000 estiver ocupada por servidores iniciados manualmente, a Central recusa o início e pede que sejam parados ou que sejam visualizados separadamente. Por segurança não assume a posse de servidores desconhecidos.
+- **Prévia** abre a aplicação React realmente servida pelo Vite em um iframe com sandbox, com opção **Nova aba**. A prévia é do código já aplicado no disco: propostas pendentes de aprovação não aparecem.
+- **Parar** encerra os processos iniciados por esta instância da Central. Eles também são encerrados no desligamento normal da Central. Permissões persistidas não iniciam servidores automaticamente após reiniciar o programa.
+
+### Segurança e limitações
+
+Executar um projeto local implica executar o código e as dependências que já estiverem nos diretórios autorizados. Mesmo sem comandos arbitrários, código de projeto ou bibliotecas comprometidas podem agir com os privilégios do usuário Windows. Autorize apenas projetos e dependências confiáveis; faça backup ou commit Git antes de testar propostas não revisadas. O instalador de pacotes autorizado ao Arquiteto é separado desta função.
+
+O executor só reconhece estrutura de desenvolvimento React/Vite + FastAPI, vincula-se a **127.0.0.1**, verifica caminhos críticos contra links/junções/hardlinks, recusa execução em portas ocupadas e limita a um projeto ativo por instância. Não permite comandos livres por chat, execução no servidor de produção, compartilhamento pela rede ou pré-visualização de outros processos no sistema. O teste de CI usa processos simulados; ainda é necessária a validação manual com o Python e Node.js instalados no Windows.
