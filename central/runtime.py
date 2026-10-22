@@ -12,8 +12,7 @@ import sys
 import threading
 import time
 from collections import deque
-from urllib.request import urlopen
-from urllib.error import HTTPError, URLError
+from http.client import HTTPConnection, HTTPException
 from pathlib import Path
 
 from .database import utcnow
@@ -149,9 +148,14 @@ class RuntimeManager:
         try:
             with socket.create_connection(('127.0.0.1',RuntimeManager.BACK_PORT),timeout=.3):
                 pass
-            with urlopen('http://127.0.0.1:5173/',timeout=.4) as response:
-                return response.status < 500
-        except (OSError,URLError,HTTPError,TimeoutError,ValueError):
+            connection=HTTPConnection('127.0.0.1',RuntimeManager.FRONT_PORT,timeout=.4)
+            try:
+                connection.request('GET','/')
+                response=connection.getresponse()
+                return 200<=response.status<500
+            finally:
+                connection.close()
+        except (OSError,HTTPException,TimeoutError,ValueError):
             return False
 
     @staticmethod
