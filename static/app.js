@@ -1020,6 +1020,7 @@ async function executeSlashCommand(command){
      SLASH_COMMANDS.map(c=>'/' + c.name + ' — ' + c.description).join('\n'));
    return;
   case 'testar':await runQualityChecks();return;
+  case 'revisar':await loadChatPendingReviews();await openChatProposalReview();return;
   case 'iniciar':await startRuntime();return;
   case 'previa':await previewRuntime();return;
   case 'parar':await stopRuntime();return;
