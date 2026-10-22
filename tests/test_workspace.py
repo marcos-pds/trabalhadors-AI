@@ -418,7 +418,7 @@ def test_run_report_preserves_applied_files_when_full_explorer_info_is_unavailab
         agent=next(a for a in c.get('/api/agents').json() if a['specialty']=='frontend')
         response=c.post('/api/runs',json={'conversation_id':conversation,
             'mode':'manual','agent_ids':[agent['id']],
-            'prompt':'Crie um novo componente no projeto existente.'},headers=HEADERS)
+            'prompt':'Adicione um novo componente React ao frontend.'},headers=HEADERS)
         assert response.status_code==200,response.text
         run=wait_for(c,response.json()['id'])
         assert run['status']=='completed',run.get('error')
