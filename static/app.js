@@ -457,9 +457,10 @@ async function enterChat(){
  await loadChatRuntime();
  if(S.currentConvo)await showMessages(S.currentConvo);
  else showWelcome();
+ await loadChatPendingReviews();
 }
 function showWelcome(){const root=$('#chat-transcript');if(!root)return;root.innerHTML=`<div class="chat-welcome"><div class="spark">✳</div><h2>O que vamos criar hoje?</h2><p>Converse com um especialista ou coordene uma equipe inteira de trabalhadores IA.</p><div class="starter-pills"><button data-suggest="Crie uma interface de dashboard responsiva e elegante">◈ Criar um dashboard</button><button data-suggest="Desenvolva uma API com autenticação e persistência">⌘ Desenvolver uma API</button><button data-suggest="Analise e melhore a arquitetura de um aplicativo">◎ Revisar arquitetura</button></div></div>`}
-async function showMessages(cid){cancelChatDecisions();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
+async function showMessages(cid){cancelChatDecisions();removeChatReview();const root=$('#chat-transcript');if(!root)return;try{const messages=await api(`/conversations/${cid}/messages`);root.innerHTML=messages.length?messages.map(m=>messageHTML(m.role,m.agent_name||'Central IA',m.content)).join(''):'';if(!messages.length)showWelcome();scrollChat()}catch(ex){toast(ex.message)}}
 function messageHTML(role,agent,content,stepId=''){return `<article class="chat-message ${role==='user'?'user':''}" ${stepId?`data-step="${esc(stepId)}"`:''}><div class="msg-avatar">${role==='user'?'☺':'✳'}</div><div class="message-content"><div class="msg-author">${esc(role==='user'?'Você':agent)}</div><div class="msg-body">${markdown(content)}</div></div></article>`}
 function appendMessage(role,agent,content,stepId){let root=$('#chat-transcript');if(!root)return;const welcome=root.querySelector('.chat-welcome');if(welcome)welcome.remove();root.insertAdjacentHTML('beforeend',messageHTML(role,agent,content,stepId));scrollChat()}
 function scrollChat(){const root=$('#chat-transcript');if(root)root.scrollTop=root.scrollHeight}
@@ -541,7 +542,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   }
   if(msg.event==='workspace_prepared'){S.workspaceRunProject=d.project_id;appendEvent('📁 Pasta criada/autorizada: '+d.folder+(d.starter_files?' · '+d.starter_files+' arquivos iniciais gravados.':''))}
   if(msg.event==='workspace_files_created'){appendEvent('✓ Novos arquivos dos trabalhadores gravados automaticamente. Abra Arquivos para conferir.')}
-  if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações em arquivos existentes exigem aprovação. Confira Projetos → Arquivos.')}
+  if(msg.event==='workspace_proposals'){appendEvent('⚠ Alterações pendentes: use Revisar no chat para conferir os diffs e decidir.');void loadChatPendingReviews()}
   if(msg.event==='workspace_retry_started'){appendEvent('↻ '+d.agent+': tentando entregar um arquivo completo em formato estruturado...')}
   if(msg.event==='workspace_retry_succeeded'){appendEvent('✓ '+d.agent+': arquivo estruturado validado. Aguardando gravação segura.')}
   if(msg.event==='workspace_retry_failed'){appendEvent('⚠ '+d.agent+': nova tentativa sem arquivo válido ('+d.message+').')}
@@ -551,7 +552,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='architect_approved'){appendEvent('✓ Arquiteto autorizado aprovou '+d.count+' alteração(ões) após revisão.')}
   if(msg.event==='architect_package_install'){appendEvent((d.ok?'✓':'⚠')+' Pacotes: '+(d.manager||'')+' '+(d.packages||[]).join(', ')+(d.ok?' instalados.':' não instalados.'))}
   if(msg.event==='architect_delegation_changed'){S.delegation=d;appendEvent(d.enabled?'Autonomia delegada ao Arquiteto nesta conversa.':'Autonomia do Arquiteto revogada.');const b=$('#architect-permission');if(b)b.textContent=d.enabled?'✓ Arquiteto autorizado':'Arquiteto: autorizar'}
-  if(msg.event==='run_completed'){await loadAll();appendEvent('Tarefa concluída. Confira os arquivos reais em Projetos → Arquivos.');await finishRun(true)}
+  if(msg.event==='run_completed'){await loadAll();appendEvent('Tarefa concluída. As propostas pendentes estão disponíveis para revisão aqui no chat.');await finishRun(true)}
   if(msg.event==='run_status'&&d.status==='cancelled'){appendEvent('Execução cancelada.');finishRun(false)}
  };
  src.onerror=()=>{if(S.currentRun===rid)toast('A conexão de eventos foi interrompida; tentando reconectar...')};
@@ -701,6 +702,7 @@ function appendEvent(message){const root=$('#chat-transcript');if(!root)return;r
 async function finishRun(ok){disconnect();S.currentRun=null;renderChatSkills();const send=$('#chat-send');if(send)send.disabled=false;const cancel=$('#chat-cancel');if(cancel)cancel.hidden=true;
  // The final consolidated answer is persisted; use it as canonical conversation history.
  if(ok&&S.currentConvo){await showMessages(S.currentConvo)}
+ await loadChatPendingReviews();
 }
 function showSteps(){const root=$('#chat-steps');if(!root)return;root.innerHTML=S.runSteps.map(s=>`<div class="step-line ${esc(s.status)}"><div><strong>${esc(s.name)}</strong><small>${labelStatus(s.status)}${s.model?' · '+esc(s.model):''}</small>${s.status==='awaiting_approval'?'<div class="approval-card"><p>Decisão solicitada no Chat IA.</p></div>':''}</div></div>`).join('')||'<div class="right-tip">Aguardando nova tarefa.</div>'}
 function modal(title,description,content,onSubmit,saveLabel='Salvar alterações'){
@@ -758,6 +760,12 @@ async function handleAction(action,id,el){
    await api('/projects/'+S.skillProject+'/skills/'+id,'POST',{enabled:el.dataset.enabled==='true'});
    await renderPage();toast('Skill atualizada neste projeto.');
  }
+ if(action==='chat-review-open'){await openChatProposalReview();return}
+ if(action==='chat-review-select'){await openChatProposalReview(id);return}
+ if(action==='chat-review-refresh'){await loadChatPendingReviews();return}
+ if(action==='chat-review-close'){removeChatReview();return}
+ if(action==='chat-review-approve'){await decideChatProposal(true);return}
+ if(action==='chat-review-reject'){await decideChatProposal(false);return}
  if(action==='chat-consent-yes'){decideChatPermission(id,true);return}
  if(action==='chat-consent-no'){decideChatPermission(id,false);return}
  if(action==='runtime-quality')await runQualityChecks();
