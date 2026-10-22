@@ -507,7 +507,7 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
      await executeSlashCommand(local.command);
      if(input)input.value='';
    }catch(ex){toast(ex.message||'Falha ao executar o comando.')}
-   finally{if(send)send.disabled=Boolean(S.currentRun);if(input&&!S.menuOpen)input.focus()}
+   finally{const next=$('#chat-input');if(next&&S.page==='chat')next.disabled=Boolean(S.currentRun);if(next&&!S.menuOpen)next.focus()}
    return;
  }
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
@@ -1167,6 +1167,22 @@ async function executeSlashCommand(command){
    else toast('Selecione um projeto para escolher Skills.');
    return;
   }
+  case 'nova':await handleAction('new-chat',null,null);return;
+  case 'conversas':{
+   setMenuOpen(true);
+   const target=$('#convos .conversation')||$('.drawer-new-chat');
+   target?.focus();return;
+  }
+  case 'dashboard':goto('dashboard');return;
+  case 'trabalhadores':goto('agents');return;
+  case 'fluxos':goto('workflows');return;
+  case 'projetos':goto('projects');return;
+  case 'arquivos':goto('workspace');return;
+  case 'historico':goto('history');return;
+  case 'monitoramento':goto('monitoring');return;
+  case 'provedores':goto('providers');return;
+  case 'configuracoes':goto('settings');return;
+  case 'tema':await handleAction('theme',null,null);return;
   default:throw Error('Comando não reconhecido.');
  }
 }
