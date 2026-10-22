@@ -16,6 +16,7 @@ from pathlib import Path
 from .database import uid, utcnow
 from .scaffolds import react_fastapi_files
 from .roles import worker_role
+from .quality import inspect_sources
 
 MAX_FILE = 160_000
 MAX_FILES = 20
@@ -410,6 +411,19 @@ class Workspaces:
             if self.wants_project(run['prompt']):
                 errors.append('Nenhum arquivo estruturado completo foi entregue pelos trabalhadores.')
             return {'pending':[],'auto_applied':[],'errors':errors}
+        # The deterministic Testador performs a read-only compatibility check
+        # against ALL proposed TS/React files before any auto-apply. An error
+        # must not be bypassed by delegated Architect approval.
+        folder=self._folder(run['user_id'],project_id)
+        overlay={item['path']:item['content'] for _,files in tasks for item in files
+                 if item.get('action','write')=='write' and isinstance(item.get('content'),str)}
+        def read_existing(path):
+            try:
+                raw=self._current(folder,path)
+                return raw.decode('utf-8') if raw is not None else None
+            except (WorkspaceError,UnicodeError,OSError):
+                return None
+        qa_issues=inspect_sources(read_existing,overlay)
         # Validate all candidates BEFORE any disk write, across all workers.
         try:
             for name,files in tasks:
@@ -419,6 +433,10 @@ class Workspaces:
             return {'pending':staged,'auto_applied':[],'errors':errors+[str(exc)]}
         previews=[self.proposal(run['user_id'],project_id,pid) for pid in staged]
         # If any worker proposes a destructive change, keep ALL proposals for explicit approval.
+        if qa_issues:
+            return {'pending':staged,'auto_applied':[],
+                    'errors':errors+['QA Testador IA: '+issue for issue in qa_issues],
+                    'qa_issues':qa_issues}
         if any(file['action']!='write' or file['replace'] or file['stale']
                for proposal in previews for file in proposal['files']):
             return {'pending':staged,'auto_applied':[],'errors':errors}
