@@ -451,6 +451,12 @@ def change_conversation_project(cid:str,data:ConversationProjectIn,
             raise HTTPException(409,'Esta conversa já possui histórico. Crie uma nova conversa para trocar de projeto.')
         DB.execute('DELETE FROM architect_delegations WHERE conversation_id=? AND user_id=?',
                    (cid,user['id']))
+        # Stop any server launched under the old project before changing
+        # this draft conversation's project association.
+        try:
+            RUNTIME.stop(user['id'],cid)
+        except WorkspaceError:
+            pass
         DB.execute('DELETE FROM runtime_permissions WHERE conversation_id=? AND user_id=?',
                    (cid,user['id']))
         DB.execute('UPDATE conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=?',
