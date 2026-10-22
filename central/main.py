@@ -15,6 +15,7 @@ from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .workspace import WorkspaceError
 from .roles import worker_role, role_source
+from .runtime import RuntimeManager
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -22,6 +23,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB = Database(DATA_DIR/'central.sqlite3')
 SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
+RUNTIME = RuntimeManager(DB, ENGINE.workspaces)
 
 
 @asynccontextmanager
@@ -30,6 +32,7 @@ async def lifespan(app):
     ENGINE.resume_pending()
     yield
     ENGINE.shutting_down = True
+    RUNTIME.shutdown()
     pending = list(ENGINE.running.values())
     for task in pending:
         task.cancel()
@@ -385,6 +388,39 @@ def new_conversation(data:ConversationIn,user=Depends(current_user)):
     return require_owned(DB,'conversations',cid,user['id'])
 
 
+
+class RuntimeAccessIn(BaseModel):
+    enabled: bool
+
+
+@app.get('/api/conversations/{cid}/runtime')
+def local_runtime_status(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.status(user['id'],cid)
+
+
+@app.post('/api/conversations/{cid}/runtime/access')
+def local_runtime_access(cid:str,data:RuntimeAccessIn,
+                         request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.authorize(user['id'],cid,data.enabled)
+
+
+@app.post('/api/conversations/{cid}/runtime/start')
+def local_runtime_start(cid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.start(user['id'],cid)
+
+
+@app.post('/api/conversations/{cid}/runtime/stop')
+def local_runtime_stop(cid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB,'conversations',cid,user['id'])
+    return RUNTIME.stop(user['id'],cid)
+
+
 class ConversationProjectIn(BaseModel):
     project_id: str | None = None
 
@@ -414,6 +450,8 @@ def change_conversation_project(cid:str,data:ConversationProjectIn,
         if used or runs:
             raise HTTPException(409,'Esta conversa já possui histórico. Crie uma nova conversa para trocar de projeto.')
         DB.execute('DELETE FROM architect_delegations WHERE conversation_id=? AND user_id=?',
+                   (cid,user['id']))
+        DB.execute('DELETE FROM runtime_permissions WHERE conversation_id=? AND user_id=?',
                    (cid,user['id']))
         DB.execute('UPDATE conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=?',
                    (data.project_id,utcnow(),cid,user['id']))
