@@ -272,3 +272,17 @@ O botão Iniciar agora só confirma sucesso depois que FastAPI (porta 8000) e Vi
 Se o Python ou o Vite encerrar rapidamente, a Central retorna um erro HTTP 422 com o nome do processo, código de saída e trecho limitado das mensagens do servidor. O Chat IA mostra o diagnóstico em uma mensagem, mantém a opção Iniciar para nova tentativa e oferece **Diagnóstico** para reabrir/copiar a mensagem após recarregar a conversa (durante a mesma sessão do servidor). Enquanto o serviço não estiver saudável, **Prévia** fica desabilitada. Se um servidor encerrar depois de iniciar, a próxima consulta de status invalida a prévia e guarda a falha. O stdout dos processos é consumido continuamente com buffer limitado para não bloquear subprocessos.
 
 Causas comuns: Vite sem dependências de `node_modules`, backend com importação inválida, pacote uvicorn ausente no virtualenv ou incompatibilidade de código proposta anteriormente. Corrija somente após ler o diagnóstico; as alterações pendentes permanecem na revisão e nenhuma instalação é iniciada automaticamente.
+
+
+### Logs de falha no Vite/PostCSS
+
+Quando um servidor Vite encerra com código 1, as primeiras linhas normalmente explicam a causa (por exemplo, `Failed to load PostCSS config`, plugin Tailwind não instalado ou formato incompatível de `postcss.config.js`). O buffer anterior mostrava apenas as **últimas cinco linhas** e podia ocultar essa mensagem, exibindo apenas `at Array.map`, `at plugins` e `Node.js ...`.
+
+O diagnóstico do runtime agora preserva o início do log **e** o fim do stack trace, com retenção limitada. Use **Chat IA → ⚠ Diagnóstico → Copiar diagnóstico**, sem incluir arquivos contendo chaves de API. Não altere o arquivo de configuração de CSS por suposição: primeiro confira a mensagem completa e os arquivos `frontend/postcss.config.*`, `frontend/vite.config.ts`, `frontend/package.json` e eventuais configs ancestrais.
+
+Para diagnosticar diretamente no Git Bash, sem modificar dependências:
+```bash
+cd /c/Projetos/Central-IA/loja-virtual-8943d369/frontend
+npm run dev
+```
+Copie as **primeiras linhas do erro**, não apenas o final. Não atribua esse erro automaticamente ao Node.js 24 sem confirmar a mensagem principal.
