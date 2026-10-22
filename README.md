@@ -226,3 +226,12 @@ No topo da conversa, a barra de contexto **Projeto / Skills do projeto** permite
 - Caso o usuário ainda não tenha criado um projeto, escolha **Sem projeto** para conversas comuns ou cadastre um projeto na aba **Projetos**.
 
 O controle de Skills no chat é uma interface para o catálogo local atualmente disponível. Não significa que as CLIs ou servidores MCP externos listados nas orientações da Skill tenham sido instalados.
+
+
+### Compatibilidade de especialidades em Trabalhadores
+
+Os cartões da aba Trabalhadores mostram agora o papel reconhecido pelo orquestrador. O campo editável Especialidade aceita descrições personalizadas; para os nomes padrão exatos Arquiteto IA, Frontend IA e Designer IA, o roteamento pode recuperar o papel mesmo quando essa especialidade foi personalizada.
+
+Os códigos canônicos continuam sendo architecture, frontend e design. Um código canônico explícito sempre tem prioridade sobre o nome mostrado: um trabalhador chamado Arquiteto IA com especialidade backend não se torna Arquiteto na execução e não recebe automaticamente poderes privilegiados.
+
+Não há alteração automática de registros de trabalhadores nem mudanças nas permissões do usuário. Para trabalhadores com nomes personalizados, configure a especialidade com seu código canônico em Trabalhadores -> Configurar.
