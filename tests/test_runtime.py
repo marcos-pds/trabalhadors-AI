@@ -56,13 +56,15 @@ def test_start_requires_explicit_per_chat_permission_and_fixed_commands(tmp_path
     def fake_popen(argv,**kwargs):
         assert kwargs['shell'] is False
         assert kwargs['cwd']
-        assert kwargs['stdout'] is module.subprocess.DEVNULL
+        assert kwargs['stdout'] is module.subprocess.PIPE
+        assert kwargs['stderr'] is module.subprocess.STDOUT
         proc=DummyProcess(argv,kwargs['cwd'])
         launched.append(proc)
         return proc
     monkeypatch.setattr(module.subprocess,'Popen',fake_popen)
     monkeypatch.setattr(module.shutil,'which',lambda name:'/usr/bin/node')
     monkeypatch.setattr(RUNTIME,'_available',lambda port:True)
+    monkeypatch.setattr(RUNTIME,'_probe',lambda :True)
     with TestClient(app) as c:
         project,cid,root=configured(c,tmp_path)
         status=c.get(f'/api/conversations/{cid}/runtime')
@@ -186,3 +188,61 @@ def test_permission_alone_never_installs_packages_or_starts_ai_worker(tmp_path):
         assert c.get(f'/api/conversations/{cid}/runtime').json()['running'] is False
         assert not ENGINE.db.all('SELECT * FROM runs WHERE conversation_id=?',(cid,))
         assert not ENGINE.db.all('SELECT * FROM architect_package_installs WHERE project_id=?',(project,))
+
+
+def test_early_fastapi_exit_reports_process_and_logs_and_blocks_preview(tmp_path,monkeypatch):
+    from central import runtime as module
+    import io
+    launched=[]
+    class FailFast(DummyProcess):
+        def __init__(self,argv,cwd):
+            super().__init__(argv,cwd)
+            self.stdout=io.BytesIO(b'ERROR: Error loading ASGI app. Could not import module main.\n')
+            if '-m' in argv and 'uvicorn' in argv:
+                self.exit_code=1
+    def fake_popen(argv,**kwargs):
+        p=FailFast(argv,kwargs['cwd']);launched.append(p);return p
+    monkeypatch.setattr(module.subprocess,'Popen',fake_popen)
+    monkeypatch.setattr(module.shutil,'which',lambda name:'/usr/bin/node')
+    monkeypatch.setattr(RUNTIME,'_available',lambda port:True)
+    monkeypatch.setattr(RUNTIME,'_probe',lambda:False)
+    with TestClient(app) as c:
+        project,cid,root=configured(c,tmp_path)
+        c.post(f'/api/conversations/{cid}/runtime/access',json={'enabled':True},headers=HEADERS)
+        fail=c.post(f'/api/conversations/{cid}/runtime/start',headers=HEADERS)
+        assert fail.status_code==422,fail.text
+        assert 'backend (código 1)' in fail.json()['detail']
+        status=c.get(f'/api/conversations/{cid}/runtime').json()
+        assert not status['running']
+        assert status['frontend_url'] is None
+        assert 'backend' in status['last_error']
+        assert 'Error loading ASGI' in fail.json()['detail']
+        assert RUNTIME.sessions=={}
+
+
+def test_live_process_without_reachable_http_is_not_reported_as_started(tmp_path,monkeypatch):
+    from central import runtime as module
+    launched=[]
+    def fake_popen(argv,**kwargs):
+        proc=DummyProcess(argv,kwargs['cwd']);launched.append(proc);return proc
+    monkeypatch.setattr(module.subprocess,'Popen',fake_popen)
+    monkeypatch.setattr(module.shutil,'which',lambda name:'/usr/bin/node')
+    monkeypatch.setattr(RUNTIME,'_available',lambda port:True)
+    monkeypatch.setattr(RUNTIME,'_probe',lambda:False)
+    # Avoid eight real seconds during CI.
+    clock=[0.0]
+    def fake_monotonic():
+        clock[0]+=1.5
+        return clock[0]
+    monkeypatch.setattr(module.time,'monotonic',fake_monotonic)
+    monkeypatch.setattr(module.time,'sleep',lambda seconds:None)
+    with TestClient(app) as c:
+        project,cid,root=configured(c,tmp_path)
+        c.post(f'/api/conversations/{cid}/runtime/access',json={'enabled':True},headers=HEADERS)
+        result=c.post(f'/api/conversations/{cid}/runtime/start',headers=HEADERS)
+        assert result.status_code==422,result.text
+        assert 'não ficaram prontos' in result.json()['detail']
+        assert all(p.terminated for p in launched)
+        status=c.get(f'/api/conversations/{cid}/runtime').json()
+        assert not status['running']
+        assert '8 segundos' in status['last_error']
