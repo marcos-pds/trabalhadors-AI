@@ -480,6 +480,13 @@ async function sendMessage(){const input=$('#chat-input');let prompt=input?.valu
    return;
  }
  if(S.currentRun){toast('Aguarde ou cancele a tarefa atual.');return}
+ if(chatProjectId()&&isLocalBuildDiagnostic(prompt)){
+   if(S.attached.length){toast('Remova anexos antes de analisar um diagnóstico local.');return}
+   if(input)input.value='';
+   appendMessage('user','Você',prompt.slice(0,4500));
+   appendEvent('⊙ Erro de compilação reconhecido. Lendo arquivos reais da pasta autorizada e executando QA estático.');
+   await runQualityChecks();return;
+ }
  const attachments=S.attached.map(f=>`\n\nArquivo: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('');
  prompt+=attachments;
  const send=$('#chat-send');if(send)send.disabled=true;
@@ -865,7 +872,12 @@ async function runQualityChecks(){
      ' problema(s) em '+checked+' arquivo(s):\n'+report.issues.map(x=>'• '+x).join('\n')+
      '\nAprovação automática e início da prévia ficam bloqueados até a correção.');
    toast('Testador IA: foram encontrados problemas. Consulte o chat.');
-   await proposeQaRepair(report.issues);
+   const handled=await offerDependencyInstall(report,cid);
+   if(!handled){
+    const codeProblems=report.issues.filter(x=>!x.includes('dependência npm'));
+    if(codeProblems.length)await proposeQaRepair(codeProblems);
+    else appendEvent('Dependências npm pendentes. A Central não as instalará sem autorização.');
+   }
   }else{
    appendEvent('✓ Testador IA: '+checked+' arquivo(s) verificados. '
      +'Nenhum conflito direto de imports/exports React ou erro de sintaxe Python identificado. '
@@ -874,6 +886,57 @@ async function runQualityChecks(){
   }
  }catch(err){toast('Não foi possível executar o Testador IA: '+err.message)}
 }
+
+const DIRECT_NPM_ALLOWLIST=new Set([
+ 'tailwindcss','@tailwindcss/vite','lucide-react','motion','clsx',
+ 'tailwind-merge','class-variance-authority','@radix-ui/react-slot',
+ '@radix-ui/react-dialog','@radix-ui/react-dropdown-menu','@playwright/test'
+]);
+async function offerDependencyInstall(report,conversationId){
+ const project=chatProjectId();
+ const missing=Array.isArray(report.missing_packages)?report.missing_packages:[];
+ const candidate=missing.find(x=>DIRECT_NPM_ALLOWLIST.has(x));
+ if(!candidate)return false;
+ const permitted=await askChatPermission({
+   title:'Deseja instalar '+candidate+' para corrigir a Loja Virtual?',
+   details:'O Testador IA encontrou um import que depende de '+candidate+
+     ', mas o pacote não está disponível no frontend. '
+     +'A Central instalará somente este pacote permitido dentro do projeto selecionado.',
+   note:'Isso executará npm install com scripts desativados, atualizará package.json, '
+     +'package-lock.json e node_modules. Nenhum arquivo React será sobrescrito por esta ação. '
+     +'Instalar bibliotecas de terceiros envolve riscos e depende da sua confirmação.',
+   confirmLabel:'✓ Instalar '+candidate,denyLabel:'Negar'
+ });
+ if(!permitted)return true; // no automatic install or agent fallback on denial
+ if(S.page!=='chat'||S.currentConvo!==conversationId||chatProjectId()!==project)return true;
+ try{
+   // Recheck the exact finding after the user clicks Confirmar.
+   const fresh=await api('/conversations/'+encodeURIComponent(conversationId)+'/quality');
+   if(!(fresh.missing_packages||[]).includes(candidate)){
+     appendEvent('⚠ A dependência já não consta como ausente. Execute /testar novamente.');
+     return true;
+   }
+   appendEvent('▶ Instalação autorizada: '+candidate+'. Executando npm seguro no projeto local.');
+   const done=await api('/conversations/'+encodeURIComponent(conversationId)+
+     '/dependencies/install','POST',{package:candidate});
+   if(!done.result?.ok){
+     appendEvent('⚠ Falha ao instalar '+candidate+': '+(done.result?.error||
+       done.result?.output||'Falha não especificada.'));
+     return true;
+   }
+   appendEvent('✓ Pacote '+candidate+' instalado pela Central. Executando QA novamente.');
+   if(S.currentConvo===conversationId&&chatProjectId()===project)await runQualityChecks();
+ }catch(ex){appendEvent('⚠ Instalação não concluída: '+ex.message)}
+ return true;
+}
+/** Recognizable build output is evidence to analyze, not an AI instruction. */
+function isLocalBuildDiagnostic(message){
+ return /\[(?:plugin:vite:[^\]]+)\]/i.test(message)||
+  /Failed to resolve import\s+["'][^"']+["']/i.test(message)||
+  /No matching export in\s+["'][^"']+/i.test(message)||
+  /Failed to load PostCSS config/i.test(message);
+}
+
 async function startRuntime(){
  if(!chatProjectId()){toast('Selecione um projeto primeiro.');return}
  const cid=await ensureConvo();
