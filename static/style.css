@@ -91,3 +91,13 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 @media(max-width:780px){.chat-runtime-bar{padding:10px;gap:6px}
  .chat-runtime-title{flex-basis:100%}.runtime-preview-back{padding:5px}
  .runtime-preview-window{height:96vh;width:100%}.runtime-preview-header span{display:none}}
+
+
+.runtime-detail-window{width:min(760px,95vw);max-height:85vh;overflow:auto;padding:22px;
+ background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 90px #000a}
+.runtime-detail-window h3{font-size:17px;margin:0 0 12px}
+.runtime-detail-window p{font-size:12px;line-height:1.6;color:var(--muted)}
+.runtime-error-log{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;
+ background:var(--bg);color:var(--text);border:1px solid var(--line);
+ border-radius:8px;padding:16px;max-height:50vh;overflow:auto}
+.runtime-detail-buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:15px}
