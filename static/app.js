@@ -240,10 +240,13 @@ async function selectChatProject(projectId){
      const messages=await api('/conversations/'+encodeURIComponent(cid)+'/messages');
      const hasRuns=S.runs.some(r=>r.conversation_id===cid);
      if(messages.length||hasRuns){
-       if(!confirm('Esta conversa tem histórico. Criar uma NOVA conversa para o projeto escolhido? O histórico e a autorização do Arquiteto da conversa anterior permanecerão separados.')){
-         if(select)select.value=old||'';
-         return;
-       }
+       const allowed=await askChatPermission({
+         title:'Deseja abrir uma nova conversa para trocar de projeto?',
+         details:'Esta conversa já possui histórico. O projeto escolhido abrirá uma nova conversa; '
+          +'as autorizações e as propostas da conversa anterior não serão transferidas.',
+         confirmLabel:'✓ Criar nova conversa',denyLabel:'Negar'
+       });
+       if(!allowed){if(select)select.value=old||'';return}
        const created=await api('/conversations','POST',
          {title:'Nova conversa',project_id:projectId});
        S.conversations.unshift(created);
@@ -568,7 +571,18 @@ async function handleAction(action,id,el){
    if(!S.currentConvo && chatProjectId())await ensureConvo();
    if(!S.currentConvo || !chatProjectId()){toast('Selecione primeiro um projeto nesta conversa.');return}
    const enabled=!(S.delegation?.enabled);
-   if(enabled&&!confirm('Conceder ao Arquiteto IA, NESTA conversa, autorização para aprovar mudanças comuns de código e instalar somente pacotes permitidos via npm/pip? Instalar software de terceiros envolve riscos. Exclusões, arquivos sensíveis, scripts e comandos livres continuam bloqueados.'))return;
+   if(enabled){
+     const permitted=await askChatPermission({
+       title:'Deseja conceder autonomia ao Arquiteto IA neste projeto?',
+       details:'O Arquiteto poderá revisar e aprovar alterações comuns de código, '
+         +'além de instalar pacotes permitidos pelo catálogo via npm/pip. '
+         +'Isso pode executar software de terceiros no seu computador.',
+       note:'A permissão fica limitada a esta conversa. Exclusões, arquivos sensíveis '
+         +'e comandos livres continuam bloqueados.',
+       confirmLabel:'✓ Autorizar Arquiteto',denyLabel:'Negar'
+     });
+     if(!permitted)return;
+   }
    S.delegation=await api('/conversations/'+S.currentConvo+'/architect-delegation','POST',{enabled});
    const b=$('#architect-permission');if(b)b.textContent=enabled?'✓ Arquiteto autorizado':'Arquiteto: sem delegação';
    toast(enabled?'Autonomia registrada nesta conversa.':'Autonomia revogada.');
@@ -612,10 +626,22 @@ async function authorizeRuntime(){
  if(!chatProjectId()){toast('Selecione um projeto para autorizar.');return}
  const cid=await ensureConvo();
  const enabled=!(S.chatRuntime?.authorized);
- if(enabled&&!confirm('Autorizar a Central a EXECUTAR os servidores React/Vite e FastAPI deste projeto em seu computador? O código local e as dependências instaladas serão executados. Não haverá instalação de pacotes nem comandos livres. Você poderá revogar.'))return;
+ if(enabled){
+  const permitted=await askChatPermission({
+   title:'Deseja autorizar a Central a iniciar os servidores React e FastAPI?',
+   details:'A execução iniciará o código e as dependências do projeto no seu computador, '
+    +'apenas nas portas locais 5173 e 8000. Não inclui instalação de pacotes nem comandos livres.',
+   note:'A autorização vale somente nesta conversa. Use /revogar para cancelar e parar os servidores.',
+   confirmLabel:'✓ Autorizar execução',denyLabel:'Negar'
+  });
+  if(!permitted)return false;
+ }
  await api('/conversations/'+encodeURIComponent(cid)+'/runtime/access','POST',{enabled});
  await loadChatRuntime();
+ appendEvent(enabled?'✓ Execução local autorizada nesta conversa.':
+   '✓ Autorização revogada. Processos iniciados pela Central serão interrompidos.');
  toast(enabled?'Permissão de execução concedida nesta conversa.':'Permissão revogada.');
+ return true;
 }
 async function runQualityChecks(){
  if(!chatProjectId()){toast('Selecione um projeto.');return}
