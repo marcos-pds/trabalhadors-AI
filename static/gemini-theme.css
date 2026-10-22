@@ -212,6 +212,8 @@ body.light .topbar { border-bottom-color: #20212412; }
   text-align: left;
   justify-content: center;
 }
+.chat-welcome .spark .ui-icon { width: 30px; height: 30px; }
+.starter-pills .ui-icon { width: 16px; height: 16px; }
 .chat-welcome .spark {
   margin: 0 0 20px;
   background: none;
@@ -410,6 +412,22 @@ body.light .chat-compose .composer-box:focus-within {
 .slash-glyph { color: var(--muted); }
 .slash-info strong { font-size: 12px; }
 .slash-info small { color: var(--muted); }
+
+/* Keep the sign-in view consistent with the charcoal workspace. */
+.auth-page {
+  background: var(--bg);
+}
+.auth-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.auth-card h1 { font-weight: 560; letter-spacing: -.035em; }
+.auth-card p,.switch-auth { color: var(--muted); }
+.auth-card .field { color: var(--text); background: var(--card); }
+.switch-auth button { color: var(--purple); }
 
 /* Minimal shared controls in non-chat pages. */
 .btn-primary {
