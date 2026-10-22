@@ -10,6 +10,10 @@ import socket
 import subprocess
 import sys
 import threading
+import time
+from collections import deque
+from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 
 from .database import utcnow
@@ -25,6 +29,8 @@ class RuntimeManager:
         self.workspaces = workspaces
         self.lock = threading.RLock()
         self.sessions = {}
+        self.logs = {}
+        self.failures = {}
 
     def _conversation(self,user_id,conversation_id):
         row = self.db.one('''SELECT c.project_id FROM conversations c
@@ -104,14 +110,49 @@ class RuntimeManager:
                          str(self.FRONT_PORT),'--strictPort'],front)
         ]
 
+    @staticmethod
+    def _capture(stream, output):
+        """Read continuously to avoid PIPE deadlocks. Only keep bounded log excerpts."""
+        try:
+            for raw in iter(stream.readline,b''):
+                line=raw.decode('utf-8','replace').strip()
+                if line:
+                    output.append(line[-450:])
+        except (OSError,ValueError,AttributeError):
+            pass
+        finally:
+            try: stream.close()
+            except (OSError,ValueError,AttributeError): pass
+
+    @staticmethod
+    def _excerpt(logs, kinds=None):
+        kinds=kinds or ('backend','frontend')
+        return '\n'.join(kind+': '+' | '.join(list(logs.get(kind,()))[-5:])
+                         for kind in kinds if logs.get(kind))[-2400:]
+
     def _check_session(self,key):
         current=self.sessions.get(key)
         if not current:return None
-        if any(proc.poll() is not None for proc in current.values()):
+        dead=[kind for kind,proc in current.items() if proc.poll() is not None]
+        if dead:
+            codes=', '.join(kind+' (código '+str(current[kind].poll())+')' for kind in dead)
             self._terminate(current)
             self.sessions.pop(key,None)
+            excerpt=self._excerpt(self.logs.get(key,{}),dead)
+            self.failures[key]='Processo encerrado: '+codes+(('\n'+excerpt) if excerpt else '')
             return None
         return current
+
+    @staticmethod
+    def _probe():
+        """Require HTTP response from Vite and active local FastAPI port."""
+        try:
+            with socket.create_connection(('127.0.0.1',RuntimeManager.BACK_PORT),timeout=.3):
+                pass
+            with urlopen('http://127.0.0.1:5173/',timeout=.4) as response:
+                return response.status < 500
+        except (OSError,URLError,HTTPError,TimeoutError,ValueError):
+            return False
 
     @staticmethod
     def _terminate(processes):
@@ -130,14 +171,19 @@ class RuntimeManager:
         project_id=self._conversation(user_id,conversation_id)
         permission=self.access(user_id,conversation_id)
         with self.lock:
-            current=self._check_session((user_id,project_id))
+            key=(user_id,project_id)
+            current=self._check_session(key)
+            message='Servidores locais respondendo.' if current else (
+                self.failures.get(key) or 'Projeto não iniciado pela Central.')
             return {
                 'project_id':project_id,
                 'authorized':permission['enabled'],
                 'running':bool(current),
                 'frontend_url':f'http://127.0.0.1:{self.FRONT_PORT}/' if current else None,
                 'backend_docs_url':f'http://127.0.0.1:{self.BACK_PORT}/docs' if current else None,
-                'message':'Executando localmente.' if current else 'Projeto não iniciado pela Central.'
+                'message':message,
+                'last_error':self.failures.get(key),
+                'logs':self._excerpt(self.logs.get(key,{})) if current else None
             }
 
     def start(self,user_id,conversation_id):
@@ -160,24 +206,57 @@ class RuntimeManager:
             if not self._available(self.FRONT_PORT) or not self._available(self.BACK_PORT):
                 raise WorkspaceError('A porta 5173 ou 8000 já está em uso. Pare os servidores manuais antes de iniciar pela Central.',409)
             processes={}
+            logs={kind:deque(maxlen=50) for kind,_,_ in commands}
+            self.logs[key]=logs
+            self.failures.pop(key,None)
             try:
                 for kind,argv,cwd in commands:
-                    processes[kind]=subprocess.Popen(
+                    proc=subprocess.Popen(
                         argv,cwd=str(cwd),shell=False,
-                        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
                         creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name=='nt' else 0))
+                    processes[kind]=proc
+                    if getattr(proc,'stdout',None) is not None:
+                        threading.Thread(target=self._capture,args=(proc.stdout,logs[kind]),
+                                         name='runtime-log-'+kind,daemon=True).start()
+                # Launch does not imply readiness. Wait briefly for FastAPI and Vite
+                # to accept localhost connections, checking for early process exits.
+                deadline=time.monotonic()+8
+                ready=False
+                while time.monotonic()<deadline:
+                    dead=[kind for kind,proc in processes.items() if proc.poll() is not None]
+                    if dead:
+                        time.sleep(.15)  # give log reader a chance to drain the final traceback
+                        code=', '.join(kind+' (código '+str(processes[kind].poll())+')' for kind in dead)
+                        reason=self._excerpt(logs,dead)
+                        raise WorkspaceError('Falha ao iniciar: '+code+
+                            (('\n'+reason) if reason else '\nSem saída do processo.'),422)
+                    if self._probe():
+                        ready=True
+                        break
+                    time.sleep(.2)
+                if not ready:
+                    reason=self._excerpt(logs)
+                    raise WorkspaceError('Os servidores não ficaram prontos em 8 segundos. '+
+                        ('Saída: '+reason if reason else
+                        'Verifique as dependências do Vite e do FastAPI.'),422)
                 self.sessions[key]=processes
-            except (OSError,ValueError) as exc:
+            except (WorkspaceError,OSError,ValueError) as exc:
                 self._terminate(processes)
+                self.failures[key]=str(exc)[:2600]
+                if isinstance(exc,WorkspaceError):raise
                 raise WorkspaceError('Não foi possível iniciar os servidores locais: '+str(exc)[:170],422)
             return self.status(user_id,conversation_id)
 
     def stop(self,user_id,conversation_id):
         project_id=self._conversation(user_id,conversation_id)
         with self.lock:
-            procs=self.sessions.pop((user_id,project_id),None)
+            key=(user_id,project_id)
+            procs=self.sessions.pop(key,None)
             if procs:self._terminate(procs)
+            self.failures.pop(key,None)
+            self.logs.pop(key,None)
         return self.status(user_id,conversation_id)
 
     def shutdown(self):
@@ -185,3 +264,5 @@ class RuntimeManager:
             for processes in self.sessions.values():
                 self._terminate(processes)
             self.sessions.clear()
+            self.logs.clear()
+            self.failures.clear()
