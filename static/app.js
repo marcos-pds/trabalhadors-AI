@@ -1,6 +1,6 @@
 import { SLASH_COMMANDS, findSlashCommands, parseSlashCommand } from './slash-commands.mjs';
 import { chooseRepairWorkers, repairPrompt } from './chat-approvals.mjs';
-const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set()};
+const S={me:null,page:'dashboard',theme:localStorage.getItem('central-theme')||'dark',agents:[],providers:[],projects:[],conversations:[],workflows:[],runs:[],currentConvo:null,currentRun:null,source:null,runSteps:[],streams:{},lastSeq:0,mode:'auto',selectedAgent:'',selectedWorkflow:'',attached:[],loginMode:'register',workspaceProject:null,workspaceInfo:null,workspaceRunProject:null,skillProject:null,skills:[],packageAudit:[],delegation:null,chatSkills:[],chatSkillsLoading:false,chatRuntime:null,slashSelection:0,chatDecisions:new Map(),nextDecision:0,offeredApprovals:new Set(),chatPendingReviews:[],pendingReviewProject:null,pendingReviewSeq:0,chatReviewId:null,chatReviewPreview:null,chatReviewBusy:false};
 const $=sel=>document.querySelector(sel);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labelStatus=s=>({completed:'Concluído',running:'Executando',failed:'Falhou',cancelled:'Cancelado',queued:'Na fila',awaiting_approval:'Aguardando aprovação',disabled:'Desativado'}[s]||s);
@@ -282,7 +282,171 @@ async function toggleChatSkill(skillId,enabled){
  }catch(error){renderChatSkills();toast(error.message)}
 }
 
-function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Descreva a tarefa ou digite / para comandos..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+function chat(){return `<div class="chat-layout"><aside class="chat-left"><button class="btn btn-primary" data-action="new-chat">＋ Nova conversa</button><div class="chat-section-label">Recentes</div><div id="convos">${S.conversations.map(c=>`<button class="conversation ${S.currentConvo===c.id?'active':''}" data-action="switch-convo" data-id="${c.id}">▧ <span>${esc(c.title)}</span></button>`).join('')||'<p style="color:var(--muted);font-size:11px;padding:12px">Suas conversas aparecerão aqui.</p>'}</div></aside><div class="chat-center"><div class="chat-toolbar"><div><strong id="chat-title">${esc(S.conversations.find(c=>c.id===S.currentConvo)?.title||'Nova conversa')}</strong><small>Equipe de especialistas IA</small></div><div class="composer-controls"><select id="chat-mode" class="field"><option value="auto" ${S.mode==='auto'?'selected':''}>✦ Seleção automática</option><option value="manual" ${S.mode==='manual'?'selected':''}>◇ Agente manual</option><option value="team" ${S.mode==='team'?'selected':''}>▣ Equipe de agentes</option></select><span id="architect-permission" class="chat-architect-status" title="Digite /arquiteto para conceder ou revogar autonomia">Arquiteto: sem delegação</span><select id="chat-agent" class="field" title="Trabalhador preferido"><option value="">Qualquer trabalhador</option>${S.agents.filter(a=>a.enabled).map(a=>`<option value="${a.id}" ${S.selectedAgent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div></div>${chatContextBar()}<div id="chat-pending-banner" class="chat-pending-banner" hidden></div><div class="chat-transcript" id="chat-transcript"></div><div class="chat-compose"><div class="composer-box"><div id="chat-slash-menu" class="chat-slash-menu" role="listbox" aria-label="Comandos disponíveis" hidden></div><textarea id="chat-input" rows="2" aria-controls="chat-slash-menu" aria-autocomplete="list" aria-expanded="false" placeholder="Descreva a tarefa ou digite / para comandos..."></textarea><div class="composer-footer"><div class="composer-controls"><label class="btn btn-sm btn-quiet" for="file-upload" title="Anexar arquivo de texto ou código">＋ Arquivo</label><input type="file" id="file-upload" style="display:none" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"><span id="attached-label" style="font-size:10px;color:var(--muted)">${S.attached.length?esc(S.attached.map(f=>f.name).join(', ')):'Sem anexos'}</span></div><div class="composer-controls"><button class="btn btn-sm btn-quiet" id="chat-cancel" data-action="cancel-run" hidden>■ Parar</button><button class="btn btn-primary btn-sm" id="chat-send">Enviar ↗</button></div></div></div><small>Digite <kbd>/</kbd> para comandos do projeto. Tarefas de IA usam suas chaves de API.</small></div></div><aside class="chat-right"><div class="right-head">◎ Painel de execução <span class="dot"></span></div><div id="chat-steps"><div class="right-tip">Nenhuma tarefa em execução. Selecione o modo de trabalho e envie uma solicitação para começar.</div></div><div class="right-tip"><strong>Roteamento inteligente</strong><br>O orquestrador divide solicitações por especialidade e tenta o próximo provedor ativo em caso de falha.</div></aside></div>`}
+
+/* Fast project-scoped review inbox inside the chat, independent of old run history. */
+function chatPendingPaths(){
+ return [...new Set(S.chatPendingReviews.flatMap(p=>(p.files||[]).map(f=>f.path)))];
+}
+function renderChatPendingBanner(){
+ const root=$('#chat-pending-banner');if(!root)return;
+ const pid=chatProjectId();
+ if(!pid||pid!==S.pendingReviewProject||!S.chatPendingReviews.length){
+  root.hidden=true;root.innerHTML='';return;
+ }
+ const paths=chatPendingPaths();
+ root.hidden=false;
+ root.innerHTML='<div class="chat-pending-summary"><strong>⚠ Revisão pendente</strong>'
+  +'<span>'+S.chatPendingReviews.length+' proposta(s) · '+paths.length+
+   ' arquivo(s) aguardando aprovação</span></div>'
+  +'<div class="chat-pending-paths">'+paths.slice(0,4).map(p=>'<code>'+esc(p)+'</code>').join('')
+  +(paths.length>4?'<span>+'+(paths.length-4)+' outros</span>':'')+'</div>'
+  +'<div class="chat-pending-actions"><button class="btn btn-primary btn-sm" data-action="chat-review-open">'
+  +'◫ Revisar no chat</button><button class="btn btn-sm" data-action="chat-review-refresh" title="Recarregar propostas">'
+  +'↻</button></div>';
+}
+async function loadChatPendingReviews(){
+ const pid=chatProjectId(),seq=++S.pendingReviewSeq;
+ if(!pid){
+  S.chatPendingReviews=[];S.pendingReviewProject=null;
+  S.chatReviewId=null;S.chatReviewPreview=null;renderChatPendingBanner();return;
+ }
+ try{
+  const result=await api('/projects/'+encodeURIComponent(pid)+'/workspace/pending');
+  if(seq!==S.pendingReviewSeq||S.page!=='chat'||chatProjectId()!==pid)return;
+  S.chatPendingReviews=Array.isArray(result.proposals)?result.proposals:[];
+  S.pendingReviewProject=pid;
+  renderChatPendingBanner();
+ }catch(ex){
+  if(seq!==S.pendingReviewSeq||S.page!=='chat'||chatProjectId()!==pid)return;
+  S.chatPendingReviews=[];S.pendingReviewProject=null;renderChatPendingBanner();
+  // A workspace may not be prepared for a newly selected project.
+  if(!/Prepare primeiro|não está preparada/.test(ex.message))toast('Não foi possível consultar propostas: '+ex.message);
+ }
+}
+function chatProposalDiffHtml(diff){
+ return String(diff||'').split('\n').map(line=>{
+  const type=line.startsWith('+++')||line.startsWith('---')?'meta':
+             line.startsWith('+')?'added':line.startsWith('-')?'removed':
+             line.startsWith('@@')?'hunk':'context';
+  return '<span class="chat-diff-'+type+'">'+esc(line)+'</span>';
+ }).join('\n');
+}
+function removeChatReview(){
+ const old=$('#chat-review-panel');if(old)old.remove();
+ S.chatReviewId=null;S.chatReviewPreview=null;
+}
+function renderChatProposalReview(){
+ const preview=S.chatReviewPreview;
+ if(!preview)return;
+ const root=$('#chat-transcript');if(!root)return;
+ const existing=$('#chat-review-panel');if(existing)existing.remove();
+ const pending=S.chatPendingReviews;
+ const multi=preview.files.length>1;
+ const stale=preview.files.some(f=>f.stale);
+ const truncated=preview.files.some(f=>f.diff_truncated);
+ const blocked=stale||truncated||preview.status!=='pending';
+ const choices=pending.map(p=>{
+  const files=(p.files||[]).map(f=>f.path).join(', ');
+  return '<button type="button" class="chat-review-choice '+(p.id===preview.id?'selected':'')+
+   '" data-action="chat-review-select" data-id="'+esc(p.id)+'" title="'+esc(files)+'">'+
+   esc(files.slice(0,95))+(files.length>95?'…':'')+'</button>';
+ }).join('');
+ const detail=preview.files.map(file=>
+  '<section class="chat-review-file"><div class="chat-review-file-title"><strong>'+esc(file.path)+'</strong>'
+   +'<small>'+(file.action==='delete'?'Excluir':file.replace?'Substituir arquivo':'Criar arquivo')+
+   '</small></div>'+
+   (file.stale?'<p class="chat-review-warning">⚠ Este arquivo foi modificado após a proposta. '
+     +'Recrie a proposta para evitar sobrescrever alterações recentes.</p>':'')+
+   (file.diff_truncated?'<p class="chat-review-warning">⚠ O diff completo excede o limite '
+     +'da visualização. A aprovação no chat está desabilitada.</p>':'')+
+   '<pre class="chat-review-diff" tabindex="0" aria-label="Comparação antes e depois de '+esc(file.path)+'">'+
+     chatProposalDiffHtml(file.diff)+'</pre></section>'
+ ).join('');
+ root.insertAdjacentHTML('beforeend',
+  '<article class="chat-message chat-review-message" id="chat-review-panel"><div class="msg-avatar">▧</div>'+
+  '<div class="message-content"><div class="msg-author">Central IA · Revisão dos arquivos</div>'+
+  '<div class="chat-review-card"><div class="chat-review-head"><strong>Confira as diferenças antes de decidir</strong>'+
+  '<button class="btn btn-sm" data-action="chat-review-close">✕ Fechar</button></div>'+
+  '<p>Proposta de '+esc(preview.agent||'trabalhador IA')+
+   '. <strong>+</strong> indica adição e <strong>−</strong> indica remoção. '+
+   (multi?'Esta proposta contém '+preview.files.length+' arquivos e será decidida por inteiro.':'')+'</p>'+
+  '<div class="chat-review-choices">'+choices+'</div>'+
+  detail+
+  (blocked?
+   '<p class="chat-review-warning">Aprovação indisponível: '+
+    (stale?'arquivo alterado após a proposta. ':'' )+
+    (truncated?'diff incompleto. ':'')+
+    (preview.status!=='pending'?'proposta já decidida.':'')+
+    'Atualize a revisão.</p>':
+   '<label class="chat-review-confirm">Para aplicar os arquivos revisados, digite <strong>APLICAR</strong>'+
+   '<input class="field" id="chat-review-confirmation" type="text" autocomplete="off" spellcheck="false" '+
+   'placeholder="APLICAR" aria-label="Confirmação APLICAR"/></label>')+
+  '<div class="chat-review-controls"><button class="btn btn-primary btn-sm" data-action="chat-review-approve" '+
+   (blocked?'disabled ':'')+'>✓ Aprovar e aplicar</button>'+
+  '<button class="btn btn-sm btn-danger" data-action="chat-review-reject" '+
+   (preview.status!=='pending'?'disabled ':'')+'>✕ Rejeitar proposta</button></div>'+
+  '<div class="chat-review-message-status" role="status" aria-live="polite"></div>'+
+  '</div></div></article>');
+ scrollChat();
+}
+async function openChatProposalReview(id){
+ const pid=chatProjectId(),convo=S.currentConvo;
+ if(!pid){toast('Selecione um projeto.');return}
+ if(S.pendingReviewProject!==pid)await loadChatPendingReviews();
+ const chosen=id||S.chatPendingReviews[0]?.id;
+ if(!chosen){appendEvent('✓ Este projeto não tem propostas aguardando revisão.');return}
+ if(!S.chatPendingReviews.some(p=>p.id===chosen)){toast('Proposta não está mais pendente. Atualize as revisões.');return}
+ const preview=await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+   encodeURIComponent(chosen)+'?full=true');
+ if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==convo)return;
+ if(preview.status!=='pending'){await loadChatPendingReviews();return}
+ S.chatReviewId=chosen;S.chatReviewPreview=preview;
+ renderChatProposalReview();
+}
+async function decideChatProposal(approved){
+ const pid=chatProjectId(),convo=S.currentConvo,preview=S.chatReviewPreview;
+ if(!pid||!preview||S.chatReviewBusy)return;
+ if(S.currentRun){toast('Aguarde a execução atual terminar antes de decidir propostas.');return}
+ if(approved){
+  const typed=$('#chat-review-confirmation')?.value.trim();
+  if(typed!=='APLICAR'){toast('Digite APLICAR exatamente para confirmar a gravação.');return}
+ }
+ S.chatReviewBusy=true;
+ const card=$('#chat-review-panel');
+ if(card)card.querySelectorAll('button').forEach(b=>b.disabled=true);
+ try{
+  // Read current server-side preview again before taking any irreversible action.
+  const latest=await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+    encodeURIComponent(preview.id)+'?full=true');
+  if(S.page!=='chat'||chatProjectId()!==pid||S.currentConvo!==convo)return;
+  if(latest.status!=='pending'||latest.files.some(f=>f.stale||f.diff_truncated)||
+     JSON.stringify(latest.files)!==JSON.stringify(preview.files)){
+   toast('O diff mudou ou está incompleto. Atualize a proposta antes de decidir.');
+   await loadChatPendingReviews();
+   await openChatProposalReview(preview.id);
+   return;
+  }
+  await api('/projects/'+encodeURIComponent(pid)+'/workspace/proposals/'+
+    encodeURIComponent(preview.id)+'/decision','POST',
+    {approved,confirmation:approved?'APLICAR':''});
+  removeChatReview();
+  appendEvent((approved?'✓ Proposta aplicada após revisão: ':'✕ Proposta rejeitada: ')+
+    latest.files.map(f=>f.path).join(', '));
+  await loadChatPendingReviews();
+  if(S.chatPendingReviews.length)await openChatProposalReview();
+  else appendEvent('✓ Não há mais propostas pendentes neste projeto.');
+ }catch(ex){
+  toast('Não foi possível decidir a proposta: '+ex.message);
+  const msg=$('#chat-review-panel .chat-review-message-status');
+  if(msg)msg.textContent='⚠ '+ex.message+' Atualize os diffs antes de tentar novamente.';
+  await loadChatPendingReviews();
+ }finally{
+  S.chatReviewBusy=false;
+  const active=$('#chat-review-panel');if(active)active.querySelectorAll('button').forEach(b=>b.disabled=false);
+ }
+}
+
 async function enterChat(){
  $('#chat-mode').onchange=e=>{S.mode=e.target.value;if(S.mode!=='manual'){S.selectedAgent='';$('#chat-agent').value=''}};$('#chat-agent').onchange=e=>{S.selectedAgent=e.target.value;S.mode=e.target.value?'manual':'auto';$('#chat-mode').value=S.mode};
  $('#chat-project').onchange=e=>selectChatProject(e.target.value||null);
