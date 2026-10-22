@@ -19,6 +19,7 @@ TEMPLATES = [
  ('Designer IA','design','Produza direção visual, UI elegante, microinterações, hierarquia tipográfica e experiência do usuário.','✺'),
  ('Programador IA','code','Implemente código completo, coerente, legível e testável.','⌘'),
  ('Revisor IA','review','Analise resultados criticamente, aponte defeitos e valide critérios com rigor.','✓'),
+ ('Testador IA','testing','Analise verificações automáticas, imports/exports React e erros de execução. Não invente testes passados, não gere arquivos e reporte defeitos reproduzíveis.','⊙'),
  ('Pesquisador IA','research','Pesquise e compare alternativas. Sem ferramenta de busca, reconheça limitações e não invente referências.','◎'),
  ('DevOps IA','devops','Pipelines, infraestrutura, observabilidade, confiabilidade e execução segura.','⚙'),
  ('Vídeo e Legendas IA','video','Oriente transcrição, legendagem, edição e automação de vídeos.','▣'),
@@ -33,6 +34,7 @@ KEYWORDS = {
  'devops': ['deploy','docker','devops','infra','ci/cd','pipeline'],
  'video': ['vídeo','video','legenda','transcri','reels'],
  'code': ['código','program','função','script','bug','corrij'],
+ 'testing': ['testes','testar','testador','qualidade','build','compilação'],
 }
 
 
