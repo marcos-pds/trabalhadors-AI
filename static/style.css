@@ -141,3 +141,50 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 .chat-permission-result:empty{display:none}
 @media(max-width:600px){.chat-permission-card{padding:12px}
  .chat-permission-actions{flex-direction:column}.chat-permission-actions .btn{width:100%}}
+
+
+/* Persistent, project-scoped pending review alert in Chat IA */
+.chat-pending-banner{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;
+ padding:11px 18px;border-bottom:1px solid var(--line);
+ background:color-mix(in srgb,var(--panel) 86%,#8f6cf4 14%)}
+.chat-pending-banner[hidden]{display:none}
+.chat-pending-summary{display:flex;flex-wrap:wrap;gap:7px 12px;align-items:center;min-width:0}
+.chat-pending-summary strong{color:#dec7ff;font-size:12px}
+.chat-pending-summary span{font-size:11px;color:var(--muted)}
+.chat-pending-paths{display:flex;gap:5px;flex-wrap:wrap;flex:1;min-width:0}
+.chat-pending-paths code{font:10px/1.5 ui-monospace,Consolas,monospace;color:var(--text);
+ background:var(--card);border:1px solid var(--line);border-radius:5px;padding:2px 5px}
+.chat-pending-paths span{color:var(--muted);font-size:10px;align-self:center}
+.chat-pending-actions{display:flex;gap:6px;margin-left:auto}
+.chat-review-message .message-content{flex:1;min-width:0;width:100%;max-width:100%}
+.chat-review-card{border:1px solid var(--line);border-radius:13px;
+ background:var(--panel);padding:16px;max-width:100%}
+.chat-review-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chat-review-head strong{font-size:13px}
+.chat-review-card>p{color:var(--muted);font-size:11px;line-height:1.6;margin:10px 0}
+.chat-review-choices{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.chat-review-choice{border:1px solid var(--line);background:var(--card);color:var(--text);
+ text-align:left;border-radius:7px;font-size:10px;cursor:pointer;max-width:100%;
+ overflow-wrap:anywhere;padding:8px}
+.chat-review-choice.selected{border-color:var(--purple);background:var(--bg)}
+.chat-review-file{margin:10px 0 16px}
+.chat-review-file-title{display:flex;align-items:center;justify-content:space-between;
+ gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.chat-review-file-title strong{font:11px ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.chat-review-file-title small{font-size:10px;color:var(--muted)}
+.chat-review-diff{max-width:100%;max-height:375px;overflow:auto;white-space:pre;
+ font:11px/1.55 ui-monospace,Consolas,monospace;background:var(--bg);
+ border:1px solid var(--line);border-radius:9px;padding:11px}
+.chat-diff-added{color:#8ed6a8}.chat-diff-removed{color:#f9a3a3}
+.chat-diff-hunk{color:#acb9ff}.chat-diff-meta{color:#90bded}
+.chat-review-warning{padding:8px 10px;background:var(--card);border-left:2px solid #ffbe73;
+ border-radius:4px;color:#ffcd89;font-size:11px;line-height:1.5}
+.chat-review-confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+ font-size:11px;color:var(--muted);margin:13px 0}
+.chat-review-confirm input{max-width:160px;font-size:12px}
+.chat-review-controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px}
+.chat-review-message-status{font-size:11px;color:#ffcd89;margin-top:10px}
+.chat-review-message-status:empty{display:none}
+@media(max-width:850px){.chat-pending-banner{padding:10px;align-items:flex-start}
+ .chat-pending-actions{margin-left:0}.chat-pending-paths{flex-basis:100%}
+ .chat-review-card{padding:10px}.chat-review-controls .btn{flex:1;min-width:140px}}
