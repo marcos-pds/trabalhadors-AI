@@ -477,7 +477,8 @@ function runtimeControls(){
  const running=Boolean(runtime?.running),auth=Boolean(runtime?.authorized);
  return '<div class="chat-runtime-bar" aria-label="Executar projeto local">'
   +'<div class="chat-runtime-title"><strong>▶ Projeto</strong><small>'
-  +(!pid?'Selecione um projeto':running?'React + FastAPI iniciados pela Central':
+  +(!pid?'Selecione um projeto':running?'React + FastAPI respondendo na Central':
+    runtime?.last_error?'Última inicialização falhou — veja o diagnóstico no chat':
     auth?'Execução autorizada nesta conversa':'Execução exige autorização')+'</small></div>'
   +'<button class="btn btn-sm" data-action="runtime-authorize" '+(!pid?'disabled ':'')+'>'
   +(auth?'✓ Autorizado':'Autorizar execução')+'</button>'
@@ -512,10 +513,21 @@ async function startRuntime(){
   await authorizeRuntime();
   if(!S.chatRuntime?.authorized)return;
  }
- S.chatRuntime=await api('/conversations/'+encodeURIComponent(cid)+'/runtime/start','POST');
- updateRuntimeControls();
- appendEvent('▶ Início solicitado. Use Prévia para abrir a loja local.');
- toast('Servidores locais iniciados. Confira a prévia.');
+ try{
+  S.chatRuntime=await api('/conversations/'+encodeURIComponent(cid)+'/runtime/start','POST');
+  updateRuntimeControls();
+  if(!S.chatRuntime.running){
+    appendEvent('⚠ O processo não ficou ativo: '+(S.chatRuntime.message||'Inicialização incompleta.'));
+    toast('Os servidores não foram iniciados. Verifique o diagnóstico no chat.');
+    return;
+  }
+  appendEvent('✓ React e FastAPI estão respondendo em 127.0.0.1. Clique em Prévia.');
+  toast('Projeto iniciado e respondendo. A prévia está disponível.');
+ }catch(ex){
+  await loadChatRuntime();
+  appendEvent('⚠ Falha ao iniciar o projeto:\n'+ex.message);
+  toast('Falha na inicialização. Veja o erro no histórico do chat.');
+ }
 }
 async function stopRuntime(){
  if(!S.currentConvo)return;
