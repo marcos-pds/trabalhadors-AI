@@ -296,7 +296,7 @@ def test_bounded_vite_log_preserves_first_postcss_error_after_long_traceback():
     assert 'Failed to load PostCSS config' in result
     assert 'Cannot find module tailwindcss' in result
     assert 'stack_frame_129' in result
-    assert 'stack_frame_0' not in result
+    assert '[… linhas intermediárias omitidas …]' in result
     assert len(result)<=5800
 
 
