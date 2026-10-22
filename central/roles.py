@@ -8,7 +8,7 @@ import unicodedata
 
 CANONICAL = frozenset({
     'architecture','frontend','backend','design','code','review',
-    'research','devops','video','coordination',
+    'research','devops','video','coordination','testing',
 })
 ROLE_ALIASES = {
     'arquiteto ia':'architecture',
@@ -17,6 +17,7 @@ ROLE_ALIASES = {
     'backend ia':'backend',
     'programador ia':'code',
     'revisor ia':'review',
+    'testador ia':'testing',
     'pesquisador ia':'research',
     'devops ia':'devops',
     'video e legendas ia':'video',
@@ -32,6 +33,8 @@ SPECIALTY_ALIASES = {
     'ux/ui':'design',
     'programacao':'code',
     'revisao':'review',
+    'testes':'testing',
+    'testador':'testing',
 }
 
 def _normalized(value):
