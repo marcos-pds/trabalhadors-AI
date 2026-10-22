@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS project_skills (
  skill_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
  updated_at TEXT NOT NULL, PRIMARY KEY(project_id,skill_id)
 );
+CREATE TABLE IF NOT EXISTS runtime_permissions (
+ conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS architect_delegations (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
