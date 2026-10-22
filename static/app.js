@@ -597,3 +597,119 @@ async function previewRuntime(){
     'http://127.0.0.1:5173/','_blank','noopener,noreferrer');
  overlay.onclick=e=>{if(e.target===overlay)overlay.remove()};
 }
+
+
+/* Slash palette: every supported command maps to a fixed host action.
+   Unknown commands are never sent to a worker or interpreted as shell. */
+function hideSlashMenu(){
+ const menu=$('#chat-slash-menu'),input=$('#chat-input');
+ if(menu)menu.hidden=true;
+ if(input){input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant')}
+}
+function renderSlashMenu(){
+ const menu=$('#chat-slash-menu'),input=$('#chat-input');
+ if(!menu||!input)return;
+ const value=input.value.trimStart();
+ if(!/^\/[^\s]*$/.test(value)){hideSlashMenu();return}
+ const found=findSlashCommands(value);
+ if(!found.length){
+   menu.innerHTML='<div class="slash-empty">Comando não encontrado. Digite <strong>/ajuda</strong>.</div>';
+   menu.hidden=false;input.setAttribute('aria-expanded','true');
+   input.removeAttribute('aria-activedescendant');
+   return;
+ }
+ S.slashSelection=Math.max(0,Math.min(S.slashSelection,found.length-1));
+ menu.innerHTML='<div class="slash-menu-title">Comandos da Central IA <span>↑ ↓ · Enter · Esc</span></div>'+
+   found.map((cmd,index)=>'<button type="button" id="slash-option-'+index+
+     '" role="option" aria-selected="'+(index===S.slashSelection?'true':'false')+
+     '" class="slash-option '+(index===S.slashSelection?'active':'')+
+     '" data-slash="'+esc(cmd.name)+'"><span class="slash-glyph">'+esc(cmd.icon)+
+     '</span><span class="slash-info"><strong>/'+esc(cmd.name)+
+     '</strong><small>'+esc(cmd.description)+'</small></span></button>').join('');
+ menu.hidden=false;input.setAttribute('aria-expanded','true');
+ input.setAttribute('aria-activedescendant','slash-option-'+S.slashSelection);
+}
+function setupSlashCommands(){
+ const input=$('#chat-input'),menu=$('#chat-slash-menu');
+ if(!input||!menu)return;
+ input.addEventListener('input',()=>{S.slashSelection=0;renderSlashMenu()});
+ input.addEventListener('focus',renderSlashMenu);
+ input.addEventListener('keydown',event=>{
+   if(event.isComposing)return;
+   const options=findSlashCommands(input.value);
+   const active=menu.hidden===false&&options.length>0;
+   if(event.key==='Escape'&&!menu.hidden){
+     event.preventDefault();hideSlashMenu();return;
+   }
+   if(active&&(event.key==='ArrowDown'||event.key==='ArrowUp')){
+     event.preventDefault();S.slashSelection=(S.slashSelection+
+       (event.key==='ArrowDown'?1:-1)+options.length)%options.length;
+     renderSlashMenu();return;
+   }
+   if(active&&event.key==='Tab'){
+     event.preventDefault();input.value='/'+options[S.slashSelection].name;
+     hideSlashMenu();return;
+   }
+   if(active&&event.key==='Enter'&&!event.shiftKey){
+     event.preventDefault();input.value='/'+options[S.slashSelection].name;
+     hideSlashMenu();sendMessage();return;
+   }
+   if(event.key==='Enter'&&!event.shiftKey){
+     event.preventDefault();sendMessage();
+   }
+ });
+ menu.addEventListener('mousedown',event=>event.preventDefault());
+ menu.addEventListener('click',event=>{
+   const clicked=event.target.closest('[data-slash]');
+   if(!clicked)return;
+   input.value='/'+clicked.dataset.slash;
+   hideSlashMenu();sendMessage();
+ });
+}
+async function executeSlashCommand(command){
+ switch(command){
+  case 'ajuda':
+   appendEvent('Comandos da Central IA (locais, não enviados aos agentes):\n'+
+     SLASH_COMMANDS.map(c=>'/' + c.name + ' — ' + c.description).join('\n'));
+   return;
+  case 'testar':await runQualityChecks();return;
+  case 'iniciar':await startRuntime();return;
+  case 'previa':await previewRuntime();return;
+  case 'parar':await stopRuntime();return;
+  case 'autorizar':
+   await loadChatRuntime();
+   if(S.chatRuntime?.authorized){
+     appendEvent('✓ A execução local já está autorizada nesta conversa.');
+     return;
+   }
+   await authorizeRuntime();return;
+  case 'revogar':
+   await loadChatRuntime();
+   if(!S.chatRuntime?.authorized){appendEvent('Execução local já está sem autorização.');return}
+   await authorizeRuntime();appendEvent('Autorização de execução revogada.');return;
+  case 'diagnostico':
+   await loadChatRuntime();showRuntimeDetails();return;
+  case 'status':
+   await loadChatRuntime();
+   appendEvent(!chatProjectId()?'Selecione um projeto primeiro.':
+      '◎ Projeto: '+(S.projects.find(p=>p.id===chatProjectId())?.name||'Selecionado')+
+      '\nAutorização de execução: '+(S.chatRuntime?.authorized?'ativa':'não concedida')+
+      '\nServidores: '+(S.chatRuntime?.running?'em execução':'parados')+
+      (S.chatRuntime?.last_error?'\nÚltimo erro: '+S.chatRuntime.last_error:''));
+   return;
+  case 'arquiteto':
+   await handleAction('architect-delegation',null,null);return;
+  case 'projeto':{
+   const select=$('#chat-project');
+   if(select){select.focus();toast('Escolha o projeto no seletor acima do chat.')}
+   return;
+  }
+  case 'skills':{
+   const toggle=$('#chat-skill-list input[type=checkbox]');
+   if(toggle){toggle.focus();toast('Marque ou desmarque a Skill do projeto acima do chat.')}
+   else toast('Selecione um projeto para escolher Skills.');
+   return;
+  }
+  default:throw Error('Comando não reconhecido.');
+ }
+}
