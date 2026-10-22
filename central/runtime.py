@@ -19,6 +19,39 @@ from .database import utcnow
 from .workspace import WorkspaceError, is_link_or_junction
 
 
+class _BoundedProcessLog:
+    """Keep the error opening AND final traceback when verbose tools exit.
+
+    Vite/PostCSS typically prints 'Failed to load PostCSS config' before a long
+    call stack. A tail-only buffer hides the actionable cause.
+    """
+    def __init__(self):
+        self.first=[]
+        self.last=deque(maxlen=32)
+
+    def append(self,line):
+        line=line[-550:]
+        if len(self.first)<16:
+            self.first.append(line)
+        self.last.append(line)
+
+    def excerpt(self):
+        latest=list(self.last)
+        if len(self.first)<=16 and len(latest)<=len(self.first) and latest==self.first[-len(latest):]:
+            lines=self.first
+        elif self.first and latest:
+            overlap=0
+            for k in range(min(len(self.first),len(latest)),0,-1):
+                if self.first[-k:]==latest[:k]:
+                    overlap=k
+                    break
+            lines=self.first+(['[… linhas intermediárias omitidas …]'] if overlap==0 else [])+latest[overlap:]
+        else:
+            lines=self.first or latest
+        # Prioritize the FIRST error message over the tail stack trace.
+        return '\n'.join(lines)[:5700]
+
+
 class RuntimeManager:
     FRONT_PORT = 5173
     BACK_PORT = 8000
@@ -126,8 +159,14 @@ class RuntimeManager:
     @staticmethod
     def _excerpt(logs, kinds=None):
         kinds=kinds or ('backend','frontend')
-        return '\n'.join(kind+': '+' | '.join(list(logs.get(kind,()))[-5:])
-                         for kind in kinds if logs.get(kind))[-2400:]
+        blocks=[]
+        for kind in kinds:
+            output=logs.get(kind)
+            if output:
+                text=output.excerpt()
+                if text:
+                    blocks.append('['+kind+']\n'+text)
+        return '\n\n'.join(blocks)[:5800]
 
     def _check_session(self,key):
         current=self.sessions.get(key)
@@ -210,7 +249,7 @@ class RuntimeManager:
             if not self._available(self.FRONT_PORT) or not self._available(self.BACK_PORT):
                 raise WorkspaceError('A porta 5173 ou 8000 já está em uso. Pare os servidores manuais antes de iniciar pela Central.',409)
             processes={}
-            logs={kind:deque(maxlen=50) for kind,_,_ in commands}
+            logs={kind:_BoundedProcessLog() for kind,_,_ in commands}
             self.logs[key]=logs
             self.failures.pop(key,None)
             try:
@@ -248,7 +287,7 @@ class RuntimeManager:
                 self.sessions[key]=processes
             except (WorkspaceError,OSError,ValueError) as exc:
                 self._terminate(processes)
-                self.failures[key]=str(exc)[:2600]
+                self.failures[key]=str(exc)[:6100]
                 if isinstance(exc,WorkspaceError):raise
                 raise WorkspaceError('Não foi possível iniciar os servidores locais: '+str(exc)[:170],422)
             return self.status(user_id,conversation_id)
