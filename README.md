@@ -333,3 +333,16 @@ Digite **`/testar`** na conversa para verificar o projeto local, sem procurar bo
 **Limitação deliberada:** isso não substitui o compilador TypeScript, `npm run build`, os testes `pytest` do próprio projeto ou testes de navegador com Playwright. Erros de tipagem avançada, runtime, integração HTTP, configurações PostCSS ou Tailwind podem não ser detectados pela verificação estática atual. Nenhum comando de testes é executado sem autorização específica para execução de código.
 
 As sete propostas antigas e os arquivos já existentes continuam intactos. A política não executa nem aceita automaticamente código corrigido pela IA; o Frontend/Backend deve preparar uma nova proposta e o fluxo de aprovação continua valendo.
+
+
+### Autorizações e propostas de correção dentro da conversa
+
+Quando **`/testar`** encontra problemas concretos de imports/exports React ou sintaxe Python no projeto selecionado, o Chat IA apresenta o diagnóstico e logo abaixo um cartão da Central perguntando: **"Deseja que Frontend IA execute a correção?"** (ou Backend IA quando houver somente erros Python; ambos quando há problemas nas duas áreas). O cartão oferece botões **Confirmar correção** e **Negar**.
+
+- **Confirmar** apenas autoriza o início de uma nova tarefa de reparo com os agentes ativos das especialidades corretas. A Central verifica novamente o projeto e os erros reais antes de enviar o pedido, rejeitando decisões sobre diagnósticos obsoletos, troca de projeto ou mudança dos trabalhadores.
+- O novo pedido usa o endpoint normal de runs e respeita o limite de uso/custo dos provedores. O trabalho solicitado gera arquivos completos em formato `central-files`; arquivos existentes continuam protegidos pelo fluxo de propostas e revisão, inclusive aprovação delegada existente. **A autorização de correção não equivale a autorização de instalação, execução de comandos ou aprovação de diffs.**
+- **Negar** não chama os agentes e não altera os arquivos. Saídas de modelos, texto colado e registros antigos não podem acionar esses botões, que dependem de clique humano na conversa corrente. Autorizações pendentes são canceladas ao trocar de contexto ou atualizar o histórico da conversa.
+- As confirmações antes feitas pelo navegador para `/autorizar`, `/arquiteto` e mudança de projeto em conversa com histórico aparecem agora como cartões dentro do chat. Etapas de fluxo que precisam de decisão humana também apresentam **Aprovar etapa / Negar etapa** no chat, em vez de botões no painel lateral. Cancelar um cartão devido à navegação não rejeita automaticamente a etapa de fluxo.
+- A lista de propostas de substituição e exclusão de arquivos ainda precisa ser inspecionada no explorador **Projetos → Arquivos** para visualizar o diff integral e obter a confirmação `APLICAR` antes de gravar. Cartões de reparo não substituem essa inspeção.
+
+**Validação:** verificações Python e Node na CI, inclusive escolha de Frontend/Backend baseada no caminho diagnosticado, limites do prompt de correção, bloqueio de comandos inventados e uso de cartões de consentimento na interface. O teste de interação real com o navegador e modelos conectados ainda deve ser feito no Windows.
