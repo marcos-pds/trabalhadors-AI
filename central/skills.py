@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from .database import uid, utcnow
 from .workspace import WorkspaceError, is_link_or_junction
 from .roles import worker_role
@@ -37,6 +38,7 @@ BLOCK = re.compile(re.escape(FENCE)+r'central-packages\s*\n(.*?)\n'+re.escape(FE
 class SkillsHub:
     def __init__(self,db,workspaces):
         self.db=db;self.workspaces=workspaces
+        self._package_install_lock=threading.Lock()
 
     def catalog(self,user_id,project_id=None):
         enabled=set()
@@ -171,6 +173,35 @@ class SkillsHub:
                               check=False,shell=False)
         return {'ok':result.returncode==0,'manager':manager,'packages':packages,
                 'exit_code':result.returncode,'output':result.stdout[-1800:]}
+
+    async def install_explicit(self,user_id,conversation_id,project_id,package):
+        """Run exactly one already-allowlisted npm install after an explicit user click.
+
+        Does not rely on Architect delegation and does not accept model-authored
+        commands, package versions, multiple packages, or arbitrary paths.
+        """
+        if not isinstance(package,str) or package not in NPM:
+            raise WorkspaceError('Este pacote não está no catálogo permitido.',403)
+        self.workspaces._folder(user_id,project_id)
+        job=uid()
+        self.db.execute('''INSERT INTO architect_package_installs
+            (id,user_id,project_id,run_id,manager,packages,status,created_at)
+            VALUES(?,?,?,?,?,?,?,?)''',
+            (job,user_id,project_id,'chat:'+conversation_id,'npm',
+             json.dumps([package]),'running',utcnow()))
+        def guarded_install():
+            with self._package_install_lock:
+                return self._install_sync(user_id,project_id,'npm',[package])
+        try:
+            result=await asyncio.to_thread(guarded_install)
+        except (WorkspaceError,OSError,ValueError,subprocess.TimeoutExpired) as exc:
+            result={'ok':False,'error':str(exc)[:250],
+                    'manager':'npm','packages':[package]}
+        self.db.execute('''UPDATE architect_package_installs
+            SET status=?,details=?,finished_at=? WHERE id=?''',
+            ('completed' if result['ok'] else 'failed',
+             json.dumps(result,ensure_ascii=False),utcnow(),job))
+        return result
 
     async def install_for_run(self,run):
         grant=self.delegation(run['user_id'],run['conversation_id'])
