@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .database import utcnow
 from .workspace import WorkspaceError, is_link_or_junction
+from .quality import inspect_project
 
 
 class _BoundedProcessLog:
@@ -245,6 +246,13 @@ class RuntimeManager:
                 raise WorkspaceError('Raiz autorizada do projeto não pode ser link/junção.',403)
             if is_link_or_junction(folder) or not folder.is_dir():
                 raise WorkspaceError('Pasta de projeto inexistente ou insegura.',403)
+            # Never start broken code when the read-only Testador IA preflight
+            # has identified a concrete import/export or Python syntax error.
+            qa=inspect_project(self.workspaces,user_id,permission['project_id'])
+            if qa['issues']:
+                raise WorkspaceError('Testador IA bloqueou a prévia: '+
+                    ' | '.join(qa['issues'][:4])+'. '
+                    'Corrija o código e execute Testar novamente.',422)
             commands=self._commands(folder)
             if not self._available(self.FRONT_PORT) or not self._available(self.BACK_PORT):
                 raise WorkspaceError('A porta 5173 ou 8000 já está em uso. Pare os servidores manuais antes de iniciar pela Central.',409)
