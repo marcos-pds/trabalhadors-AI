@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .database import uid, utcnow
 from .scaffolds import react_fastapi_files
+from .roles import worker_role
 
 MAX_FILE = 160_000
 MAX_FILES = 20
@@ -363,9 +364,17 @@ class Workspaces:
                            (project_id,run['user_id'])):
             return {'pending':[],'auto_applied':[],'errors':['A pasta do projeto não está preparada.']}
         staged=[];errors=[];used=set();total_files=0
-        steps=self.db.all("SELECT name,output,instructions FROM steps WHERE run_id=? AND status='completed' AND kind='agent'",(run['id'],))
+        steps=self.db.all("""SELECT s.name,s.output,s.instructions,a.name AS worker_name,a.specialty
+            FROM steps s JOIN agents a ON a.id=s.agent_id AND a.user_id=?
+            WHERE s.run_id=? AND s.status='completed' AND s.kind='agent'""",
+            (run['user_id'],run['id']))
         tasks=[]
         for step in steps:
+            # Review and architectural planning are not file-producing actions.
+            # Never parse or stage a reviewer manifest even when its JSON is
+            # incomplete: the reviewer should examine, not overwrite, code.
+            if worker_role({'name':step['worker_name'],'specialty':step['specialty']})=='review':
+                continue
             try:
                 files=self._extract_files(step['output'] or '')
                 if not files: continue
@@ -425,7 +434,7 @@ class Workspaces:
         return {'pending':[p for p in staged if p not in applied],
                 'auto_applied':applied,'errors':errors}
 
-    def prompt(self,user_id,conversation_id,request=''):
+    def prompt(self,user_id,conversation_id,request='',generate_files=True):
         """Provide existing files named by the user, never an arbitrary initial slice.
 
         Contents are bounded and only loaded from the authenticated project's sandbox.
@@ -472,6 +481,21 @@ class Workspaces:
         reference_note=''
         if request and not selected and re.search(r'\b[\w-]+\.(?:tsx|jsx|ts|js|py|css|html|json|md)\b',request,re.I):
             reference_note='\nNenhum arquivo existente citado foi encontrado nesta pasta. Não alegue tê-lo lido.'
+        generation_instructions = (
+            '\nSe sua tarefa exige criar ou editar arquivos, produza no máximo 3 arquivos completos nesta etapa. '
+            'Priorize arquivos da sua especialidade, não descreva código sem produzir os arquivos. '
+            'Finalize a resposta com UM bloco EXATO:'
+            '\n' + chr(96)*3 + 'central-files\n{"files":[{"path":"src/arquivo.py","content":"conteúdo completo do arquivo"}]}\n' + chr(96)*3 +
+            '\nEntregue caminhos relativos, JSON válido e conteúdo COMPLETO; não use markdown dentro do JSON. '
+            'Não inclua segredos. Nunca tente executar comandos, alterar arquivos fora do projeto ou dizer que já gravou arquivos. '
+            'Arquivos novos completos e válidos são criados automaticamente na pasta autorizada. '
+            'Substituições e exclusões sempre exigem aprovação.'
+            if generate_files else
+            '\nVOCÊ É REVISOR SOMENTE DE LEITURA. Não crie, edite ou exclua arquivos, não gere '
+            'manifestos JSON nem blocos de código destinados à gravação. '
+            'Examine o trabalho dos outros agentes, a compatibilidade de imports, endpoints e a '
+            'preservação de funcionalidades. Aponte possíveis conflitos e limitações da '
+            'revisão sem executar código. O parecer não equivale a aprovação humana.')
         return ('\nVocê está trabalhando no projeto local autorizado. Arquivos atuais: '+names+
             '\nArquivos existentes citados pelo usuário (conteúdo integral de cada arquivo listado abaixo):\n'+
             ('\n\n'.join(snippets) if snippets else '(nenhum arquivo citado e disponível para leitura completa)')+
@@ -482,12 +506,4 @@ class Workspaces:
             'Para editar um arquivo existente, preserve as funcionalidades atuais e gere sua versão COMPLETA; '
             'a Central preparará um diff e EXIGIRÁ aprovação humana antes de sobrescrever. '
             'Se um arquivo referido não tiver conteúdo integral, não invente sua implementação atual.'+
-            '\nSe sua tarefa exige criar ou editar arquivos, produza no máximo 3 arquivos completos nesta etapa. '
-            'Priorize arquivos da sua especialidade, não descreva código sem produzir os arquivos. '
-            'Finalize a resposta com UM bloco EXATO:'+
-            '\n' + chr(96)*3 + 'central-files\n{"files":[{"path":"src/arquivo.py","content":"conteúdo completo do arquivo"}]}\n' + chr(96)*3 +
-            '\nEntregue caminhos relativos, JSON válido e conteúdo COMPLETO; não use markdown dentro do JSON. '
-            'Não inclua segredos. Nunca tente executar comandos, alterar arquivos fora do projeto ou dizer que já gravou arquivos. '
-            'Arquivos novos completos e válidos são criados automaticamente na pasta autorizada. '
-            'Substituições e exclusões sempre exigem aprovação. '
-            'Se estiver fazendo revisão ou planejamento sem alterar arquivos, não inclua o bloco.')
+            generation_instructions)
