@@ -286,3 +286,26 @@ cd /c/Projetos/Central-IA/loja-virtual-8943d369/frontend
 npm run dev
 ```
 Copie as **primeiras linhas do erro**, não apenas o final. Não atribua esse erro automaticamente ao Node.js 24 sem confirmar a mensagem principal.
+
+
+## Testador IA: QA independente antes da aprovação e da prévia
+
+A Central agora inclui um trabalhador **Testador IA** com papel `testing`. Contas já existentes recebem o trabalhador padrão no início da Central **somente se ainda não houver um Testador**, preservando os agentes personalizados e suas configurações. Novas contas também recebem esse modelo.
+
+### Quando o Testador é chamado
+- Na modernização com **UI/UX Studio Pro**, o Testador recebe a saída de Arquiteto/Designer/Frontend **depois** das tarefas de implementação e **antes** da revisão de integração do Arquiteto.
+- Nas execuções de equipe envolvendo Frontend/Backend/Programador, o Testador entra depois dos produtores de código e antes do Revisor IA. Também aceita seleção explícita do Testador na equipe, mantendo a ordem correta.
+- O Testador recebe um diagnóstico objetivo dos arquivos propostos (não precisa inventar resultados de testes). Seu parecer de IA é consultivo; a **validação estática determinística** permanece independente do provedor.
+- O Testador é **somente leitura**, não pode propor/alterar arquivos nem instalar bibliotecas, mesmo que o modelo devolva um manifesto de escrita.
+
+### Validação automática de código proposto
+O estágio de arquivos verifica imports relativos React/TypeScript em relação ao conteúdo dos arquivos existentes e de todas as propostas da execução. Detecta, por exemplo, um `import { LoadingSpinner }` em `App.tsx` quando `LoadingSpinner.tsx` só oferece `export default`. Identifica imports de módulos locais ausentes e exports nomeados inexistentes.
+
+Se houver incompatibilidade, **nenhum arquivo daquela rodada é aplicado automaticamente**, e a autorização delegada ao Arquiteto **não contorna** a falha. O relatório do chat exibe os caminhos e símbolos afetados; as propostas permanecem disponíveis para revisão e correção.
+
+### Testar o projeto atual no Chat IA
+Use **⊙ Testar**, junto dos controles Autorizar / Iniciar / Prévia / Parar. Esta primeira versão executa **somente análise estática**, sem iniciar processos, e verifica imports/exports de React/TypeScript e sintaxe Python dos arquivos na pasta autorizada (até 120 arquivos). Retorna uma lista de erros no chat. Ao pressionar **Iniciar**, uma verificação estática semelhante é feita como pré-requisito, impedindo a execução de um projeto com incompatibilidade detectada.
+
+**Limitação deliberada:** isso não substitui o compilador TypeScript, `npm run build`, os testes `pytest` do próprio projeto ou testes de navegador com Playwright. Erros de tipagem avançada, runtime, integração HTTP, configurações PostCSS ou Tailwind podem não ser detectados pela verificação estática atual. Nenhum comando de testes é executado sem autorização específica para execução de código.
+
+As sete propostas antigas e os arquivos já existentes continuam intactos. A política não executa nem aceita automaticamente código corrigido pela IA; o Frontend/Backend deve preparar uma nova proposta e o fluxo de aprovação continua valendo.
