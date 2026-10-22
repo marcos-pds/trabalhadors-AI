@@ -16,6 +16,7 @@ from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .workspace import WorkspaceError
 from .roles import worker_role, role_source
 from .runtime import RuntimeManager
+from .quality import inspect_project
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -29,6 +30,16 @@ RUNTIME = RuntimeManager(DB, ENGINE.workspaces)
 @asynccontextmanager
 async def lifespan(app):
     ENGINE.shutting_down = False
+    # Backfill the dedicated QA role for existing accounts, without editing or
+    # deleting their customized agents or provider configuration.
+    for owner in DB.all('SELECT id FROM users'):
+        members=DB.all('SELECT name,specialty FROM agents WHERE user_id=?',(owner['id'],))
+        if not any(worker_role(a)=='testing' for a in members):
+            template=next(x for x in TEMPLATES if x[1]=='testing')
+            name,role,instructions,avatar=template
+            DB.execute('''INSERT INTO agents(id,user_id,name,specialty,instructions,avatar,created_at)
+                          VALUES(?,?,?,?,?,?,?)''',
+                       (uid(),owner['id'],name,role,instructions,avatar,utcnow()))
     ENGINE.resume_pending()
     yield
     ENGINE.shutting_down = True
@@ -387,6 +398,13 @@ def new_conversation(data:ConversationIn,user=Depends(current_user)):
     DB.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',(cid,user['id'],data.title,data.project_id,now,now))
     return require_owned(DB,'conversations',cid,user['id'])
 
+
+
+@app.get('/api/conversations/{cid}/quality')
+def inspect_chat_project(cid:str,user=Depends(current_user)):
+    require_owned(DB,'conversations',cid,user['id'])
+    project=RUNTIME.access(user['id'],cid)['project_id']
+    return inspect_project(ENGINE.workspaces,user['id'],project)
 
 
 class RuntimeAccessIn(BaseModel):
