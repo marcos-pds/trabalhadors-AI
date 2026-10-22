@@ -363,6 +363,7 @@ async function watchRun(rid){disconnect();try{const run=await api(`/runs/${rid}`
   if(msg.event==='workspace_retry_succeeded'){appendEvent('✓ '+d.agent+': arquivo estruturado validado. Aguardando gravação segura.')}
   if(msg.event==='workspace_retry_failed'){appendEvent('⚠ '+d.agent+': nova tentativa sem arquivo válido ('+d.message+').')}
   if(msg.event==='workspace_stage_error'){appendEvent('⚠ Arquivos não aplicados: '+d.message)}
+  if(msg.event==='workspace_summary_warning'){appendEvent('⚠ Relatório do projeto: '+d.message+' ('+d.code+' / '+d.type+').')}
   if(msg.event==='architect_approved'){appendEvent('✓ Arquiteto autorizado aprovou '+d.count+' alteração(ões) após revisão.')}
   if(msg.event==='architect_package_install'){appendEvent((d.ok?'✓':'⚠')+' Pacotes: '+(d.manager||'')+' '+(d.packages||[]).join(', ')+(d.ok?' instalados.':' não instalados.'))}
   if(msg.event==='architect_delegation_changed'){S.delegation=d;appendEvent(d.enabled?'Autonomia delegada ao Arquiteto nesta conversa.':'Autonomia do Arquiteto revogada.');const b=$('#architect-permission');if(b)b.textContent=d.enabled?'✓ Arquiteto autorizado':'Arquiteto: autorizar'}
