@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from .database import uid, utcnow
 from .workspace import WorkspaceError, is_link_or_junction
+from .roles import worker_role
 
 SKILLS = {'ux-ui-studio-pro': {
  'id':'ux-ui-studio-pro','name':'UI/UX Studio Pro',
@@ -174,11 +175,11 @@ class SkillsHub:
     async def install_for_run(self,run):
         grant=self.delegation(run['user_id'],run['conversation_id'])
         if not grant['enabled']:return []
-        steps=self.db.all('''SELECT s.output,a.specialty FROM steps s JOIN agents a ON a.id=s.agent_id
+        steps=self.db.all('''SELECT s.output,a.specialty,a.name FROM steps s JOIN agents a ON a.id=s.agent_id
                               WHERE s.run_id=? AND s.status='completed' ''',(run['id'],))
         results=[]
         for step in steps:
-            if step['specialty']!='architecture':continue
+            if worker_role(step)!='architecture':continue
             try:manifest=self.manifest(step['output'])
             except WorkspaceError as exc:
                 results.append({'ok':False,'error':str(exc)});continue
