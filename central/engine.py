@@ -552,7 +552,7 @@ class Engine:
                 system += ('\nNa revisão UX/UI, confira acessibilidade, layout responsivo, '
                            'preservação da API e dependências já presentes. '
                            'Não solicite instalação; apenas reporte riscos.')
-        else:
+        elif not is_testing:
             system += self.skills.guide(user,run['conversation_id'],worker_role(agent))
         if worker_role(agent)=='architecture' and self.skills.delegation(user,run['conversation_id'])['enabled']:
             from .skills import NPM, PIP
