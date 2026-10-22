@@ -255,3 +255,109 @@ def test_repaired_react_files_with_new_css_are_staged_for_review_without_false_q
           'frontend/src/main.tsx','frontend/src/index.css'}
         assert (component.read_text(),main.read_text())==original
         assert not (root/'index.css').exists()
+
+
+
+def test_scans_lucide_react_import_from_local_product_card():
+    """Regressão Windows: Vite could not resolve lucide-react in ProductCard.tsx."""
+    from central.quality import inspect_npm_imports
+    changes={'frontend/src/components/ProductCard.tsx':
+             'import { ShoppingCart, Star } from "lucide-react";\n'
+             'export function ProductCard(){return null}'}
+    pkg={'dependencies':{'react':'^18.0.0'}}
+    problems,missing=inspect_npm_imports(changes,pkg,installed=lambda p:False,check_installed=True)
+    assert missing==['lucide-react']
+    assert len(problems)==1 and 'ProductCard.tsx' in problems[0]
+    assert 'dependência npm não declarada: lucide-react' in problems[0]
+    declared={'dependencies':{'lucide-react':'^0.500.0'}}
+    problems,missing=inspect_npm_imports(changes,declared,installed=lambda p:False,check_installed=True)
+    assert missing==['lucide-react']
+    assert 'não instalada' in problems[0]
+    assert inspect_npm_imports(changes,declared,installed=lambda p:True,check_installed=True)==([],[])
+
+
+def test_project_qa_reads_real_product_card_and_package_manifest(tmp_path):
+    import json
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        RUNTIME.workspaces=ENGINE.workspaces
+        component=folder/'frontend/src/components/ProductCard.tsx'
+        component.parent.mkdir(parents=True,exist_ok=True)
+        component.write_text('import { ShoppingCart, Star } from "lucide-react";\n'
+                             'export function ProductCard(){return null}')
+        pkg=folder/'frontend/package.json'
+        pkg.write_text(json.dumps({'dependencies':{'react':'^18'}}))
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        response=c.get(f'/api/conversations/{convo}/quality')
+        assert response.status_code==200,response.text
+        data=response.json()
+        assert data['status']=='failed'
+        assert data['missing_packages']==['lucide-react']
+        assert 'ProductCard.tsx' in ' '.join(data['issues'])
+        assert 'não declarada' in ' '.join(data['issues'])
+        assert pkg.read_text()==json.dumps({'dependencies':{'react':'^18'}})
+        # No package installation until an explicit post with authorization.
+        assert not (folder/'frontend/node_modules/lucide-react').exists()
+
+
+def test_dependency_install_requires_user_click_and_current_qa_evidence(tmp_path,monkeypatch):
+    import json
+    from central.main import ENGINE as engine
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        RUNTIME.workspaces=ENGINE.workspaces
+        front=folder/'frontend';component=front/'src/components/ProductCard.tsx'
+        component.parent.mkdir(parents=True,exist_ok=True)
+        component.write_text('import {ShoppingCart,Star} from "lucide-react";\n'
+                             'export const ProductCard=()=>null')
+        manifest=front/'package.json';manifest.write_text('{"dependencies":{"react":"^18"}}')
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        endpoint=f'/api/conversations/{convo}/dependencies/install'
+        calls=[]
+        def safe_fake_install(user_id,pid,manager,packages):
+            calls.append((pid,manager,packages))
+            new=front/'node_modules/lucide-react'
+            new.mkdir(parents=True)
+            (new/'package.json').write_text('{"name":"lucide-react"}')
+            manifest.write_text(json.dumps({'dependencies':{'react':'^18','lucide-react':'^0.5'}}))
+            return {'ok':True,'manager':manager,'packages':packages,'exit_code':0,'output':'mocked install'}
+        monkeypatch.setattr(engine.skills,'_install_sync',safe_fake_install)
+        assert c.post(endpoint,json={'package':'lucide-react'}).status_code==403
+        assert c.post(endpoint,json={'package':'unapproved-library'},headers=HEADERS).status_code==403
+        assert calls==[]
+        approved=c.post(endpoint,json={'package':'lucide-react'},headers=HEADERS)
+        assert approved.status_code==200,approved.text
+        assert approved.json()['result']['ok']
+        assert approved.json()['quality']['missing_packages']==[]
+        assert calls==[(project,'npm',['lucide-react'])]
+        assert c.post(endpoint,json={'package':'lucide-react'},headers=HEADERS).status_code==409
+        assert len(calls)==1
+
+
+def test_dependency_install_is_not_accessible_to_other_user(tmp_path,monkeypatch):
+    from test_workspace import register
+    with TestClient(app) as owner, TestClient(app) as attacker:
+        project=setup(owner,tmp_path);prepare(owner,project)
+        RUNTIME.workspaces=ENGINE.workspaces
+        register(attacker)
+        convo=owner.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        endpoint=f'/api/conversations/{convo}/dependencies/install'
+        assert attacker.post(endpoint,json={'package':'lucide-react'},
+                             headers=HEADERS).status_code==404
+
+
+def test_worker_receives_product_card_and_package_json_on_dependency_error(tmp_path):
+    import json
+    with TestClient(app) as c:
+        project=setup(c,tmp_path);folder=prepare(c,project)
+        src=folder/'frontend/src/components/ProductCard.tsx'
+        src.parent.mkdir(parents=True,exist_ok=True)
+        src.write_text('import {Star} from "lucide-react";\nexport const ProductCard=()=>null')
+        (folder/'frontend/package.json').write_text(json.dumps({'dependencies':{'react':'^18'}}))
+        convo=c.post('/api/conversations',json={'project_id':project},headers=HEADERS).json()['id']
+        context=ENGINE.workspaces.prompt(c.get('/api/me').json()['id'],convo,
+            request='Corrija frontend/src/components/ProductCard.tsx: '
+                    'dependência npm ausente lucide-react')
+        assert '=== INÍCIO DO ARQUIVO EXISTENTE: frontend/src/components/ProductCard.tsx' in context
+        assert '=== INÍCIO DO ARQUIVO EXISTENTE: frontend/package.json' in context
+        assert 'import {Star} from "lucide-react"' in context
