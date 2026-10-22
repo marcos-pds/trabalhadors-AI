@@ -124,3 +124,20 @@ body.light{--bg:#f3f5fb;--side:#fff;--panel:#f8f9fd;--card:#fff;--line:#dfe3f0;-
 @media(max-width:780px){.chat-slash-menu{max-height:42vh}
  .slash-menu-title span{font-size:10px}
  .slash-option{padding:9px 10px}}
+
+
+/* In-conversation requests for human authorization and QA-assisted correction. */
+.chat-permission .message-content{min-width:0;width:100%}
+.chat-permission-card{background:var(--panel);border:1px solid var(--purple);
+ border-radius:11px;padding:15px 17px;max-width:630px;box-shadow:0 6px 20px #0002}
+.chat-permission-card>strong{font-size:13px;line-height:1.5;display:block}
+.chat-permission-card p{font-size:12px;line-height:1.6;white-space:pre-wrap;
+ overflow-wrap:anywhere;margin:9px 0;color:var(--text)}
+.chat-permission-card small{font-size:11px;line-height:1.5;color:var(--muted);
+ display:block;overflow-wrap:anywhere}
+.chat-permission-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+.chat-permission-actions .btn{min-height:34px}
+.chat-permission-result{font-size:11px;color:var(--muted);margin-top:8px}
+.chat-permission-result:empty{display:none}
+@media(max-width:600px){.chat-permission-card{padding:12px}
+ .chat-permission-actions{flex-direction:column}.chat-permission-actions .btn{width:100%}}
