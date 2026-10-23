@@ -137,6 +137,26 @@ A aplicação **não procura preços ou disponibilidade em tempo real**; priorid
 
 ## Testes
 
+### Z.ai, ModelScope e SiliconFlow
+
+Em **Provedores**, selecione o serviço, informe sua chave/token e salve. Use **Testar** para validar a conexão na sua conta. Todos usam streaming compatível com OpenAI; nenhuma chave é incluída no código.
+
+| Provedor | URL base padrão | Modelo e condições |
+| --- | --- | --- |
+| Z.ai / GLM | `https://api.z.ai/api/paas/v4` | Preset `glm-4.7-flash`; alternativa `glm-4.5-flash`. Use uma chave API padrão, não o endpoint do Coding Plan. Só os modelos explicitamente gratuitos devem ser tratados como grátis; cotas podem mudar. |
+| ModelScope | `https://api-inference.modelscope.cn/v1` | Informe o ID completo de um modelo com API-Inference e seu Access Token. Confirme requisitos de cadastro/vinculação e cotas no painel; não há modelo pago escolhido automaticamente. |
+| SiliconFlow | `https://api.siliconflow.com/v1` | Informe o ID de um modelo de chat do catálogo da sua conta. Gratuidade não é garantida. Contas da China devem usar `https://api.siliconflow.cn/v1` e a chave correspondente. |
+
+A integração atual envia texto. Modelos visuais não recebem imagens por estes conectores. O botão Testar realiza uma chamada real, que pode consumir cota ou saldo. Só habilite um modelo depois de conferir sua tarifa; provedores habilitados podem participar do failover.
+
+Referências: [Z.ai](https://docs.z.ai/guides/overview/quick-start), [preços Z.ai](https://docs.z.ai/guides/overview/pricing), [ModelScope](https://modelscope.cn/docs/model-service/API-Inference/intro), [SiliconFlow](https://docs.siliconflow.com/en/userguide/quickstart).
+
+Testes dos novos conectores, com transporte HTTP simulado e sem chamadas externas:
+
+```bash
+python -m pytest -q tests/test_provider_integrations.py
+```
+
 ```bash
 python -m pytest -q tests/test_app.py
 ```

@@ -30,6 +30,9 @@ DEFAULT_ENDPOINTS = {
     'cohere': 'https://api.cohere.ai/compatibility/v1',
     'deepinfra': 'https://api.deepinfra.com/v1/openai',
     'novita': 'https://api.novita.ai/v3/openai',
+    'zai': 'https://api.z.ai/api/paas/v4',
+    'modelscope': 'https://api-inference.modelscope.cn/v1',
+    'siliconflow': 'https://api.siliconflow.com/v1',
     'compatible': '',
 }
 

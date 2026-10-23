@@ -18,6 +18,9 @@ const chatCommands = [
 const navGroups = [['WORKSPACE', [['chat','▣'],['dashboard','◫'],['agents','◈'],['workflows','⌁'],['projects','▤']]], ['GERENCIAR', [['history','◷'],['monitoring','⌁'],['providers','⬡'],['settings','⚙']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
+  {id:'zai',name:'Z.ai / GLM',kind:'zai',model:'glm-4.7-flash',base_url:'https://api.z.ai/api/paas/v4',group:'Grátis limitado',badge:'Modelos Flash gratuitos com limites',note:'Use glm-4.7-flash ou glm-4.5-flash e uma chave API padrão. Outros modelos podem ser pagos; confira as cotas da conta.'},
+  {id:'modelscope',name:'ModelScope',kind:'modelscope',model:'',base_url:'https://api-inference.modelscope.cn/v1',group:'Verificar plano',badge:'Cota gratuita sujeita à conta',note:'Copie o ID completo de um modelo com API-Inference e use seu Access Token. Confira os requisitos de cadastro, vinculação e as cotas no painel.'},
+  {id:'siliconflow',name:'SiliconFlow',kind:'siliconflow',model:'',base_url:'https://api.siliconflow.com/v1',group:'Verificar plano',badge:'Preço e cotas por modelo e região',note:'Selecione um modelo de chat e confirme o preço no painel. A API internacional usa .com; para uma conta da China, ajuste a URL para https://api.siliconflow.cn/v1 e use a chave dessa região.'},
   {id:'ollama',name:'Ollama',kind:'ollama',model:'gemma3:4b',group:'Local',badge:'Grátis no seu computador',note:'Executa modelos localmente; exige instalar o Ollama.'},
   {id:'lmstudio',name:'LM Studio',kind:'lmstudio',model:'',group:'Local',badge:'Grátis no seu computador',note:'Use o identificador do modelo carregado no LM Studio.'},
   {id:'jan',name:'Jan',kind:'jan',model:'',group:'Local',badge:'Grátis no seu computador',note:'Ative a API local do Jan e informe o modelo carregado.'},
@@ -48,6 +51,7 @@ const providerPresets = [
 ]
 const providerKindLabels = Object.fromEntries(providerPresets.filter(p=>p.id===p.kind).map(p=>[p.kind,p.name]))
 const providerKeyLinks = {
+  zai:'https://z.ai/manage-apikey/apikey-list',modelscope:'https://modelscope.cn/my/myaccesstoken',siliconflow:'https://cloud.siliconflow.com/account/ak',
   openai:'https://platform.openai.com/api-keys',anthropic:'https://console.anthropic.com/settings/keys',gemini:'https://aistudio.google.com/app/apikey',deepseek:'https://platform.deepseek.com/api_keys',grok:'https://console.x.ai/',mistral:'https://console.mistral.ai/api-keys',
   ollama:'https://docs.ollama.com/api/openai-compatibility',lmstudio:'https://lmstudio.ai/docs/developer/openai-compat',jan:'https://jan.ai/docs/local-api',localai:'https://localai.io/features/openai-functions/',vllm:'https://docs.vllm.ai/en/latest/serving/openai_compatible_server/',llamacpp:'https://github.com/ggml-org/llama.cpp/tree/master/examples/server',
   openrouter:'https://openrouter.ai/settings/keys',groq:'https://console.groq.com/keys',cerebras:'https://cloud.cerebras.ai/',sambanova:'https://cloud.sambanova.ai/apis',huggingface:'https://huggingface.co/settings/tokens',cloudflare:'https://dash.cloudflare.com/profile/api-tokens',nvidia:'https://build.nvidia.com/',
