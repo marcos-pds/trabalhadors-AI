@@ -62,7 +62,7 @@ def _feedback(result):
 
 
 async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
-                            model, system, messages, emit):
+                            model, system, messages, emit, validate_at_finish=True):
     """Requires an enabled scoped grant, returning only genuinely validated results."""
     grant = policy(db, user_id)
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
@@ -89,6 +89,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
 
         if command['action'] == 'finish':
             finished = str(command.get('message', '')).strip()[:4000]
+            if not validate_at_finish:
+                return finished or 'Planejamento registrado para o próximo trabalhador.'
             results = []
             for check in validation_commands(grant['folder']):
                 result = await agent_action(db, user_id, run_id, step_id, check, emit)
