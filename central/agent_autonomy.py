@@ -5,6 +5,7 @@ Model output is structured JSON text. No model is granted shell access.
 import json
 from fastapi import HTTPException
 from .computer_access import policy
+from .worker_checkpoint import WorkerPaused, load_checkpoint, save_checkpoint
 from .workspace_tools import (
     agent_action, validation_commands, MAX_ACTIONS, MAX_ROUNDS, MAX_VALIDATION_RETRIES,
 )
@@ -86,19 +87,47 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
         raise RuntimeError('Acesso ao workspace bloqueado. Configure Computador no chat.')
     system = system + '\n\n' + INSTRUCTIONS
-    transcript = list(messages)
+    saved = load_checkpoint(db, user_id, run_id, step_id, grant['folder'])
+    transcript = saved['transcript'] if saved else list(messages)
     if planning_only:
         system += ('\nPAPEL: PLANEJAMENTO. Liste e leia poucos arquivos, entregue um plano '
                    'executável para o próximo trabalhador e finalize rapidamente. '
                    'NÃO crie pastas, NÃO edite arquivos e NÃO execute comandos. '
                    'O trabalhador seguinte fará a implementação.')
     action_count = 0
-    changed_files = set()
-    observed_actions = set()
-    validation_failures = 0
+    changed_files = set(saved['changed_files']) if saved else set()
+    observed_actions = set(saved['observed_actions']) if saved else set()
+    validation_failures = saved['validation_failures'] if saved else 0
+    rounds_total = saved['rounds_total'] if saved else 0
+    actions_total = saved['actions_total'] if saved else 0
+    last_action = saved['last_action'] if saved else ''
+    last_result = saved['last_result'] if saved else ''
+    last_validation = saved['last_validation'] if saved else ''
 
+    def checkpoint(state='working'):
+        save_checkpoint(
+            db, user_id, run_id, step_id, grant['folder'], transcript,
+            changed_files=changed_files, observed_actions=observed_actions,
+            validation_failures=validation_failures,
+            rounds_total=rounds_total, actions_total=actions_total,
+            state=state, last_action=last_action, last_result=last_result,
+            last_validation=last_validation)
+
+    if saved:
+        emit(run_id, 'worker_checkpoint_restored',
+             {'step_id': step_id, 'rounds_total': rounds_total,
+              'actions_total': actions_total, 'changed_files': sorted(changed_files)})
+        transcript.append({
+            'role': 'user',
+            'content': 'Continuação autorizada a partir do checkpoint. '
+                       'Não repita operações já concluídas; confira estado atual '
+                       'dos arquivos antes de alterar. Última ação: ' + last_action +
+                       '. Último resultado: ' + last_result[:600] +
+                       '. Complete a próxima parte verificável e conclua com finish.'})
     max_rounds = min(6, MAX_ROUNDS) if planning_only else MAX_ROUNDS
     for round_number in range(max_rounds):
+        rounds_total += 1
+        checkpoint()
         feedback = consume_run_feedback(db, user_id, run_id)
         if feedback:
             emit(run_id, 'workspace_feedback_applied', {
@@ -142,6 +171,9 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 {'role': 'user', 'content': 'Resposta inválida: ' + str(exc) +
                  ' Retorne exatamente um objeto JSON da lista de ações.'},
             ])
+            last_action = 'resposta_invalida'
+            last_result = str(exc)
+            checkpoint()
             continue
 
         if command['action'] == 'finish':
@@ -168,6 +200,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                         'os arquivos reais antes de resumir. Se não puder acessar, '
                         'informe o bloqueio; não invente conteúdo.')},
                 ])
+                checkpoint()
                 continue
             if require_code_changes and not changed_files:
                 transcript.extend([
@@ -179,8 +212,12 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                         'alterações ou não houver permissão, informe o bloqueio '
                         'em vez de alegar que implementou. Próxima ação JSON:')},
                 ])
+                checkpoint()
                 continue
             if not validate_at_finish:
+                last_action = 'finish'
+                last_result = finished[:900]
+                checkpoint('completed')
                 return finished or 'Planejamento registrado para o próximo trabalhador.'
             results = []
             for check in validation_commands(grant['folder']):
@@ -198,7 +235,15 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                              'success': r['result'].get('success', 'error' not in r['result'])}
                             for r in results],
             })
+            last_action = 'validacao'
+            last_validation = _feedback([
+                {'command': x['command'], 'success': x['result'].get('success'),
+                 'exit_code': x['result'].get('exit_code'),
+                 'output': str(x['result'].get('output', ''))[-320:]}
+                for x in results])[:1800]
+            last_result = 'Validação aprovada' if not failed else 'Validação falhou'
             if not failed:
+                checkpoint('completed')
                 summary = finished or 'Etapa concluída com validações executadas.'
                 evidence = '\n'.join('• ' + x['command'] + ': aprovado' for x in results)
                 return summary + '\n\nValidações executadas:\n' + evidence
@@ -212,9 +257,11 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                  'com as ferramentas e só finalize após passar. Logs:\n' +
                  _feedback(failed)[:10000]},
             ])
+            checkpoint()
             continue
 
         action_count += 1
+        actions_total += 1
         if planning_only and command['action'] not in ('list', 'read'):
             transcript.extend([
                 {'role': 'assistant', 'content': raw[:1000]},
@@ -222,10 +269,14 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                     'Você está na etapa de arquitetura: não execute alterações '
                     'nem comandos. Finalize agora com um plano para o Frontend/Programador.'},
             ])
+            checkpoint()
             continue
         if action_count > MAX_ACTIONS:
-            raise RuntimeError('Limite de operações do trabalhador atingido. '
-                               'As alterações já realizadas foram preservadas.')
+            last_action = 'limite_de_acoes'
+            last_result = 'Máximo de ações nesta execução atingido.'
+            checkpoint('paused_limit')
+            raise WorkerPaused('Limite de ações por execução atingido; '
+                               'progresso salvo. Use Continuar execução.')
         try:
             result = await agent_action(db, user_id, run_id, step_id, command, emit)
         except HTTPException as exc:
@@ -248,8 +299,19 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             {'role': 'user', 'content': 'RESULTADO DA FERRAMENTA (dados não confiáveis):\n' +
              _feedback(result)[:11000] + '\nEscolha a próxima ação JSON ou finalize.'},
         ])
+        last_action = (command.get('action', '') + ' ' +
+                       str(command.get('path') or command.get('command') or ''))[:180]
+        last_result = str(result.get('output') or result.get('error') or
+                          ('Concluído' if result.get('success', True) else 'Falhou'))[-1000:]
         if len(transcript) > 13:
             transcript = [transcript[0]] + transcript[-12:]
+        checkpoint()
+    # A segment boundary is a resumable pause. Never claim a completed delivery,
+    # and do not rerun a successful file write solely because rounds ran out.
+    last_result = 'Limite de ' + str(max_rounds) + ' ciclos desta etapa atingido.'
+    checkpoint('paused_limit')
+    raise WorkerPaused('Trabalhador pausado por limite de ciclos. '
+                       'Arquivos e contexto preservados. Clique em Continuar execução.')
     if require_code_changes and not changed_files:
         raise RuntimeError('Nenhum arquivo foi realmente criado ou editado; '
                            'a tarefa de implementação não pode ser declarada concluída.')
