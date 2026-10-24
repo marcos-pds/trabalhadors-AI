@@ -499,6 +499,12 @@ class Engine:
             raise ValueError('Somente tarefas pausadas, falhas ou canceladas podem ser retomadas.')
         if self.running.get(run_id) and not self.running[run_id].done():
             raise ValueError('A tarefa anterior ainda está encerrando. Tente novamente após a parada.')
+        incomplete = self.db.one(
+            "SELECT COUNT(*) AS n FROM steps WHERE run_id=? AND status!='completed'",
+            (run_id,))['n']
+        if not incomplete:
+            raise ValueError('Não há trabalhador pendente para continuar. '
+                             'Crie uma nova tarefa para corrigir a validação final.')
         checkpoints = self.db.all(
             'SELECT step_id,folder,resumes FROM worker_checkpoints WHERE run_id=? AND user_id=?',
             (run_id, run['user_id']))
@@ -516,6 +522,14 @@ class Engine:
                 self.db.execute(
                     "UPDATE worker_checkpoints SET resumes=resumes+1,updated_at=? WHERE step_id=?",
                     (utcnow(), item['step_id']))
+        if run['status'] == 'failed':
+            # Explicit retry allows a fresh, bounded attempt to fix validation
+            # errors while retaining the last diagnostics and tool history.
+            self.db.execute(
+                "UPDATE worker_checkpoints SET validation_failures=0 "
+                "WHERE run_id=? AND user_id=? AND step_id IN "
+                "(SELECT id FROM steps WHERE run_id=? AND status!='completed')",
+                (run_id, run['user_id'], run_id))
         reset_run_commands(run_id)
         self.db.execute("UPDATE workspace_action_approvals SET status='denied' "
                         "WHERE run_id=? AND status='pending'", (run_id,))
