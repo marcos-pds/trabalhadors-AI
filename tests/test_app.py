@@ -83,7 +83,7 @@ def test_parallel_run_and_reviewer_checkpoint():
         register(c);add_provider(c,'healthy',1)
         fake=FakeClient(delay=.07);ENGINE.client=fake
         cid=new_convo(c)
-        r=c.post('/api/runs',json={'conversation_id':cid,'prompt':'Crie frontend react e backend API login'},headers=HEADERS)
+        r=c.post('/api/runs',json={'conversation_id':cid,'prompt':'Analise frontend react e backend API login'},headers=HEADERS)
         assert r.status_code==200,r.text
         run=wait_for(c,r.json()['id'])
         assert run['status']=='completed',run.get('error')
@@ -164,7 +164,7 @@ def test_resume_after_provider_configuration_preserves_steps():
     with TestClient(app) as c:
         register(c)
         cid = new_convo(c)
-        r = c.post('/api/runs', json={'conversation_id':cid,'prompt':'Crie uma API'}, headers=HEADERS)
+        r = c.post('/api/runs', json={'conversation_id':cid,'prompt':'Explique a arquitetura de uma API'}, headers=HEADERS)
         rid = r.json()['id']
         assert wait_for(c,rid)['status']=='failed'
         add_provider(c,'restored',1)
@@ -264,3 +264,39 @@ def test_agents_receive_related_same_project_memories_but_not_other_projects():
         assert 'Solicitação atual do usuário' in sent
         events = DB.all('SELECT event,payload FROM events WHERE run_id=?', (created.json()['id'],))
         assert any(e['event'] == 'memory_recalled' for e in events)
+
+
+def test_explicit_software_delivery_cannot_silently_use_text_only_mode():
+    """A coding request with Autonomia disabled must fail before saving a message."""
+    with TestClient(app) as c:
+        register(c)
+        cid = new_convo(c)
+        response = c.post('/api/runs', json={
+            'conversation_id': cid,
+            'prompt': 'Desenvolva uma landing page responsiva com React e testes.',
+            'mode': 'team', 'autonomous': False,
+        }, headers=HEADERS)
+        assert response.status_code == 409, response.text
+        assert 'Autonomia' in response.json()['detail']
+        assert c.get(f'/api/conversations/{cid}/messages').json() == []
+
+
+def test_architect_alone_cannot_claim_a_coding_delivery(monkeypatch):
+    """The run must be rejected before the engine schedules a text-only worker."""
+    from central.main import DB
+    from central.engine import Engine
+    from central.database import uid
+    from central.security import Security
+    with TestClient(app) as c:
+        registered = register(c)
+        cid = new_convo(c)
+        agents = c.get('/api/agents').json()
+        architect = next(a for a in agents if a['specialty'] == 'architecture')
+        engine = Engine(DB, None)
+        import asyncio
+        async def attempt():
+            with __import__('pytest').raises(ValueError, match='Programador'):
+                engine.create_run(registered['id'], cid,
+                                  'Implemente a landing page NOVA STUDIO.',
+                                  'manual', agent_ids=[architect['id']], autonomous=True)
+        asyncio.run(attempt())
