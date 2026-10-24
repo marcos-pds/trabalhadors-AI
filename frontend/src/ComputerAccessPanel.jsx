@@ -32,7 +32,7 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
     e.preventDefault()
     if (busy) return
     if (mode === 'full' && !window.confirm(
-      'Autorizar acesso à pasta escolhida sem novas confirmações para as operações suportadas? Isso NÃO dá acesso ao computador inteiro.')) return
+      'Atenção: os agentes poderão editar arquivos e executar builds/testes/instaladores de pacotes dentro desta pasta quando Autonomia estiver ligada. Esses comandos executam código real do projeto e NÃO estão isolados do Windows. Continuar?')) return
     setBusy('saving'); setError(''); setPending(null)
     try {
       const result = await api('/computer-access', 'PUT', { mode, folder: mode === 'blocked' ? '' : folder.trim() })
@@ -97,9 +97,9 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
         <fieldset>
           <legend className="mb-2 text-xs font-semibold">Modo de autorização</legend>
           {[
-            { id: 'blocked', icon: '🔒', help: 'Nenhum arquivo local pode ser lido pela Central.' },
-            { id: 'ask', icon: '🛡', help: 'Cada operação exige sua aprovação individual.' },
-            { id: 'full', icon: '📁', help: 'Autoriza operações suportadas dentro da pasta definida, sem pedir novamente.' },
+            { id: 'blocked', icon: '🔒', help: 'Impede leitura, edição e execução de ferramentas locais.' },
+            { id: 'ask', icon: '🛡', help: 'Cada leitura, edição ou comando solicitado pelos agentes exige sua aprovação.' },
+            { id: 'full', icon: '📁', help: 'Os agentes com Autonomia ativada podem editar código, instalar pacotes e testar sem pedir novamente dentro do workspace.' },
           ].map(item => <label key={item.id} className={'mb-2 flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition ' +
             (mode === item.id ? 'border-lilac/60 bg-lilac/[.08]' : 'border-white/10 hover:bg-white/[.04]')}>
             <input type="radio" name="computer-mode" checked={mode === item.id}
@@ -141,8 +141,10 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
       <section className="mt-5 rounded-2xl border border-white/10 bg-black/10 p-4">
         <h3 className="text-xs font-semibold">Arquivos da pasta autorizada</h3>
         <p className="mt-2 text-[11px] leading-5 text-muted">
-          Nesta versão você pode listar pastas e pré-visualizar arquivos de texto/código de até 64 KB.
-          Editar arquivos, executar comandos, usar mouse e controlar janelas ainda não estão habilitados para agentes.
+          Aqui você pode listar pastas e visualizar textos/código de até 64 KB. Com a opção Autonomia
+          do chat ativada, os trabalhadores também podem criar e editar código, instalar dependências na pasta e executar
+          builds e testes. Mouse, janelas, comandos irrestritos e exclusão de arquivos continuam bloqueados.
+          Execução de scripts de projetos e pacotes não é um sandbox de segurança do Windows.
         </p>
         {configured && <div className="mt-3 break-all rounded-lg bg-black/20 p-2 font-mono text-[10px] text-muted">{saved.folder}</div>}
         <div className="mt-3 flex flex-wrap items-center gap-2">
