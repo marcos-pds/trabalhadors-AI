@@ -25,6 +25,7 @@ from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
 from .auth_limits import ensure_allowed as allow_login, failed as fail_login, succeeded as login_ok
 from .quotas import QuotaExceeded
+from .workspace_guard import binding_summary
 from .organizations import (
     ensure_personal, membership, require_org, require_project, visible_projects,
     create_organization, set_member, remove_member, all_organizations, require_run_write)
@@ -908,6 +909,7 @@ def get_run(rid:str,user=Depends(current_user)):
     run=require_owned(DB,'runs',rid,user['id'])
     run['steps']=DB.all('SELECT * FROM steps WHERE run_id=?',(rid,))
     run['checkpoints']=checkpoint_summary(DB,user['id'],rid)
+    run['workspace_binding']=binding_summary(DB,user['id'],rid)
     run['job']=ENGINE.queue.details(rid)
     proof=delivery_evidence(DB,rid) if run['status']=='completed' else None
     run['delivery_verified']=bool(proof and proof['changed_files'] and proof['tests_passed']
@@ -1108,6 +1110,7 @@ def run_activity(rid: str, user=Depends(current_user)):
             'delivery_verified': delivered,
             'updated_at': run['updated_at'],
             'checkpoints': checkpoint_summary(DB,user['id'],rid),
+            'workspace_binding': binding_summary(DB,user['id'],rid),
             'steps': [{'id':step['id'],'name':step['name'],'status':step['status'],
                        'error':step['error']} for step in DB.all(
                            'SELECT id,name,status,error FROM steps WHERE run_id=?', (rid,))],
