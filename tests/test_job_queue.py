@@ -118,3 +118,74 @@ def test_engine_starts_job_via_persistent_queue_and_ack(tmp_path, monkeypatch):
         assert engine.queue.details('run')['attempts']==1
     finally:
         db.close()
+
+
+
+def test_api_only_enqueue_is_consumed_by_dedicated_worker(tmp_path, monkeypatch):
+    path = tmp_path / 'split.db'
+    db_api = Database(path)
+    db_worker = Database(path)
+    try:
+        seed(db_api, 'u', 'split')
+        api_engine = Engine(db_api, None)
+        api_engine.job_mode = 'api'
+        worker = Engine(db_worker, None)
+        worker.job_mode = 'worker'
+        async def finish(run_id):
+            db_worker.execute("UPDATE runs SET status='completed' WHERE id=?",
+                              (run_id,))
+        monkeypatch.setattr(worker,'process',finish)
+        async def go():
+            api_engine.schedule('split')
+            assert not api_engine.running
+            assert api_engine.queue.details('split')['state'] == 'queued'
+            worker.dispatch_ready()
+            for _ in range(80):
+                if worker.queue.details('split')['state'] == 'completed':
+                    return
+                await asyncio.sleep(.01)
+            raise AssertionError('Worker could not dispatch shared SQLite job')
+        asyncio.run(go())
+        assert db_api.one("SELECT status FROM runs WHERE id='split'")['status'] == 'completed'
+    finally:
+        db_api.close()
+        db_worker.close()
+
+
+def test_cancel_is_visible_across_processes_without_false_completion(tmp_path, monkeypatch):
+    path = tmp_path / 'shared.db'
+    db_api, db_worker = Database(path), Database(path)
+    try:
+        seed(db_api, 'u', 'task')
+        api = Engine(db_api,None)
+        api.job_mode = 'api'
+        worker = Engine(db_worker,None)
+        worker.job_mode = 'worker'
+        running = asyncio.Event()
+        stopped = asyncio.Event()
+        async def process(run_id):
+            running.set()
+            try:
+                await asyncio.sleep(10)
+                db_worker.execute("UPDATE runs SET status='completed' WHERE id=?",
+                                  (run_id,))
+            except asyncio.CancelledError:
+                stopped.set()
+                raise
+        monkeypatch.setattr(worker,'process',process)
+        async def go():
+            api.schedule('task')
+            worker.dispatch_ready()
+            await asyncio.wait_for(running.wait(), timeout=2)
+            api.cancel('task')
+            await asyncio.wait_for(stopped.wait(), timeout=4)
+            for _ in range(50):
+                if not worker.running:
+                    break
+                await asyncio.sleep(.02)
+        asyncio.run(go())
+        assert db_worker.one("SELECT status FROM runs WHERE id='task'")['status'] == 'cancelled'
+        assert api.queue.details('task')['state'] == 'cancelled'
+    finally:
+        db_api.close()
+        db_worker.close()
