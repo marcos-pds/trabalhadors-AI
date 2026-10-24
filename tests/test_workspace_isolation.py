@@ -210,3 +210,40 @@ def test_global_local_process_slots_fail_closed(tmp_path,monkeypatch):
     finally:
         tools._command_slots.release()
         tools._command_slots.release()
+
+
+
+def test_team_build_requires_one_time_consent_even_when_folder_is_full(db,tmp_path,monkeypatch):
+    folder=tmp_path/'team-code'
+    folder.mkdir()
+    org=create_organization(db,'a','Empresa Auditada')
+    add_run(db,'a','team-build',org)
+    set_policy(db,'a','full',str(folder))
+    bind_run(db,'a','team-build',org)
+    db.execute('UPDATE organizations SET host_commands_enabled=1 WHERE id=?',(org,))
+    import central.workspace_tools as tools
+    monkeypatch.setattr(tools,'preview',
+                        lambda *args: {'action':'command','path':'',
+                                      'description':'Executar compilacao'})
+    invoked=[]
+    monkeypatch.setattr(tools,'execute',lambda *args: invoked.append(args) or
+                        {'success':True,'output':'build aprovado'})
+    async def scenario():
+        task=asyncio.create_task(agent_action(
+            db,'a','team-build','step-team-build',
+            {'action':'command','command':'python_compile'},
+            lambda *args:None))
+        approval=None
+        for _ in range(150):
+            await asyncio.sleep(.01)
+            approval=db.one(
+                'SELECT id FROM workspace_action_approvals WHERE run_id=? '
+                'AND status=?',('team-build','pending'))
+            if approval:
+                break
+        assert approval
+        assert not invoked
+        assert decide(db,'a','team-build',approval['id'],True)['approved']
+        return await asyncio.wait_for(task,3)
+    assert asyncio.run(scenario())['success'] is True
+    assert len(invoked)==1
