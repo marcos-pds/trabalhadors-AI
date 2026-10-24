@@ -13,6 +13,7 @@ from .observability import log_event
 from .run_policy import classify_task, validate_run_policy
 from .worker_checkpoint import WorkerPaused, MAX_RESUMES, checkpoint_summary
 from .job_queue import JobQueue
+from .workspace_guard import bind_run, binding_summary
 from .quotas import require_capacity
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
@@ -361,6 +362,8 @@ class Engine:
                     self.db.conn.execute(
                         'INSERT INTO organization_runs(run_id,organization_id) VALUES(?,?)',
                         (run_id,organization_id))
+                if autonomous:
+                    bind_run(self.db, user_id, run_id, organization_id)
                 for p in plan:
                     self.db.conn.execute(
                         '''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,
@@ -654,6 +657,10 @@ class Engine:
         if not incomplete:
             raise ValueError('Não há trabalhador pendente para continuar. '
                              'Crie uma nova tarefa para corrigir a validação final.')
+        if run['autonomous'] and not binding_summary(self.db,run['user_id'],run_id):
+            # Reauthorization on explicit resume is the only migration path
+            # for autonomous tasks created before workspace bindings existed.
+            bind_run(self.db,run['user_id'],run_id)
         checkpoints = self.db.all(
             'SELECT step_id,folder,resumes FROM worker_checkpoints WHERE run_id=? AND user_id=?',
             (run_id, run['user_id']))
