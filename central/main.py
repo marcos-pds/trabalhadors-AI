@@ -44,6 +44,16 @@ SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
 
 
+async def knowledge_retention():
+    from .knowledge import purge_expired
+    while True:
+        try:
+            await asyncio.to_thread(purge_expired, DB)
+        except Exception:
+            log_event('knowledge_retention_failed', category='storage')
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app):
     # Multiple TestClient lifespans may use different asyncio loops.
@@ -58,9 +68,12 @@ async def lifespan(app):
     own_dispatcher = (ENGINE.dispatch_task
                       if ENGINE.dispatch_task and ENGINE.dispatch_task.get_loop() is loop
                       else None)
+    retention_task = asyncio.create_task(knowledge_retention())
     try:
         yield
     finally:
+        retention_task.cancel()
+        await asyncio.gather(retention_task, return_exceptions=True)
         ENGINE.shutting_down = True
         if own_dispatcher:
             own_dispatcher.cancel()
@@ -1358,3 +1371,32 @@ def delete_git_connection(connection_id: str, user=Depends(current_user)):
 def git_reviews(connection_id: str, number: int | None = None, user=Depends(current_user)):
     from .git_integrations import reviews
     return reviews(DB, SEC, user['id'], connection_id, number)
+
+
+class KnowledgeIn(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+    content: str = Field(min_length=1, max_length=128000)
+    visibility: str = Field(default='private', max_length=20)
+    retention_days: int | None = Field(default=90, ge=1, le=3650)
+
+
+@app.get('/api/projects/{pid}/knowledge')
+def list_knowledge(pid: str, user=Depends(current_user)):
+    from .knowledge import documents
+    return documents(DB, user['id'], pid)
+
+
+@app.post('/api/projects/{pid}/knowledge')
+def add_knowledge(pid: str, data: KnowledgeIn, user=Depends(current_user)):
+    from .knowledge import create
+    result = create(DB, user['id'], pid, data.title, data.content, data.visibility, data.retention_days)
+    ops_audit(DB, user['id'], 'knowledge_document_created', 'project', pid)
+    return result
+
+
+@app.delete('/api/projects/{pid}/knowledge/{document_id}')
+def delete_knowledge(pid: str, document_id: str, user=Depends(current_user)):
+    from .knowledge import delete
+    result = delete(DB, user['id'], pid, document_id)
+    ops_audit(DB, user['id'], 'knowledge_document_deleted', 'project', pid)
+    return result

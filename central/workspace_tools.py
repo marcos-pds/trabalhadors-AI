@@ -24,10 +24,12 @@ from .database import uid, utcnow
 from .workspace_guard import enforce_run_scope, enforce_host_command_policy
 from .sandbox_executor import backend as command_backend, sandbox_argv, force_remove
 from .approval_engine import issue_approval, decide
+from .dependency_egress import Lease, mode as dependency_network, INSTALL_COMMANDS, docker_environment
 
 _process_lock = threading.RLock()
 _active_commands = {}
 _active_containers = {}
+_preparing_runs = set()
 _cancelled_command_runs = set()
 # Bound concurrent subprocesses per *server process*. Worker mode on a separate
 # process has a separate pool; this is not a machine-wide sandbox quota.
@@ -359,6 +361,8 @@ def execute(folder, request, run_id=None):
     proc = None
     reader = None
     container_name = None
+    egress = None
+    preparation_owned = False
     output_tail = bytearray()
     total_output_bytes = [0]
 
@@ -379,6 +383,17 @@ def execute(folder, request, run_id=None):
 
     try:
         with _process_lock:
+            if run_id and (run_id in _active_commands or run_id in _preparing_runs):
+                return {'command': spec['label'], 'exit_code': None,
+                        'output': 'Outro comando desta tarefa ainda está em execução.', 'success': False}
+            if run_id:
+                _preparing_runs.add(run_id)
+                preparation_owned = True
+        if (command_backend() == 'docker' and request.get('command') in INSTALL_COMMANDS
+                and dependency_network() == 'proxy'):
+            egress = Lease()
+            egress.prepare(cancelled=lambda: bool(run_id and run_id in _cancelled_command_runs))
+        with _process_lock:
             if run_id and run_id in _cancelled_command_runs:
                 return {'command': spec['label'], 'exit_code': None,
                         'output': 'Execução cancelada pelo usuário.', 'success': False}
@@ -388,7 +403,9 @@ def execute(folder, request, run_id=None):
                         'success': False}
             argv = spec['argv']
             if command_backend() == 'docker':
-                argv, container_name = sandbox_argv(spec, request)
+                argv, container_name = (sandbox_argv(spec, request, egress=egress) if egress
+                                        else sandbox_argv(spec, request))
+                env = docker_environment()
             proc = subprocess.Popen(
                 argv, cwd=str(spec['root']), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False,
@@ -441,9 +458,15 @@ def execute(folder, request, run_id=None):
                     _active_commands.pop(run_id, None)
                 if _active_containers.get(run_id) == container_name:
                     _active_containers.pop(run_id, None)
+        if preparation_owned:
+            with _process_lock:
+                _preparing_runs.discard(run_id)
+        if egress:
+            force_remove(container_name)
+            egress.cleanup()
         _command_slots.release()
 
-async def agent_action(db, user_id, run_id, step_id, request, emit):
+async def agent_action(db, user_id, run_id, step_id, request, emit, executor=None):
     requires_write = request.get('action') in ('mkdir','write','replace','command')
     folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
     if request.get('action') == 'command':
@@ -451,8 +474,11 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     config = policy(db, user_id)
     summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
-    if config['mode'] == 'ask' or needs_explicit_approval(db,user_id,run_id,request):
-        token = issue_approval(db, user_id, run_id, step_id, folder, request, summary)
+    approval_required = (executor.approvals.required(user_id, run_id, request) if executor
+                         else needs_explicit_approval(db,user_id,run_id,request))
+    if config['mode'] == 'ask' or approval_required:
+        token = (executor.approvals.issue(user_id, run_id, step_id, folder, request, summary)
+                 if executor else issue_approval(db, user_id, run_id, step_id, folder, request, summary))
         emit(run_id, 'workspace_approval_required', {
             'step_id': step_id, 'approval_id': token, 'summary': summary})
         for _ in range(600):  # 10 minute deadline, cancellation propagates
@@ -473,7 +499,7 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     if request.get('action') == 'command':
         enforce_host_command_policy(db,user_id,run_id)
     try:
-        result = await asyncio.to_thread(execute, folder, request, run_id)
+        result = await asyncio.to_thread(executor.execute if executor else execute, folder, request, run_id)
     except HTTPException as exc:
         result = {'error': str(exc.detail), 'success': False}
     emit(run_id, 'workspace_action_result', {

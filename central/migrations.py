@@ -8,6 +8,7 @@ from .database import utcnow
 from .semantic_memory import SCHEMA as MEMORY_SCHEMA
 from .invitations import SCHEMA as INVITATIONS_SCHEMA
 from .git_integrations import SCHEMA as GIT_SCHEMA
+from .knowledge import SCHEMA as KNOWLEDGE_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -18,6 +19,7 @@ MIGRATIONS = (
     (2, 'semantic_memory', tuple(part.strip() for part in MEMORY_SCHEMA.split(';') if part.strip())),
     (3, 'single_use_invitations', (INVITATIONS_SCHEMA,)),
     (4, 'personal_git_connections', (GIT_SCHEMA,)),
+    (5, 'project_knowledge_documents', tuple(part.strip() for part in KNOWLEDGE_SCHEMA.split(';') if part.strip())),
 )
 
 

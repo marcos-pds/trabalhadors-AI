@@ -70,3 +70,24 @@ jobs:
             })
       - name: Test connection stream parser
         run: node --test frontend/src/catalogConnectionStream.test.mjs
+
+
+  docker-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Build isolated executor and dependency proxy
+        run: |
+          docker version
+          docker build -f sandbox/Dockerfile -t central-ai-executor:py311-node22 sandbox
+          docker build -f sandbox/Dockerfile.egress -t central-ai-egress:py311-v1 sandbox
+      - name: Validate real Docker network, packages and preview
+        env:
+          CENTRAL_DOCKER_INTEGRATION: "1"
+        run: python -m pytest tests/test_docker_integration.py -v --tb=short

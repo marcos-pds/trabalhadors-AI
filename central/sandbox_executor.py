@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import HTTPException
+from .dependency_egress import mode as dependency_network, INSTALL_COMMANDS, docker_environment, NAME
 
 IMAGE = 'central-ai-executor:py311-node22'
 SUPPORTED = frozenset({
@@ -42,7 +43,7 @@ def _workspace_source(root):
     return source
 
 
-def sandbox_argv(spec, request, name=None):
+def sandbox_argv(spec, request, name=None, egress=None):
     """Construct an argv array, never a shell command or Docker flags from AI."""
     if backend() != 'docker':
         raise RuntimeError('Executor Docker não está ativo.')
@@ -58,13 +59,15 @@ def sandbox_argv(spec, request, name=None):
     image = os.environ.get('CENTRAL_DOCKER_IMAGE', IMAGE).strip()
     if not _IMAGE_NAME.fullmatch(image) or image.startswith(('-', '/')):
         raise HTTPException(422, 'Imagem Docker configurada é inválida.')
-    installation = code in ('npm_ci', 'npm_install', 'pip_package', 'pip_requirements')
-    # Only an operator environment setting may enable egress. AI/request fields
-    # cannot choose network names, registries or Docker options.
-    install_network = os.environ.get('CENTRAL_DOCKER_INSTALL_NETWORK', 'none').strip()
-    if install_network not in ('none', 'bridge'):
-        raise HTTPException(422, 'CENTRAL_DOCKER_INSTALL_NETWORK deve ser none ou bridge.')
+    installation = code in INSTALL_COMMANDS
+    install_network = dependency_network()
     network = install_network if installation else 'none'
+    proxy_url = None
+    if network == 'proxy':
+        if (egress is None or not egress.ready or not NAME.fullmatch(egress.name)):
+            raise HTTPException(409, 'Instalação exige um proxy isolado preparado pelo executor.')
+        network = egress.name
+        proxy_url = egress.proxy_url
     source = _workspace_source(spec['root'])
     workdir = '/workspace'
     # Bind the selected project subfolder ONLY. A sibling repository or home
@@ -92,6 +95,9 @@ def sandbox_argv(spec, request, name=None):
                    '--cache', '/workspace/.central-npm-cache']
         if network == 'none':
             command.append('--offline')
+        if proxy_url:
+            command += ['--https-proxy', proxy_url, '--proxy', proxy_url,
+                        '--registry', 'https://registry.npmjs.org/']
         if code == 'npm_install':
             package = request.get('package', '')
             if not isinstance(package, str) or not PACKAGE.fullmatch(package):
@@ -115,7 +121,7 @@ def sandbox_argv(spec, request, name=None):
             from .workspace_tools import command_spec
             command_spec(str(spec['root']), dict(request, cwd=''))
             command += ['-r', '/workspace/requirements.txt']
-        if network == 'bridge':
+        if install_network in ('bridge', 'proxy'):
             # Cache wheel archives, not merely pip's HTTP cache, so later
             # offline installs are reproducible without enabling egress.
             import json
@@ -124,6 +130,8 @@ def sandbox_argv(spec, request, name=None):
             download = ['/opt/central-python/bin/python', '-m', 'pip', '--isolated',
                         'download', '--only-binary=:all:', '--dest', '/workspace/.central-wheels',
                         '--cache-dir', '/workspace/.central-pip-cache', *requirement]
+            if proxy_url:
+                download[4:4] = ['--proxy', proxy_url]
             install = command + ['--no-index', '--find-links', '/workspace/.central-wheels']
             program = ('import json,subprocess,sys;'
                        'a=json.loads(sys.argv[1]);b=json.loads(sys.argv[2]);'
@@ -134,8 +142,10 @@ def sandbox_argv(spec, request, name=None):
         command = ['python3', '-m', 'venv', '.venv']
     else:
         command = command_map[code]
+    proxy_args = (['--dns', '127.0.0.1', '-e', 'HTTPS_PROXY=' + proxy_url,
+                   '-e', 'HTTP_PROXY=' + proxy_url, '-e', 'NO_PROXY='] if proxy_url else [])
     return [
-        docker,'run','--rm','--name',container,
+        docker,'run','--rm','--name',container,'--pull','never',
         '--network',network,'--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges',
         '--pids-limit','128','--memory','512m','--memory-swap','512m',
@@ -145,7 +155,7 @@ def sandbox_argv(spec, request, name=None):
         '--workdir',workdir,
         '-e','HOME=/tmp','-e','CI=1','-e','PYTHONDONTWRITEBYTECODE=1',
         '-e','PYTHONPATH=/workspace/.central-python',
-        image,*command,
+        *proxy_args,image,*command,
     ], container
 
 
@@ -158,7 +168,7 @@ def force_remove(name):
     import subprocess
     try:
         subprocess.run([docker,'rm','-f',name], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=8, check=False)
+                       stderr=subprocess.DEVNULL, env=docker_environment(), timeout=8, check=False)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -173,8 +183,8 @@ def status():
         'cpu_limit': 1 if runner == 'docker' else None,
         'pids_limit': 128 if runner == 'docker' else None,
         'docker_image': os.environ.get('CENTRAL_DOCKER_IMAGE', IMAGE) if runner == 'docker' else None,
-        'dependency_installation': 'requires_approval' if runner == 'docker' else 'requires_approval',
-        'dependency_network': os.environ.get('CENTRAL_DOCKER_INSTALL_NETWORK', 'none') if runner == 'docker' else 'host',
+        'dependency_installation': 'requires_approval',
+        'dependency_network': dependency_network() if runner == 'docker' else 'host',
         'dependency_cache': 'project/.central-npm-cache' if runner == 'docker' else None,
         'live_preview': 'isolated_http_proxy' if runner == 'docker' else 'host_only',
         'note': ('A sandbox isola comandos, não as ferramentas de arquivo, a API ou o Docker daemon.'

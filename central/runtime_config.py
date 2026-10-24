@@ -19,6 +19,12 @@ def validate_runtime():
         if not os.environ.get('CENTRAL_SECRET_KEY'):
             raise ValueError('Server mode requires an externally managed CENTRAL_SECRET_KEY')
         Fernet(os.environ['CENTRAL_SECRET_KEY'].encode())
+        from .dependency_egress import mode as dependency_network
+        from fastapi import HTTPException
+        try:
+            dependency_network()
+        except HTTPException as exc:
+            raise ValueError(str(exc.detail)) from exc
     return mode
 
 

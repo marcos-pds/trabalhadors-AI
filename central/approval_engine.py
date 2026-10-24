@@ -33,6 +33,24 @@ def decide(db, user_id, run_id, approval_id, approved):
     enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Autorização expirada.')
-    db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",
-               ('approved' if approved else 'denied', approval_id))
+    changed = db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",
+                         ('approved' if approved else 'denied', approval_id))
+    if changed != 1:
+        raise HTTPException(409, 'Autorização já respondida por outra solicitação.')
     return {'ok': True, 'approved': approved}
+
+
+class ApprovalEngine:
+    """Bound, injectable approval service preserving one-time scope checks."""
+    def __init__(self, db):
+        self.db = db
+
+    def issue(self, user_id, run_id, step_id, folder, request, summary):
+        return issue_approval(self.db, user_id, run_id, step_id, folder, request, summary)
+
+    def decide(self, user_id, run_id, approval_id, approved):
+        return decide(self.db, user_id, run_id, approval_id, approved)
+
+    def required(self, user_id, run_id, request):
+        from .workspace_tools import needs_explicit_approval
+        return needs_explicit_approval(self.db, user_id, run_id, request)

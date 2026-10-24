@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import KnowledgePanel from './KnowledgePanel'
 
 const field = 'min-h-10 w-full rounded-xl border border-white/10 bg-[#191919] px-3 py-2 text-xs text-copy outline-none focus:border-lilac/60'
 const action = 'rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold transition hover:bg-white/10 disabled:opacity-40'
@@ -120,6 +121,8 @@ export default function ConversationMemoryPanel({
           <button type="button" className={action} onClick={saveNotes} disabled={!!busy || notes === (activeProject.memory_notes || '')}>{busy === 'notes' ? 'Salvando...' : 'Salvar notas'}</button>
         </div>
       </section>}
+
+      {activeProject && <KnowledgePanel key={activeProject.id} api={api} projectId={activeProject.id} />}
 
       <section className="mt-4 rounded-2xl border border-white/10 p-4">
         <h3 className="text-sm font-semibold">Buscar em conversas antigas</h3>

@@ -105,3 +105,18 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
             selected.extend(a for a in candidates if a not in selected)
         return selected[:3]
     return filtered[:3] if filtered else [next((a for a in candidates if effective_specialty(a)=='coordination'), candidates[0])]
+
+
+class AgentRegistry:
+    """User-scoped agent storage and deterministic selection policy."""
+    def __init__(self, db):
+        self.db = db
+
+    def enabled(self, user_id):
+        return self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1', (user_id,))
+
+    def get(self, user_id, agent_id):
+        return self.db.one('SELECT * FROM agents WHERE id=? AND user_id=?', (agent_id, user_id))
+
+    def select(self, agents, prompt, mode='auto', agent_ids=None):
+        return discover_agents(agents, prompt, mode, agent_ids)

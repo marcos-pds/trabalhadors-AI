@@ -1,8 +1,7 @@
-"""Bounded, user-scoped conversation recall for worker prompts.
+"""Bounded project recall with private chat history and explicit document visibility.
 
-Memory comes only from saved messages and user-curated project notes. Retrieval is
-deterministic/local (no embeddings, extra API calls, or background summarization).
-Cross-project memory is deliberately prohibited; cross-project search is UI-only.
+Local embeddings are optional per user/project. No cross-project source is
+injected; historical excerpts and document chunks remain untrusted data.
 """
 import re
 import unicodedata
@@ -131,6 +130,9 @@ def build_memory(db, user_id, conversation_id, prompt):
         seen = {(r['conversation_id'], r['content'][:100]) for r in semantic}
         sources = (semantic + [r for r in sources
                    if (r['conversation_id'], r['content'][:100]) not in seen])[:PROJECT_RECALL_COUNT]
+        from .knowledge import retrieve as retrieve_documents
+        documents = retrieve_documents(db, user_id, project['id'], prompt)
+        sources = (documents + sources)[:PROJECT_RECALL_COUNT]
 
 
     if history:
@@ -138,10 +140,14 @@ def build_memory(db, user_id, conversation_id, prompt):
             ('Usuário' if m['role'] == 'user' else 'Assistente') + ': ' + m['content']
             for m in history))
     if sources:
-        context.append('Trechos relacionados de outras conversas DO MESMO PROJETO:\n' +
-                       '\n'.join('[Conversa: ' + row['title'] + ', id=' +
-                                 row['conversation_id'] + ', ' + row['role'] + ']: ' +
-                                 row['content'] for row in sources))
+        excerpts = []
+        for row in sources:
+            label = ('Documento: ' + row['title'] + ', id=' + row['document_id']
+                     if row.get('document_id') else
+                     'Conversa: ' + row['title'] + ', id=' + row['conversation_id'] + ', ' + row['role'])
+            excerpts.append('[' + label + ']: ' + row['content'])
+        context.append('Fontes relacionadas DO MESMO PROJETO (respeitando visibilidade):\n' +
+                       '\n'.join(excerpts))
     if len(context) == 1 and not history and not sources:
         context = [] if project is None else context
     text = '\n\n'.join(context)

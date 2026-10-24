@@ -81,8 +81,9 @@ def _feedback(result):
 async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                             model, system, messages, emit, validate_at_finish=True,
                             require_code_changes=False, require_observation=False,
-                            require_document_read=False, planning_only=False):
+                            require_document_read=False, planning_only=False, workspace_executor=None):
     """Requires an enabled scoped grant, returning only genuinely validated results."""
+    perform_action = workspace_executor.action if workspace_executor is not None else agent_action
     grant = policy(db, user_id)
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
         raise RuntimeError('Acesso ao workspace bloqueado. Configure Computador no chat.')
@@ -257,7 +258,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                                 'result': {'error': str(exc), 'success': False}})
             for check in checks:
                 try:
-                    result = await agent_action(db, user_id, run_id, step_id, check, emit)
+                    result = await perform_action(db, user_id, run_id, step_id, check, emit)
                 except HTTPException as exc:
                     result = {'error': str(exc.detail), 'success': False}
                 results.append({'command': check['command'], 'result': result})
@@ -313,7 +314,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             raise WorkerPaused('Limite de ações por execução atingido; '
                                'progresso salvo. Use Continuar execução.')
         try:
-            result = await agent_action(db, user_id, run_id, step_id, command, emit)
+            result = await perform_action(db, user_id, run_id, step_id, command, emit)
         except HTTPException as exc:
             result = {'error': str(exc.detail), 'success': False}
         if result.get('approved') is False:
