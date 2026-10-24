@@ -37,11 +37,15 @@ def snapshot(db, max_age_seconds=20):
         """SELECT COUNT(*) AS n,COALESCE(SUM(active_jobs),0) AS active_jobs
            FROM worker_liveness WHERE last_seen_at>=?""",
         (threshold,))
+    dedicated=db.one(
+        "SELECT COUNT(*) AS n FROM worker_liveness WHERE last_seen_at>=? AND mode='worker'",
+        (threshold,))
     stale=db.one(
         'SELECT COUNT(*) AS n FROM worker_liveness WHERE last_seen_at<?',
         (threshold,))
     return {
         'active_workers':int(live['n']),
+        'active_dedicated_workers':int(dedicated['n']),
         'active_jobs_reported':int(live['active_jobs']),
         'stale_workers':int(stale['n']),
         'liveness_window_seconds':max_age_seconds,
