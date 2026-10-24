@@ -29,7 +29,7 @@ def new_convo(c):
 
 
 def add_provider(c,name,priority):
-    r=c.post('/api/providers',json={'name':name,'kind':'openai','model':'test-model',
+    r=c.post('/api/providers',json={'name':name,'kind':'openai','model':'test-model-'+name,
     'api_key':'fake-key-no-real-requests','priority':priority,'base_url':'https://example.com/v1',
     'input_price':0.5,'output_price':1},headers=HEADERS)
     assert r.status_code==200,r.text
