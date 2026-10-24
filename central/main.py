@@ -15,6 +15,7 @@ from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
+from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -394,6 +395,51 @@ async def test_provider(pid:str,user=Depends(current_user)):
         failure=ProviderError('internal','Falha interna na validação.',False)
         ENGINE.health.record(pid,p['model'],success=False,error=failure,latency_ms=(time.monotonic()-started)*1000)
         return {'ok':False,'category':'internal','error':'Falha interna na validação.'}
+
+
+
+class ComputerAccessSettingsIn(BaseModel):
+    mode: str = Field(default='blocked', max_length=12)
+    folder: str = Field(default='', max_length=1024)
+
+
+class ComputerAccessActionIn(BaseModel):
+    action: str = Field(max_length=12)
+    relative_path: str = Field(default='', max_length=300)
+
+
+class ComputerAccessDecisionIn(BaseModel):
+    approve: bool
+
+
+@app.get('/api/computer-access')
+def computer_access_settings(request: Request, user=Depends(current_user)):
+    local_only(request)
+    return computer_policy(DB, user['id'])
+
+
+@app.put('/api/computer-access')
+def update_computer_access(data: ComputerAccessSettingsIn, request: Request,
+                           user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    return set_computer_policy(DB, user['id'], data.mode, data.folder)
+
+
+@app.post('/api/computer-access/action')
+def computer_access_action(data: ComputerAccessActionIn, request: Request,
+                           user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    return computer_request_action(DB, user['id'], data.action, data.relative_path)
+
+
+@app.post('/api/computer-access/approvals/{approval_id}/decision')
+def computer_access_decision(approval_id: str, data: ComputerAccessDecisionIn,
+                             request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    return computer_decide_action(DB, user['id'], approval_id, data.approve)
 
 
 class AgentIn(BaseModel):
