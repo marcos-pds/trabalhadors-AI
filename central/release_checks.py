@@ -54,6 +54,8 @@ def report(db=None, probe_docker=False, backup_file=None):
                            'detail': 'Backup inválido, chave incorreta ou integridade comprometida.'})
     else:
         checks.append({'name': 'encrypted_backup_recovery_point', 'status': 'not_checked'})
+    checks.append({'name': 'production_gate_summary', 'status': 'not_checked',
+                   'detail': 'Release remains blocked until external gates are evidenced.'})
     checks.extend({'name': name, 'status': 'requires_external_validation'} for name in (
         'docker_real_workloads', 'ollama_embedding_model', 'postgresql_migration',
         'distributed_queue', 'sso_identity_provider', 'tls_public_endpoint',
