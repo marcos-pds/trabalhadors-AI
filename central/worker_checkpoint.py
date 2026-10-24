@@ -95,3 +95,44 @@ def checkpoint_summary(db, user_id, run_id):
             'updated_at': row['updated_at'],
         })
     return results
+
+
+
+def legacy_step_progress(db, run_id, step_id):
+    """Recover safe, metadata-only progress from runs made before checkpoints.
+
+    Read/write contents are never replayed from the event journal. The resumed
+    worker must inspect current files; previous writes are detected using
+    authoritative successful action events, not model claims.
+    """
+    rows = db.all(
+        "SELECT event,payload FROM events WHERE run_id=? AND "
+        "event IN ('workspace_action_result','worker_message','workspace_validation') "
+        "ORDER BY seq DESC LIMIT 180", (run_id,))
+    changed = set()
+    actions = []
+    last_validation = ''
+    for item in rows:
+        try:
+            data = json.loads(item['payload'])
+        except (TypeError, ValueError):
+            continue
+        if data.get('step_id') != step_id:
+            continue
+        if item['event'] == 'workspace_validation' and not last_validation:
+            last_validation = json.dumps({
+                'passed': data.get('passed') is True,
+                'checks': data.get('results', [])}, ensure_ascii=False)[:1200]
+        if item['event'] == 'workspace_action_result':
+            summary = data.get('summary') or {}
+            action = summary.get('action')
+            path = summary.get('path') or ''
+            success = data.get('success') is True
+            if success and action in ('write', 'replace') and path:
+                changed.add(path)
+            if len(actions) < 10:
+                actions.append((action or 'ferramenta') + ' ' + str(path)[:90] +
+                               (' · sucesso' if success else ' · falhou'))
+    return {'changed_files': sorted(changed),
+            'actions': list(reversed(actions)),
+            'last_validation': last_validation}
