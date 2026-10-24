@@ -7,6 +7,10 @@ import os
 from datetime import datetime, timedelta, timezone
 
 
+class QuotaExceeded(ValueError):
+    """Operational account capacity exhausted (HTTP 429)."""
+
+
 def _limit(name, default):
     try:
         return max(1, min(100000, int(os.getenv(name, str(default)))))
@@ -38,10 +42,10 @@ def require_capacity(db, user_id):
     configured = limits()
     used = usage(db,user_id)
     if used['runs_last_24h'] >= configured['runs_per_24h']:
-        raise ValueError(
+        raise QuotaExceeded(
             'Cota diária de tarefas atingida nesta conta. '
             'Tente novamente após a janela de 24 horas.')
     if used['active_runs'] >= configured['active_runs']:
-        raise ValueError(
+        raise QuotaExceeded(
             'Limite de tarefas simultâneas atingido. Aguarde ou pare uma tarefa.')
     return configured
