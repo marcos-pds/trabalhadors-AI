@@ -258,7 +258,10 @@ def execute(folder, request, run_id=None):
         return {'items': items, 'path': relative}
     if action == 'mkdir':
         directory = target(folder, relative, creating=True)
-        directory.mkdir()
+        with _process_lock:
+            if run_id and run_id in _cancelled_command_runs:
+                raise HTTPException(409, 'Tarefa cancelada; criação de pasta bloqueada.')
+            directory.mkdir()
         return {'path': relative, 'created': True}
     if action == 'read':
         file = target(folder, relative)
@@ -292,7 +295,10 @@ def execute(folder, request, run_id=None):
             with tempfile.NamedTemporaryFile(prefix='.central-write-', dir=file.parent, delete=False) as out:
                 tmp = Path(out.name)
                 out.write(new_data)
-            os.replace(tmp, file)
+            with _process_lock:
+                if run_id and run_id in _cancelled_command_runs:
+                    raise HTTPException(409, 'Tarefa cancelada; alteração de arquivo bloqueada.')
+                os.replace(tmp, file)
         finally:
             if tmp and tmp.exists():
                 tmp.unlink()
