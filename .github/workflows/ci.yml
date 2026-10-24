@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   build-and-test:
@@ -38,6 +39,33 @@ jobs:
       - name: Build React frontend
         run: npm run build
       - name: Run regression and autonomy tests
-        run: python -m pytest -q
+        id: pytests
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q > pytest-output.txt 2>&1
+          rc=$?
+          cat pytest-output.txt
+          if [ "$rc" -ne 0 ]; then
+            summary=$(grep -E '^(FAILED|ERROR) ' pytest-output.txt | head -n 2 | cut -c1-130 | paste -sd ';' -)
+            if [ -z "$summary" ]; then summary='pytest failed: consult workflow logs'; fi
+            printf 'failures=%s\n' "$summary" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
+      - name: Record failed test names on commit
+        if: failure() && steps.pytests.outputs.failures != ''
+        uses: actions/github-script@v7
+        env:
+          TEST_FAILURES: ${{ steps.pytests.outputs.failures }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'pytest/${{ matrix.os }}',
+              description: (process.env.TEST_FAILURES || 'pytest failed').slice(0, 140)
+            })
       - name: Test connection stream parser
         run: node --test frontend/src/catalogConnectionStream.test.mjs
