@@ -282,7 +282,9 @@ class Engine:
                             output = await autonomous_worker(
                                 self.client, self.db, user, run['id'], sid, provider,
                                 self.security.decrypt(provider['api_key_enc']), model,
-                                system, messages, self.emit)
+                                system, messages, self.emit,
+                                validate_at_finish=agent['specialty'] not in (
+                                    'architecture', 'design', 'research', 'coordination'))
                             self.emit(run['id'], 'token', {
                                 'step_id': sid, 'agent': agent['name'], 'text': output})
                         else:
