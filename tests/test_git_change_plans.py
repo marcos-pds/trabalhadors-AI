@@ -1,0 +1,144 @@
+import json
+import httpx
+import pytest
+from fastapi import HTTPException
+from central.database import Database
+from central.security import Security
+from central.git_integrations import connect, reviews
+from central import git_change_plans as plans
+from test_memory import user
+
+
+@pytest.fixture
+def setup(tmp_path):
+    db = Database(':memory:'); user(db, 'alice'); user(db, 'bob')
+    security = Security(db, tmp_path)
+    yield db, security
+    db.close()
+
+
+def remote(service='github', moved=False, timeout=False):
+    requests = []
+    def respond(request):
+        requests.append(request)
+        if request.method == 'GET':
+            branch = request.url.path.rsplit('/', 1)[-1]
+            sha = ('b' if branch == 'main' else 'c' if moved else 'a') * 40
+            return httpx.Response(200, json={'commit': {'sha': sha, 'id': sha}})
+        if timeout:
+            raise httpx.ReadTimeout('response unavailable', request=request)
+        payload = json.loads(request.content)
+        assert payload.get('draft') is True if service == 'github' else payload['title'].startswith('Draft: ')
+        assert '<!-- central-plan:' in payload.get('body', payload.get('description'))
+        assert request.url.path.endswith('/pulls' if service == 'github' else '/merge_requests')
+        return httpx.Response(201, json={'number': 7, 'iid': 7, 'draft': True, 'sha': 'a' * 40,
+                                        'head': {'sha': 'a' * 40}, 'base': {'sha': 'b' * 40},
+                                        'diff_refs': {'start_sha': 'b' * 40}})
+    return requests, httpx.MockTransport(respond)
+
+
+@pytest.mark.parametrize('service', ['github', 'gitlab'])
+def test_planning_only_reads_then_single_approval_creates_one_draft(setup, service):
+    db, security = setup
+    connection = connect(db, security, 'alice', service, 'owner/repo', 'private-token')
+    requests, transport = remote(service)
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', 'Description', transport)
+    assert all(req.method == 'GET' for req in requests)
+    assert 'private-token' not in json.dumps(plan) and 'connection_fingerprint' not in plan
+    result = plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert result['state'] == 'completed' and result['result']['draft']
+    assert result['result']['requires_review'] is False
+    with pytest.raises(HTTPException) as error:
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert error.value.status_code == 409
+    assert len([req for req in requests if req.method == 'POST']) == 1
+
+
+def test_other_user_wrong_confirmation_expiry_and_rotated_token_cannot_publish(setup):
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    requests, transport = remote()
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', transport=transport)
+    with pytest.raises(HTTPException):
+        plans.execute(db, security, 'bob', plan['id'], plan['confirmation'], transport)
+    with pytest.raises(HTTPException):
+        plans.execute(db, security, 'alice', plan['id'], '0' * 64, transport)
+    db.execute("UPDATE git_change_plans SET expires_at='2000-01-01' WHERE id=?", (plan['id'],))
+    with pytest.raises(HTTPException):
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', transport=transport)
+    connect(db, security, 'alice', 'github', 'owner/repo', 'new-token')
+    with pytest.raises(HTTPException):
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert not any(req.method == 'POST' for req in requests)
+
+
+def test_branch_drift_blocks_write_and_requires_new_approval(setup):
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    _, original = remote()
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', transport=original)
+    requests, changed = remote(moved=True)
+    with pytest.raises(HTTPException) as error:
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], changed)
+    assert error.value.status_code == 409
+    assert plans.status(db, 'alice', plan['id'])['state'] == 'failed'
+    assert not any(req.method == 'POST' for req in requests)
+
+
+def test_post_timeout_is_uncertain_and_is_never_automatically_retried(setup):
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    requests, transport = remote(timeout=True)
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', transport=transport)
+    for _ in range(2):
+        with pytest.raises(HTTPException):
+            plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert plans.status(db, 'alice', plan['id'])['state'] == 'uncertain'
+    assert len([req for req in requests if req.method == 'POST']) == 1
+
+
+def test_pagination_never_follows_external_link_or_forwards_credentials(setup):
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    requested = []
+    def respond(request):
+        requested.append(request)
+        assert request.url.host == 'api.github.com'
+        return httpx.Response(200, json=[], headers={'Link': '<https://evil.example>; rel="next"'})
+    result = reviews(db, security, 'alice', connection['id'], transport=httpx.MockTransport(respond), page=2)
+    assert result['next_page'] == 3 and result['previous_page'] == 1
+    assert len(requested) == 1 and requested[0].url.params['page'] == '2'
+    with pytest.raises(HTTPException):
+        reviews(db, security, 'alice', connection['id'], page=101)
+
+
+@pytest.mark.parametrize('branch', ['../main', 'feature?x=y', 'feature@{1}', 'feature.lock', 'feature//a'])
+def test_invalid_branch_is_rejected_before_any_network_request(branch):
+    with pytest.raises(HTTPException):
+        plans.validate_branch(branch)
+
+
+def test_two_approvals_cannot_create_two_remote_drafts(setup, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    requests, transport = remote()
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main', 'Fix', transport=transport)
+    barrier = threading.Barrier(2)
+    original = db.execute
+    def execute(query, args=()):
+        if query.startswith("UPDATE git_change_plans SET state='executing'"):
+            barrier.wait(timeout=3)
+        return original(query, args)
+    monkeypatch.setattr(db, 'execute', execute)
+    def approve(_):
+        try:
+            return plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)['state']
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            return 'conflict'
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(approve, [1, 2])) == ['completed', 'conflict']
+    assert len([request for request in requests if request.method == 'POST']) == 1

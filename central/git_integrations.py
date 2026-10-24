@@ -1,6 +1,6 @@
-"""Read-only GitHub/GitLab reviews with per-user encrypted credentials.
+"""Paginated GitHub/GitLab review reads with per-user encrypted credentials.
 
-No arbitrary URLs, redirects, remote writes, push, merge or deployment actions.
+Draft writes are separate, immutable single-use plans in git_change_plans.
 """
 import re
 from urllib.parse import quote
@@ -36,49 +36,42 @@ def connections(db, user_id):
     return db.all('SELECT id,service,repository,created_at FROM git_connections WHERE user_id=?', (user_id,))
 
 
-def reviews(db, security, user_id, connection_id, number=None, transport=None):
-    row = db.one('SELECT * FROM git_connections WHERE id=? AND user_id=?', (connection_id, user_id))
-    if not row:
-        raise HTTPException(404, 'Conexão não encontrada.')
-    if number is not None and (not isinstance(number, int) or not 1 <= number <= 2147483647):
+def reviews(db, security, user_id, connection_id, number=None, transport=None, page=1):
+    from .git_gateway import Gateway, RemoteRejected, connection
+    row = connection(db, user_id, connection_id)
+    if number is not None and (type(number) is not int or not 1 <= number <= 2147483647):
         raise HTTPException(422, 'Número de revisão inválido.')
-    token = security.decrypt(row['token_enc'])
-    github = row['service'] == 'github'
-    if github:
-        url = 'https://api.github.com/repos/' + row['repository'] + '/pulls'
-        url += '/' + str(number) + '/files?per_page=100' if number else '?state=open&per_page=20'
-        headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json'}
+    if type(page) is not int or not 1 <= page <= 100:
+        raise HTTPException(422, 'Página deve estar entre 1 e 100.')
+    gateway = Gateway(row, security, transport)
+    suffix = '/pulls' if gateway.github else '/merge_requests'
+    if number:
+        suffix += '/' + str(number) + ('/files' if gateway.github else '/diffs') + '?per_page=100'
     else:
-        url = 'https://gitlab.com/api/v4/projects/' + quote(row['repository'], safe='') + '/merge_requests'
-        url += '/' + str(number) + '/diffs?per_page=100' if number else '?state=opened&per_page=20'
-        headers = {'PRIVATE-TOKEN': token}
+        suffix += '?state=' + ('open' if gateway.github else 'opened') + '&per_page=20'
+    suffix += '&page=' + str(page)
     try:
-        with httpx.Client(timeout=10, trust_env=False, follow_redirects=False, transport=transport) as client:
-            # Bounded streaming: don't hold arbitrarily large remote responses.
-            with client.stream('GET', url, headers=headers) as response:
-                if response.status_code != 200:
-                    raise HTTPException(502, 'Serviço Git recusou a consulta; verifique token e permissões.')
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > 2 * 1024 * 1024:
-                        raise HTTPException(413, 'Resposta Git excedeu o limite de 2 MB.')
-                import json
-                data = json.loads(raw)
+        data, headers = gateway.request('GET', suffix)
         if not isinstance(data, list):
             raise ValueError('Expected list')
         if number:
-            items = [{'path': str(item.get('filename' if github else 'new_path', ''))[:500],
+            items = [{'path': str(item.get('filename' if gateway.github else 'new_path', ''))[:500],
                       'status': str(item.get('status', 'modified'))[:30],
-                      'patch': str(item.get('patch' if github else 'diff', ''))[:12000]}
+                      'patch': str(item.get('patch' if gateway.github else 'diff') or '')[:12000],
+                      'truncated': (len(str(item.get('patch' if gateway.github else 'diff') or '')) > 12000
+                                    or bool(item.get('too_large') or item.get('collapsed')))}
                      for item in data[:100]]
         else:
-            items = [{'number': item.get('number' if github else 'iid'),
+            items = [{'number': item.get('number' if gateway.github else 'iid'),
                       'title': str(item.get('title', ''))[:300],
                       'state': str(item.get('state', ''))[:30]}
                      for item in data[:20]]
-        return {'service': row['service'], 'repository': row['repository'],
-                'items': items, 'pagination_notice': 'Primeira página; diffs podem estar truncados.',
+        has_next = ('rel="next"' in headers.get('link', '') if gateway.github else
+                    headers.get('x-next-page') == str(page + 1))
+        return {'service': row['service'], 'repository': row['repository'], 'items': items,
+                'page': page, 'previous_page': page - 1 if page > 1 else None,
+                'next_page': page + 1 if has_next and page < 100 else None,
+                'pagination_notice': 'Página ' + str(page) + '; diffs podem estar truncados pelo serviço.',
                 'read_only': True}
-    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+    except (httpx.HTTPError, RemoteRejected, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(502, 'Não foi possível consultar o serviço Git.') from exc

@@ -5,10 +5,10 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 
 | Fase | Implementado | Ainda necessário |
 | --- | --- | --- |
-| 5 — dependências e prévia | npm/pip isolados; wheels; cache por subprojeto; offline por padrão; proxy HTTPS por domínios, DNS público fixado e rede interna isolada; prévia Vite no Docker sem rede por proxy HTTP em origem separada; limite de quatro prévias, expiração em 30 minutos | Homologar Docker Desktop; validar novo job Docker real no CI; WebSocket/HMR e backends na prévia |
+| 5 — dependências e prévia | npm/pip isolados; wheels; cache por subprojeto; offline por padrão; proxy HTTPS por domínios, DNS público fixado e rede interna isolada; prévia Vite no Docker sem rede por proxy HTTP em origem separada; limite de quatro prévias, expiração em 30 minutos | Homologar Docker Desktop; WebSocket/HMR e backends na prévia (Docker Linux validado no CI) |
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
-| 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Validar refatoração com suíte assíncrona no CI; revisão de contratos de plugins |
-| 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs GitHub/GitLab com tokens pessoais criptografados; UI; CLI operacional | Contas reais; paginação; PR/MR gravável e deploy com aprovação de plano concreto |
+| 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
+| 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
 | 9 — infraestrutura | Migrações SQLite ordenadas com checksum; índices; compatibilidade com bancos legados | PostgreSQL, Redis distribuído e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
@@ -105,8 +105,8 @@ rede interna sem gateway e limpeza dos recursos na falha/cancelamento.
 O CI agora possui um job específico com Docker real para npm online/offline,
 wheels Python online/offline, restrição de rede e prévia HTTP com revogação.
 Esses testes são opt-in localmente e não foram executados neste Windows sem
-Docker instalado. Resultado do job remoto deve ser conferido antes de concluir
-homologação Linux. Validação direcionada desta continuação: 118 testes aprovados.
+Docker instalado. O job Docker real do CI passou com quatro testes em Linux. A suíte integral
+passou com 216 testes em cada sistema (Linux e Windows), no run 40117218111.
 
 
 ### Continuação das Fases 6 e 7
@@ -134,9 +134,36 @@ compatível. O executor passa pelas mesmas verificações de escopo e aprovaçã
 antes de chamar seu runner. Aprovações concorrentes têm apenas uma decisão
 aceita; a segunda recebe conflito. Nenhum desses objetos é aceito do JSON da IA.
 
-O envio dos commits desta continuação ao GitHub foi bloqueado pela revisão
-automática por exigir autorização explícita para o novo conjunto de arquivos.
-Portanto, a nova suíte completa e os testes com Docker real ainda aguardam
-publicação, embora a versão anterior do PR tenha passado em Linux e Windows.
+Os 26 arquivos das Fases 5–7 foram publicados após autorização explícita.
+O run [40117218111](https://github.com/marcos-pds/trabalhadors-AI/actions/runs/40117218111)
+aprovou 216 testes em Linux e Windows, mais os quatro testes com Docker real.
+Ollama com modelo real e avaliação de relevância continuam pendentes.
 
-Validação final desta continuação: 130 testes Python direcionados aprovados, 4 testes Docker opt-in sem execução local, 4 testes JavaScript aprovados e build React aprovado. A nova suíte assíncrona completa aguarda publicação no CI.
+### Continuação da Fase 8
+
+Consultas de revisões e diffs agora recebem páginas de 1 a 100, com botões
+anterior/próxima e indicação de truncamento. A paginação usa apenas números
+validados; links remotos nunca são seguidos com credenciais.
+
+Criar um PR/MR exige preparar e aprovar um plano de rascunho. O plano identifica
+serviço, repositório, origem/destino, commits, título e descrição. Expira em
+15 minutos. A aprovação é de uso único e revalida os commits antes do POST.
+Mudar token/conexão ou branches invalida o plano; duas aprovações simultâneas
+não criam duas revisões. O plano não faz push, merge ou deploy.
+
+Respostas perdidas, malformadas, redirects inesperados ou erros 5xx após o POST
+ficam com resultado incerto, sem repetição automática. A interface orienta
+conferir o serviço antes de preparar outro plano. Uma queda abrupta durante a
+operação pode deixar o plano em executing; também exige conferência manual.
+O ID do plano é incluído como comentário Markdown na descrição para correlação.
+
+O serviço pode receber uma atualização de branch entre a última conferência e
+a criação da revisão. O retorno verifica os commits confirmados pelo provedor;
+se diferirem ou não forem informados, exige revisão no serviço. PR/MR é mutável
+por natureza e nunca é mesclado automaticamente pela Central.
+
+Tokens de leitura continuam suficientes para consultas. Criar rascunhos exige
+permissão adequada no provedor. A implementação foi testada com transportes
+simulados; a homologação em contas reais e o deploy aprovado seguem pendentes.
+
+Validação local da Fase 8: 142 testes Python direcionados aprovados, 4 testes JavaScript aprovados e build React aprovado. Integrações de gravação foram simuladas; nenhuma revisão remota foi criada pelos testes.

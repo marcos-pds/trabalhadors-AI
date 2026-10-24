@@ -1368,9 +1368,9 @@ def delete_git_connection(connection_id: str, user=Depends(current_user)):
 
 
 @app.get('/api/git/connections/{connection_id}/reviews')
-def git_reviews(connection_id: str, number: int | None = None, user=Depends(current_user)):
+def git_reviews(connection_id: str, number: int | None = None, page: int = 1, user=Depends(current_user)):
     from .git_integrations import reviews
-    return reviews(DB, SEC, user['id'], connection_id, number)
+    return reviews(DB, SEC, user['id'], connection_id, number, page=page)
 
 
 class KnowledgeIn(BaseModel):
@@ -1399,4 +1399,37 @@ def delete_knowledge(pid: str, document_id: str, user=Depends(current_user)):
     from .knowledge import delete
     result = delete(DB, user['id'], pid, document_id)
     ops_audit(DB, user['id'], 'knowledge_document_deleted', 'project', pid)
+    return result
+
+
+class GitDraftPlanIn(BaseModel):
+    head: str = Field(min_length=1, max_length=200)
+    base: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(default='', max_length=10000)
+
+
+class GitPlanApprovalIn(BaseModel):
+    confirmation: str = Field(min_length=64, max_length=64)
+
+
+@app.post('/api/git/connections/{connection_id}/draft-plans')
+def create_git_plan(connection_id: str, data: GitDraftPlanIn, user=Depends(current_user)):
+    from .git_change_plans import create
+    result = create(DB, SEC, user['id'], connection_id, data.head, data.base, data.title, data.body)
+    ops_audit(DB, user['id'], 'git_draft_planned', 'git_plan', result['id'])
+    return result
+
+
+@app.get('/api/git/draft-plans/{plan_id}')
+def git_plan_status(plan_id: str, user=Depends(current_user)):
+    from .git_change_plans import status
+    return status(DB, user['id'], plan_id)
+
+
+@app.post('/api/git/draft-plans/{plan_id}/approve')
+def approve_git_plan(plan_id: str, data: GitPlanApprovalIn, user=Depends(current_user)):
+    from .git_change_plans import execute
+    result = execute(DB, SEC, user['id'], plan_id, data.confirmation)
+    ops_audit(DB, user['id'], 'git_draft_created', 'git_plan', plan_id)
     return result
