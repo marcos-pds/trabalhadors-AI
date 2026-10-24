@@ -392,8 +392,9 @@ export default function App() {
     } catch(e) {notify(e.message)}
   }
   async function sendRunFeedback(note) {
-    if (!currentRun) throw new Error('Não há tarefa em execução para receber ajustes.')
-    const result = await api('/runs/' + currentRun + '/feedback', 'POST', {message: note})
+    const targetRun = currentRun || inspectedRun
+    if (!targetRun) throw new Error('Abra uma tarefa ativa ou pausada para enviar ajustes.')
+    const result = await api('/runs/' + targetRun + '/feedback', 'POST', {message: note})
     setMessages(old => [...old,{type:'event',content:'✉ Ajuste solicitado: '+note}])
     setExecutionPanelOpen(true)
     return result
