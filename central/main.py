@@ -17,6 +17,7 @@ from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
+from .task_contract import is_implementation_request
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -611,6 +612,10 @@ class RunIn(BaseModel):
 async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     convo=require_owned(DB,'conversations',data.conversation_id,user['id'])
     if data.mode not in ('auto','manual','team'): raise HTTPException(422,'Modo inválido.')
+    if is_implementation_request(data.prompt) and not data.autonomous:
+        raise HTTPException(
+            409, 'Você solicitou implementar ou corrigir código, mas Autonomia está desligada. '
+                 'Abra Computador, confira a pasta correta e ative Autonomia antes de enviar.')
     if data.autonomous:
         local_only(request)
         grant = computer_policy(DB, user['id'])
@@ -627,14 +632,16 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     if idempotency:
         existing=DB.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?',(user['id'],idempotency))
         if existing: return {'id':existing['id']}
-    now=utcnow()
-    DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
-    DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
-       (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
+    # Validate the worker plan BEFORE persisting the user's request. A rejected
+    # plan must not create a ghost chat message or appear as a completed task.
     try:
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency,autonomous=data.autonomous)
     except ValueError as exc: raise HTTPException(422,str(exc))
+    now=utcnow()
+    DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
+    DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
+       (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
     return {'id':run_id}
 
 
