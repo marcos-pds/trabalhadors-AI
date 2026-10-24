@@ -94,6 +94,20 @@ class JobQueue:
                    lease_owner=NULL,lease_until=NULL,updated_at=?
                    WHERE run_id=?""", (utcnow(),run_id))
 
+    def reconcile(self):
+        """Repair jobs whose business run finished before the worker could ack."""
+        with self.db.lock, self.db.conn:
+            for status, queue_state in (
+                ('completed','completed'), ('failed','failed'),
+                ('paused_limit','paused'), ('cancelled','cancelled')):
+                self.db.conn.execute(
+                    """UPDATE job_queue SET state=?,lease_owner=NULL,
+                       lease_until=NULL,updated_at=?
+                       WHERE run_id IN (SELECT id FROM runs WHERE status=?)
+                         AND state!=?""",
+                    (queue_state,utcnow(),status,queue_state))
+        return True
+
     def details(self, run_id):
         return self.db.one(
             'SELECT run_id,state,attempts,queued_at,updated_at,'
