@@ -25,6 +25,7 @@ from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
 from .auth_limits import ensure_allowed as allow_login, failed as fail_login, succeeded as login_ok
 from .quotas import QuotaExceeded
+from .sandbox_executor import status as sandbox_status
 from .workspace_guard import binding_summary
 from .organizations import (
     ensure_personal, membership, require_org, require_project, visible_projects,
@@ -1047,6 +1048,9 @@ def preview_start(data: PreviewStartIn, request: Request,
                   user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
+    if sandbox_status()['backend'] == 'docker':
+        raise HTTPException(409, 'Prévia npm dev em Docker ainda não está isolada. '
+                                 'Não será executada no host enquanto o modo Docker estiver ativo.')
     return start_preview(DB, user['id'], data.cwd)
 
 
@@ -1201,7 +1205,9 @@ def dashboard(user=Depends(current_user)):
 
 @app.get('/api/operations/overview')
 def operational_overview(user=Depends(current_user)):
-    return ops_overview(DB,user['id'])
+    result = ops_overview(DB,user['id'])
+    result['command_executor'] = sandbox_status()
+    return result
 
 
 @app.get('/api/operations/audit')
@@ -1227,6 +1233,7 @@ def readiness(response: Response):
         return {'status':'ready','database':'ready',
                 'job_executor':ENGINE.job_mode,'durable_job_queue':True,
                 'distributed_queue':False,
+                'command_executor':sandbox_status(),
                 'providers':'not_checked'}
     except Exception:
         response.status_code=503
