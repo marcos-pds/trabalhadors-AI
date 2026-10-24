@@ -454,9 +454,11 @@ class Engine:
         raise RuntimeError('Não foi possível concluir ' + agent['name'] + ': ' + '; '.join(failures)[:220])
 
     def resume_run(self, run_id):
+        from .workspace_tools import reset_run_commands
         run = self.db.one('SELECT status FROM runs WHERE id=?', (run_id,))
         if not run or run['status'] not in ('failed', 'cancelled'):
             raise ValueError('Somente execuções interrompidas podem ser retomadas.')
+        reset_run_commands(run_id)
         # Preserve completed checkpoints and rerun only incomplete nodes.
         self.db.execute("UPDATE steps SET status='queued',error=NULL WHERE run_id=? AND status IN ('failed','running','queued','rejected','awaiting_approval')", (run_id,))
         self.db.execute("UPDATE runs SET status='queued',error=NULL,updated_at=? WHERE id=?", (utcnow(),run_id))
