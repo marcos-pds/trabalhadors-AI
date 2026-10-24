@@ -53,6 +53,13 @@ def test_adjustments_are_persistent_scoped_and_consumed_once(monkeypatch, tmp_pa
                    for e in activity.json()['events'])
         assert consume_run_feedback(DB, user, rid) == ['Troque a cor do botão para azul.']
         assert consume_run_feedback(DB, user, rid) == []
+        DB.execute("UPDATE runs SET status='paused_limit' WHERE id=?", (rid,))
+        paused_feedback = client.post('/api/runs/' + rid + '/feedback',
+                                      headers=headers,
+                                      json={'message': 'Priorize o Hero na continuação.'})
+        assert paused_feedback.status_code == 200, paused_feedback.text
+        assert 'Continuar execução' in paused_feedback.json()['message']
+        assert consume_run_feedback(DB, user, rid) == ['Priorize o Hero na continuação.']
         stopped = client.post('/api/runs/' + rid + '/cancel', headers=headers)
         assert stopped.status_code == 200, stopped.text
         saved_status = DB.one('SELECT status FROM runs WHERE id=?', (rid,))['status']
