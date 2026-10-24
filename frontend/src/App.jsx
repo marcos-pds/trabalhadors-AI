@@ -275,8 +275,32 @@ function Providers({ data, onEdit, onDelete, onTest, onHistory, onConnected }) {
   </div>
 }
 
-function Agents({ data, onEdit }) {
-  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="EQUIPE IA" title="Seus trabalhadores inteligentes" description="Veja a especialidade de cada agente nos cartões ou altere-a em Configurar." action={<Button primary onClick={()=>onEdit(null)}>＋ Criar trabalhador</Button>} /><section className="mb-5 rounded-2xl border border-white/[.09] bg-panel p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-muted">Especialidades disponíveis</p><div className="flex flex-wrap gap-2">{specialtyOptions.map(([,label,description])=><span key={label} title={description} className="rounded-xl border border-lilac/15 bg-lilac/[.05] px-3 py-2 text-[11px] text-copy">{label}</span>)}</div><p className="mt-3 text-[10px] text-muted">Cada cartão abaixo mostra a especialidade atribuída. Use “Configurar” para trocar.</p></section><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{data.agents.map(agent=><article key={agent.id} className="rounded-2xl border border-white/[.09] bg-panel p-5 transition hover:-translate-y-0.5 hover:border-lilac/30"><div className="flex items-center justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[#43455a] to-[#303047] text-2xl text-lilac">{agent.avatar}</span><Status value={agent.enabled?'completed':'failed'}>{agent.enabled?'Disponível':'Desativado'}</Status></div><h2 className="mt-4 text-base font-semibold">{agent.name}</h2><p className="mt-2 min-h-12 text-xs leading-5 text-muted">{agent.instructions.slice(0,116)}{agent.instructions.length>116?'…':''}</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-lg border border-lilac/20 bg-lilac/[.06] px-2 py-1 text-[10px] text-lilac"><span className="mr-1 text-muted">ESPECIALIDADE</span>{specialtyOptions.find(([value])=>value===agent.specialty)?.[1]||agent.specialty}</span><span className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-muted">{data.providers.find(p=>p.id===agent.provider_id)?.name||'Modelo automático'}</span></div><div className="mt-4 flex items-center justify-between border-t border-white/[.08] pt-4"><small className="text-[10px] text-muted">{agent.max_concurrency} tarefa(s)/agente</small><Button small onClick={()=>onEdit(agent)}>Configurar →</Button></div></article>)}</div>{!data.agents.length&&<Empty title="Nenhum trabalhador configurado">Crie um trabalhador para organizar sua equipe.</Empty>}</div>
+function Agents({ data, onEdit, onRestored }) {
+  const [repairing, setRepairing] = useState(false)
+  const [repairResult, setRepairResult] = useState('')
+  const mismatches = data.agents.filter(agent =>
+    agent.suggested_specialty && agent.suggested_specialty !== agent.specialty)
+  async function repairRoles() {
+    if (!mismatches.length || repairing) return
+    if (!window.confirm('Restaurar as especialidades originais dos trabalhadores padrão? Modelos, instruções e personalizações serão preservados.')) return
+    setRepairing(true)
+    try {
+      const result = await api('/agents/restore-default-specialties', 'POST', {})
+      await onRestored()
+      setRepairResult(result.repaired_count + ' especialidade(s) restaurada(s).')
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent('app-toast', { detail: error.message }))
+    } finally { setRepairing(false) }
+  }
+  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="EQUIPE IA" title="Seus trabalhadores inteligentes" description="Veja a especialidade de cada agente nos cartões ou altere-a em Configurar." action={<Button primary onClick={()=>onEdit(null)}>＋ Criar trabalhador</Button>} />
+    {mismatches.length > 0 && <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/[.06] p-4">
+      <div><strong className="text-xs text-amber-200">Especialidades inconsistentes detectadas</strong>
+        <p className="mt-1 text-xs leading-5 text-muted">{mismatches.map(a => a.name).join(', ')}: os nomes e instruções originais indicam outras especialidades. A seleção automática já considera os papéis corretos.</p>
+      </div>
+      <Button small disabled={repairing} onClick={repairRoles}>{repairing ? 'Corrigindo...' : 'Restaurar especialidades padrão'}</Button>
+    </section>}
+    {repairResult && <p role="status" className="mb-4 text-xs text-emerald-300">{repairResult}</p>}
+    <section className="mb-5 rounded-2xl border border-white/[.09] bg-panel p-4"><p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-muted">Especialidades disponíveis</p><div className="flex flex-wrap gap-2">{specialtyOptions.map(([,label,description])=><span key={label} title={description} className="rounded-xl border border-lilac/15 bg-lilac/[.05] px-3 py-2 text-[11px] text-copy">{label}</span>)}</div><p className="mt-3 text-[10px] text-muted">Cada cartão abaixo mostra a especialidade atribuída. Use “Configurar” para trocar.</p></section><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{data.agents.map(agent=><article key={agent.id} className="rounded-2xl border border-white/[.09] bg-panel p-5 transition hover:-translate-y-0.5 hover:border-lilac/30"><div className="flex items-center justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[#43455a] to-[#303047] text-2xl text-lilac">{agent.avatar}</span><Status value={agent.enabled?'completed':'failed'}>{agent.enabled?'Disponível':'Desativado'}</Status></div><h2 className="mt-4 text-base font-semibold">{agent.name}</h2><p className="mt-2 min-h-12 text-xs leading-5 text-muted">{agent.instructions.slice(0,116)}{agent.instructions.length>116?'…':''}</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-lg border border-lilac/20 bg-lilac/[.06] px-2 py-1 text-[10px] text-lilac"><span className="mr-1 text-muted">ESPECIALIDADE</span>{specialtyOptions.find(([value])=>value===agent.specialty)?.[1]||agent.specialty}</span><span className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-muted">{data.providers.find(p=>p.id===agent.provider_id)?.name||'Modelo automático'}</span></div><div className="mt-4 flex items-center justify-between border-t border-white/[.08] pt-4"><small className="text-[10px] text-muted">{agent.max_concurrency} tarefa(s)/agente</small><Button small onClick={()=>onEdit(agent)}>Configurar →</Button></div></article>)}</div>{!data.agents.length&&<Empty title="Nenhum trabalhador configurado">Crie um trabalhador para organizar sua equipe.</Empty>}</div>
 }
 
 function Projects({ data, onCreate, onChat, onMemory }) {
@@ -404,7 +428,7 @@ export default function App() {
         {page === 'chat' && <ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction}/>}
         {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}
-        {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})}/>}
+        {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})} onRestored={loadAll}/>}
         {page === 'projects' && <Projects data={data} onCreate={() => setModal({kind:'project'})} onChat={id => {newChat();setSelectedProject(id)}} onMemory={id => openMemoryPanel(id)}/>}
         {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={useWorkflow}/>}
         {page === 'history' && <History data={data} onOpen={openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
