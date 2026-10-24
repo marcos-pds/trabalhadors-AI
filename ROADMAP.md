@@ -9,7 +9,7 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
 | 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
 | 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
-| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL isolado; notificações Redis opt-in e consumidor experimental com polling obrigatório | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, worker de execução real em Redis/PostgreSQL, fencing de efeitos externos e tracing multihost NÃO implementados |
+| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; PostgreSQL/Redis experimentais e consumidor com polling; staging opt-in de metadados SQLite → PostgreSQL com snapshot consistente, integridade, verificação e descarte | Aplicação ainda opera em SQLite; migração integral dos dados, PostgreSQL integrado, worker de execução real em Redis/PostgreSQL, fencing de efeitos externos e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
 | 12 — homologação | CLI de verificações; ferramenta de carga do endpoint de saúde; testes de restauração e acesso | Carga real, pentest independente, recuperação fora da máquina, deploy/escalabilidade |
@@ -344,3 +344,57 @@ Essa classe é um componente de laboratório, **não** é usada pelo worker norm
 da Central. Migrar o motor real exige persistência e transações de negócio no
 PostgreSQL, fencing nas ferramentas, implantação segura de Redis e testes de
 recuperação antes da ativação.
+
+
+### Fase 9 — Ensaio de migração SQLite → PostgreSQL (metadados)
+
+O novo módulo `central/postgres_staging.py` **não altera a base SQLite
+ativa nem muda o backend da API**. Ele lê um snapshot SQLite consistente
+usando uma conexão somente leitura, faz `integrity_check`,
+`foreign_key_check`, valida a propriedade dos relacionamentos e grava
+em PostgreSQL **apenas** uma lista fixa de colunas de:
+`users`, `projects`, `conversations` e `runs`. Não copia e-mails,
+hashes de senhas, tokens, chaves, mensagens, prompts, resultados, notas de
+memória ou caminhos locais. Nomes de projetos, descrições e títulos de
+conversas são metadados privados e continuam exigindo criptografia em
+trânsito, controle de acesso e retenção adequada no banco de destino.
+
+A cópia de metadados fica exclusivamente no schema `central_staging`.
+A migração possui versão e checksum; a gravação das quatro tabelas é
+atômica, com chaves estrangeiras para impedir associações entre
+proprietários. Ao terminar, calcula contagens e digest SHA-256 das colunas
+permitidas e verifica que PostgreSQL reproduziu o snapshot. Uma cópia
+preexistente impede outra gravação acidental. Limite padrão: 25.000 registros
+somando as quatro tabelas; volumes maiores exigem plano separado.
+
+Com Python 3.11 e `requirements-postgres.txt` instalado, avalie **apenas**
+uma base de teste ou cópia offline; a verificação inicial não requer
+PostgreSQL:
+
+    python -m central.postgres_staging inspect C:\Copia-Central\central.sqlite3
+
+Para ensaio de staging, configure `CENTRAL_PG_MIGRATION_DSN` **fora do
+repositório**, apontando para um PostgreSQL descartável, com conta restrita.
+Atenção: os testes automatizados limpam dados do schema de staging. Nunca
+rode o conjunto de testes contra banco de produção.
+
+    python -m central.postgres_staging stage C:\Copia-Central\central.sqlite3 --confirm-staging
+    python -m central.postgres_staging verify <batch_id> --source C:\Copia-Central\central.sqlite3
+    python -m central.postgres_staging discard <batch_id> --confirm-discard
+
+Os comandos exibem somente IDs aleatórios, contagens e resultados de
+verificação. `verify` detecta cópia modificada e, quando recebe `--source`,
+também detecta se a fonte SQLite mudou depois do ensaio. `discard`
+exclui unicamente a cópia de staging daquele batch, em transação com
+`ON DELETE CASCADE`; **não restaura, modifica ou substitui o SQLite**.
+
+A prova no CI usa PostgreSQL 16 descartável e SQLite temporário para
+testar consistência, integridade, isolamento de tenants, ausência de
+campos secretos, recusa de sobrescrita e rollback transacional.
+
+**A migração integral não está pronta.** A transição real ainda requer
+compatibilidade das demais tabelas e políticas de autorização,
+dados criptografados, backup independente, CDC ou parada coordenada,
+fencing nas ferramentas, rollback de operação e homologação externa.
+Nenhum `CENTRAL_DATABASE_URL` ou alternância automática de backend foi
+habilitado.
