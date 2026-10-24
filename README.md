@@ -441,3 +441,51 @@ e dependências executam código real com os privilégios de sua conta;
 não são uma sandbox de segurança. Use apenas projetos confiáveis.
 
 Verificação: npm run build; python -m pytest -q.
+
+## Checkpoints duráveis e continuação de tarefas longas
+
+Uma etapa autônoma pode precisar de mais de 12 interações com o provedor de IA.
+A Central salva um checkpoint SQLite a cada rodada, inclusive após leitura,
+edição, comando de ferramenta e resultado de validação. A fase Arquiteto
+tem limite menor (até 6 rodadas). Próximo ao limite, os trabalhadores
+recebem um aviso para terminar uma parte verificável.
+
+**Pausado por limite** NÃO significa falha no projeto: os arquivos já
+modificados permanecem no workspace, a etapa incompleta vira
+`paused_limit` e as etapas seguintes (como Revisor IA) ficam na fila.
+No Chat -> Atividade / Prévia, veja a última ação, os arquivos alterados,
+o resultado do último teste e **Continuar execução**. O mesmo botão aparece
+em Histórico. A retomada é explicitamente autorizada pela pessoa e
+recupera o histórico recente de ferramentas; não reexecuta o Arquiteto
+nem repete propositalmente a última alteração já confirmada.
+
+**Falhou por erro** indica problemas reais de ferramenta, permissão,
+provedor ou validação que não puderam ser corrigidos na execução.
+É possível tentar retomá-la quando ainda há trabalhador pendente.
+**Concluído** só é permitido para uma implementação com alteração real
+e build/teste aprovado depois da última alteração. Logs de execução e
+checkpoints permanecem disponíveis por tarefa.
+
+Os checkpoints são restritos à conta e à pasta originalmente autorizada.
+O histórico textual persistido é limitado em tamanho e fica no SQLite
+local (faça backup de `data/`); nenhuma chave de provedor entra nele
+deliberadamente. A aplicação limita continuações do mesmo trabalhador a
+8 retomadas explícitas, mantendo as 12 rodadas por segmento. Cada
+continuação usa tokens da API conectada e pode gerar cobrança.
+
+Em tarefas criadas antes dessa versão, é possível retomar a tarefa antiga:
+a Central reconstrói um resumo limitado das ferramentas registradas e
+verifica o estado atual dos arquivos antes de editar. Como esse histórico
+não inclui todo o contexto do modelo, a recuperação é menos detalhada.
+
+**Monorepos e landing pages:** verificações finais localizam o
+`package.json` aplicável aos arquivos modificados (inclusive dentro de
+subpastas) e executam o build/teste real do aplicativo. Uma compilação
+Python vazia não pode validar falsamente um projeto JavaScript.
+
+Esses checkpoints não criam snapshots Git nem backups automáticos de
+arquivos; um comando que tenha executado antes da gravação do checkpoint
+pode precisar ser conferido manualmente após falha elétrica. Use Git
+ou backup do workspace antes de permitir alterações amplas.
+
+Verificação: `npm run build` e `python -m pytest -q`.
