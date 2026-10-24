@@ -316,3 +316,40 @@ fixar notas e buscar conversas anteriores. Na área de **Projetos**, o botão
 conversas em grupos e a busca permite abrir registros mais antigos. Mudanças de
 projeto em uma conversa existente são explícitas e bloqueadas durante execuções
 ativas, para evitar misturar contextos acidentalmente.
+
+
+## Permissões locais pelo botão "Computador" do chat
+
+O compositor do chat exibe **Computador**, próximo de **Anexar**. O painel gerencia
+permissões **para uma pasta local explicitamente escolhida pela pessoa** e
+nunca concede acesso geral ao Windows, a unidades inteiras ou à pasta de
+usuário inteira. As permissões são configuradas por conta na instalação
+local (não são exclusivas de uma única conversa).
+
+- **Bloqueado** (padrão): nenhuma operação em arquivo local é permitida.
+  Selecionar este modo também remove a pasta autorizada e invalida solicitações.
+- **Solicitar permissão**: cada operação suportada gera uma solicitação com
+  identificação da pasta/arquivo e requer aprovação explícita na interface,
+  válida para uma única operação e com expiração após 5 minutos.
+- **Acesso total à pasta autorizada**: permite operações suportadas pelo backend
+  **somente dentro daquela pasta** sem perguntar novamente. É necessário
+  indicar o caminho completo manualmente e confirmar a alteração.
+
+**Limites atuais:** a única capacidade de filesystem conectada a essa tela
+é listar diretórios e ler arquivos de texto/código UTF-8 com até 64 KB.
+Arquivos ocultos sensíveis (por exemplo, .env e secret.key), links
+simbólicos/junções e caminhos fora da pasta são bloqueados. O usuário pode
+anexar um arquivo visualizado ao chat, mas nada é enviado a provedores
+externos até essa ação e o envio de uma mensagem.
+
+**Não é uma ferramenta de controle remoto nem uma capacidade automática dos
+agentes:** o motor de IA ainda não tem ferramentas nativas para executar
+comandos, modificar/apagar arquivos, clicar na tela ou controlar janelas.
+Os modos representam a política de autorização e já são impostos nas
+operações de visualização disponíveis. Para dar autonomia de edição aos
+agentes, será necessário integrar ferramentas específicas que verifiquem a
+política no servidor antes de cada operação.
+
+O backend restringe essas rotas a acesso local, login e proteção contra
+requisições indevidas. O painel guarda somente a pasta autorizada, o modo
+e os registros temporários de aprovação; não copia a pasta para o banco.
