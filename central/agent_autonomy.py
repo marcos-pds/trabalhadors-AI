@@ -312,13 +312,3 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     checkpoint('paused_limit')
     raise WorkerPaused('Trabalhador pausado por limite de ciclos. '
                        'Arquivos e contexto preservados. Clique em Continuar execução.')
-    if require_code_changes and not changed_files:
-        raise RuntimeError('Nenhum arquivo foi realmente criado ou editado; '
-                           'a tarefa de implementação não pode ser declarada concluída.')
-    if require_observation and not observed_actions.intersection(
-            {'read'} if require_document_read else {'read', 'list'}):
-        raise RuntimeError('Nenhum documento foi realmente consultado; '
-                           'o resumo de arquivos locais não pode ser declarado concluído.')
-    raise RuntimeError('O trabalhador atingiu o limite de ' + str(max_rounds) +
-                       ' ciclos sem concluir. Alterações realizadas foram mantidas; '
-                       'consulte o histórico para decidir como continuar.')
