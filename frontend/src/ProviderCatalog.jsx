@@ -100,6 +100,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
     finally { setBusy('') }
   }
   const visible = (models || []).filter(m => `${m.id} ${m.name}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))
+  const accessLabel = m => m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? (service.kind === 'sambanova' ? 'Free Tier documentado' : 'Gratuito elegível') : m.billing === 'local' ? 'Local' : 'Preço não confirmado'
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onKeyDown={e => { if (e.key === 'Escape' && !busy) onClose() }}>
     <section role="dialog" aria-modal="true" aria-labelledby="connect-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#1f1f1f] p-6 shadow-2xl">
       <div className="flex items-center justify-between gap-4"><h2 id="connect-title" className="text-xl font-semibold">Conectar {service.name}</h2><button className={button} onClick={onClose} disabled={!!busy} aria-label="Fechar">×</button></div>
@@ -121,16 +122,16 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
           <summary className="cursor-pointer text-xs text-muted">Ver catálogo e escolher um modelo específico (grátis ou pago)</summary>
           <button type="button" className={button + ' mt-4'} disabled={!allowed || !!busy} onClick={discover}>Buscar catálogo oficial</button>
           {models && <>
-            <p className="mt-3 text-xs text-muted">{models.length} modelos de chat · {models.filter(m => m.eligible && !m.connected).length} para conexão automática gratuita. Todos os modelos de chat não cadastrados podem ser escolhidos manualmente. Acesso e cobrança dependem da sua conta.</p>
+            <p className="mt-3 text-xs text-muted">{models.length} modelos de chat · {models.filter(m => m.eligible && !m.connected).length} candidatos à conexão automática de acordo com a documentação, sem garantia de saldo. Todos os modelos de chat não cadastrados podem ser escolhidos manualmente. Acesso e cobrança dependem da sua conta.</p>
             <input aria-label="Buscar modelo" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar nome ou identificador..." className={control + ' mt-3 w-full'} />
             <label htmlFor="catalog-model" className="mt-3 block text-xs text-muted">Modelo para conexão</label>
             <select id="catalog-model" value={model} onChange={e => { setModel(e.target.value); setConfirmCharges(false) }} disabled={!!busy} className={control + ' mt-2 w-full'}>
               <option value="">Automático · testar até 3 opções ainda não cadastradas</option>
-              {models.map(m => <option key={m.id} value={m.id} disabled={m.connected}>{m.name} · {m.id} · {m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? 'Gratuito elegível' : m.billing === 'local' ? 'Local' : 'Preço não confirmado'}{m.connected ? ' · Já cadastrado' : ''}</option>)}
+              {models.map(m => <option key={m.id} value={m.id} disabled={m.connected}>{m.name} · {m.id} · {accessLabel(m)}{m.connected ? ' · Já cadastrado' : ''}</option>)}
             </select>
             {chosen && <p className="mt-3 text-xs text-lilac">Selecionado: {chosen.name} · {chosen.access}</p>}
             {chosen && !['free', 'local'].includes(chosen.billing) && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-amber-200"><input type="checkbox" checked={confirmCharges} onChange={e => setConfirmCharges(e.target.checked)} className="mt-1 accent-violet-400"/> Entendo que este modelo pode gerar cobranças e que minha conta precisa ter acesso autorizado.</label>}
-            <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="ml-2 text-[10px] text-lilac">{m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? 'Gratuito elegível' : m.billing === 'local' ? 'Local' : 'Preço a confirmar'}</span><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
+            <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="ml-2 text-[10px] text-lilac">{accessLabel(m)}</span><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
           </>}
         </details>
         {error && <div role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/5 p-3">
