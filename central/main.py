@@ -103,6 +103,7 @@ def login(data: Credentials, request: Request, response: Response):
 @app.post('/api/logout')
 def logout(request:Request,response:Response,user=Depends(current_user)):
     import hashlib
+    stop_preview(user['id'])
     token=request.cookies.get('central_session','')
     DB.execute('DELETE FROM sessions WHERE token_hash=?',(hashlib.sha256(token.encode()).hexdigest(),))
     response.delete_cookie('central_session')
@@ -435,7 +436,10 @@ def update_computer_access(data: ComputerAccessSettingsIn, request: Request,
                            user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
-    return set_computer_policy(DB, user['id'], data.mode, data.folder)
+    result = set_computer_policy(DB, user['id'], data.mode, data.folder)
+    # A preview process must not outlive a revoked or changed workspace grant.
+    stop_preview(user['id'])
+    return result
 
 
 @app.post('/api/computer-access/action')
