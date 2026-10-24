@@ -271,6 +271,7 @@ class Engine:
             self.dispatch_task = asyncio.create_task(self.poll_jobs())
 
     def resume_pending(self):
+        self.queue.reconcile()
         # Seed queue rows for databases created before durable scheduling.
         # Never reset a live worker's step while its lease is valid.
         for row in self.db.all("SELECT id FROM runs WHERE status IN ('queued','running','awaiting_approval')"):
