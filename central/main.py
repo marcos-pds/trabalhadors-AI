@@ -476,7 +476,13 @@ class ConversationIn(BaseModel):
 
 @app.get('/api/conversations')
 def conversations(user=Depends(current_user)):
-    return DB.all('SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC LIMIT 100',(user['id'],))
+    # The sidebar is bounded; older conversations remain saved and searchable.
+    return DB.all('SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC LIMIT 300',(user['id'],))
+
+
+@app.get('/api/conversations/{cid}')
+def conversation_detail(cid: str, user=Depends(current_user)):
+    return require_owned(DB, 'conversations', cid, user['id'])
 
 
 @app.post('/api/conversations')
