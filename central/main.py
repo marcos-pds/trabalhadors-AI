@@ -743,6 +743,7 @@ def get_run(rid:str,user=Depends(current_user)):
     run=require_owned(DB,'runs',rid,user['id'])
     run['steps']=DB.all('SELECT * FROM steps WHERE run_id=?',(rid,))
     run['checkpoints']=checkpoint_summary(DB,user['id'],rid)
+    run['job']=ENGINE.queue.details(rid)
     proof=delivery_evidence(DB,rid) if run['status']=='completed' else None
     run['delivery_verified']=bool(proof and proof['changed_files'] and proof['tests_passed']
                                    and proof['validation_after_last_change'])
