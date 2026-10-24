@@ -285,3 +285,34 @@ No modo automático, modelos já cadastrados são ignorados antes dos testes;
 o catálogo mostra **Já cadastrado** e desabilita essas opções. A gravação faz
 nova verificação dentro da transação para impedir duplicatas simultâneas.
 Cadastros antigos não são removidos automaticamente.
+
+
+## Memória de conversas e projetos
+
+A Central salva o histórico completo das conversas no SQLite; os limites abaixo
+controlam apenas o contexto encaminhado aos modelos a cada execução (não excluem mensagens).
+
+- **Conversa avulsa:** até 6 mensagens recentes, num total de até 2.600 caracteres.
+  Nunca recupera automaticamente conteúdo de outra conversa.
+- **Conversa vinculada a projeto:** até 32 mensagens recentes, num total de até
+  15.000 caracteres, mais a descrição do projeto, notas fixadas (até 8.000
+  caracteres) e até 6 trechos relevantes (máximo de 5.000 caracteres) de
+  outras conversas **do mesmo projeto e da mesma conta**.
+- **Outro projeto ou conversas avulsas:** não entram no contexto automático de
+  um projeto. A busca opcional "Todas as minhas conversas" serve apenas para
+  consulta manual na interface e nunca mistura resultados nos prompts.
+- **Busca de lembranças:** local e lexical (palavras relevantes normalizadas),
+  não usa embeddings nem sumarização por outro modelo. Pode não recuperar
+  conversas semanticamente similares com vocabulário totalmente diferente.
+- **Notas do projeto:** fixadas e editadas pela pessoa. São mais confiáveis
+  para registrar decisões, requisitos, tecnologias e pendências importantes.
+  O conteúdo histórico é apresentado aos agentes como referência e não como instrução.
+- **Custo:** contextos maiores consomem mais tokens da API conectada. O custo
+  não é um plano de assinatura, e o cálculo local continua estimativo.
+
+No **Chat IA**, abra **Memória** para vincular/desvincular a conversa a um projeto,
+fixar notas e buscar conversas anteriores. Na área de **Projetos**, o botão
+**Memória** gerencia as notas daquele projeto. A barra lateral organiza as
+conversas em grupos e a busca permite abrir registros mais antigos. Mudanças de
+projeto em uma conversa existente são explícitas e bloqueadas durante execuções
+ativas, para evitar misturar contextos acidentalmente.
