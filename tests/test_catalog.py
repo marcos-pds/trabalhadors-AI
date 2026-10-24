@@ -335,3 +335,46 @@ def test_manual_model_must_be_in_discovered_catalog(connection_app, monkeypatch)
             request(), {'id': 'user'}))
     assert 'não encontrado' in error.value.detail
     assert db.all('SELECT * FROM providers') == []
+
+
+def test_sambanova_auto_uses_only_documented_free_tier_model_ids():
+    models = normalize_models('sambanova', [
+        {'id': 'MiniMax-M3.1-Flash'},
+        {'id': 'DeepSeek-V3.1'},
+        {'id': 'gpt-oss-120b'},
+        {'id': 'gemma-4-31B-it'},
+        {'id': 'another-unknown-model'},
+    ])
+    assert {m['id'] for m in candidates(models, 'sambanova')} == {
+        'DeepSeek-V3.1', 'gpt-oss-120b', 'gemma-4-31B-it'
+    }
+    assert next(m for m in models if m['id'] == 'MiniMax-M3.1-Flash')['billing'] == 'unknown'
+    assert [m['id'] for m in candidates(models, 'sambanova', 'MiniMax-M3.1-Flash')] == [
+        'MiniMax-M3.1-Flash'
+    ]
+
+
+def test_sambanova_credit_error_does_not_try_other_models_or_save(connection_app, monkeypatch):
+    main, db = connection_app
+    async def discover(kind, key):
+        return normalize_models(kind, [
+            {'id': 'DeepSeek-V3.1'}, {'id': 'gpt-oss-120b'}
+        ])
+    attempted = []
+    async def stream(provider, key, model, *args):
+        attempted.append(model)
+        raise ProviderError('credits', 'Créditos insuficientes.', False, 402)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(main, 'discover_models', discover)
+    monkeypatch.setattr(main.ENGINE.client, 'stream', stream)
+    with pytest.raises(HTTPException) as error:
+        complete(main.connect_provider(
+            main.QuickProviderIn(kind='sambanova', api_key='secret-key'),
+            request(), {'id': 'user'}))
+    assert error.value.status_code == 422
+    assert 'SambaNova' in error.value.detail
+    assert 'HTTP 402' in error.value.detail
+    assert 'secret-key' not in error.value.detail
+    assert attempted == ['DeepSeek-V3.1']
+    assert db.all('SELECT * FROM providers') == []
