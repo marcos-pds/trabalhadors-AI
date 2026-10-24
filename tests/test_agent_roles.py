@@ -73,12 +73,19 @@ def test_engine_builds_real_team_even_when_stored_specialties_are_all_wrong():
 
 
 def test_explicit_repair_preserves_custom_settings_and_requires_authorized_user():
-    # Import test utilities lazily: they initialize a throwaway test data directory.
-    from tests.test_app import app, register, HEADERS
-    from central.main import DB
+    # Use the app's test database; each account is generated independently.
+    import uuid
+    from central.main import app, DB
+    headers = {'X-Central-Request': '1'}
+    def create_user(client):
+        response = client.post('/api/register', headers=headers,
+            json={'email': uuid.uuid4().hex + '@example.com',
+                  'password': 'strongpasswordxyz'})
+        assert response.status_code == 200, response.text
+        return response.json()
     with TestClient(app) as client, TestClient(app) as outsider:
-        first_user = register(client)
-        register(outsider)
+        first_user = create_user(client)
+        create_user(outsider)
         rows = client.get('/api/agents').json()
         assert len(rows) == len(TEMPLATES)
         coder = next(a for a in rows if a['name'] == 'Programador IA')
@@ -92,9 +99,9 @@ def test_explicit_repair_preserves_custom_settings_and_requires_authorized_user(
         assert 'Frontend IA' in detected
         assert 'Programador IA' not in detected
         assert next(a for a in before if a['id'] == frontend['id'])['suggested_specialty'] == 'frontend'
-        assert outsider.post('/api/agents/restore-default-specialties', headers=HEADERS).json()['repaired_count'] == 0
+        assert outsider.post('/api/agents/restore-default-specialties', headers=headers).json()['repaired_count'] == 0
         assert client.post('/api/agents/restore-default-specialties').status_code == 403
-        repair = client.post('/api/agents/restore-default-specialties', headers=HEADERS)
+        repair = client.post('/api/agents/restore-default-specialties', headers=headers)
         assert repair.status_code == 200, repair.text
         assert repair.json()['repaired_count'] == len(TEMPLATES) - 2
         restored = client.get('/api/agents').json()
@@ -102,4 +109,4 @@ def test_explicit_repair_preserves_custom_settings_and_requires_authorized_user(
         assert next(a for a in restored if a['name']=='Revisor IA')['specialty'] == 'review'
         assert next(a for a in restored if a['name']=='Programador IA')['specialty'] == 'architecture'
         assert next(a for a in restored if a['name']=='Programador IA')['instructions'] == 'Instruções personalizadas mantidas'
-        assert client.post('/api/agents/restore-default-specialties', headers=HEADERS).json()['repaired_count'] == 0
+        assert client.post('/api/agents/restore-default-specialties', headers=headers).json()['repaired_count'] == 0
