@@ -18,6 +18,18 @@ def report(db=None, probe_docker=False, backup_file=None):
                        'status': 'passed' if row and list(row.values()) == ['ok'] else 'failed'})
         checks.append({'name': 'schema_migrations', 'status': 'passed',
                        'versions': [r['version'] for r in db.all('SELECT version FROM schema_migrations')]})
+    if db is not None:
+        from .worker_liveness import snapshot as worker_snapshot
+        workers = worker_snapshot(db)
+        job_mode = os.environ.get('CENTRAL_JOB_MODE', 'embedded')
+        checks.append({
+            'name':'dedicated_worker_liveness',
+            'status': ('passed' if workers['active_workers'] > 0 else 'failed')
+                      if job_mode == 'api' else 'not_checked',
+            'active_workers':workers['active_workers'],
+            'job_mode':job_mode,
+            'scope':workers['scope'],
+        })
     docker = shutil.which('docker.exe' if os.name == 'nt' else 'docker')
     status = 'not_checked'
     if probe_docker:
