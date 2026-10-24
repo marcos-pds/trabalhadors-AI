@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { providerCategory, providerFilters } from './providerFilters'
+import { connectCatalogStream } from './catalogConnectionStream'
 
 const control = 'min-h-11 rounded-xl border border-white/10 bg-[#191919] px-3 text-sm text-copy outline-none focus:border-lilac/60 disabled:opacity-50'
 const button = 'min-h-10 rounded-xl border border-white/10 px-4 text-xs font-semibold transition hover:bg-white/10 disabled:opacity-50 disabled:cursor-wait'
@@ -75,6 +76,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
   const [confirmCharges, setConfirmCharges] = useState(false)
   const [search, setSearch] = useState('')
   const [result, setResult] = useState(null)
+  const [attempts, setAttempts] = useState([])
   const input = useRef(null)
   useEffect(() => { input.current?.focus() }, [])
   const payload = () => ({ kind: service.kind, api_key: key, provider_id: saved?.id, model })
@@ -82,22 +84,50 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
   const hasNewModels = !models || models.some(m => m.eligible && !m.connected)
   const chosen = models?.find(m => m.id === model)
   const manualAllowed = !!chosen && !chosen.connected && (chosen.billing === 'free' || chosen.billing === 'local' || confirmCharges)
-  const changeKey = value => { setKey(value); setModels(null); setModel(''); setConfirmCharges(false); setError('') }
+  const changeKey = value => { setKey(value); setModels(null); setModel(''); setConfirmCharges(false); setAttempts([]); setError('') }
   async function discover() {
-    setBusy('Buscando modelos disponíveis...'); setError('')
+    setBusy('Buscando modelos disponíveis...'); setError(''); setAttempts([])
     try { const data = await api('/provider-catalog/models', 'POST', payload()); setModels(data.models); setModel(''); setConfirmCharges(false) }
     catch (e) { setError(e.message) }
     finally { setBusy('') }
   }
   async function connect(e) {
-    e.preventDefault();
-    if (model && !manualAllowed) return; setBusy('Consultando catálogo e testando resposta...'); setError('')
+    e.preventDefault()
+    if (model && !manualAllowed) return
+    setBusy('Testando modelos e registrando cada tentativa...')
+    setError('')
+    setAttempts([])
     try {
-      const data = await api('/provider-catalog/connect', 'POST', payload())
-      setKey(''); setModels(data.models); setResult(data)
+      const data = await connectCatalogStream(payload(), event => {
+        if (event.type === 'testing') {
+          setBusy('Testando ' + event.model_name + '...')
+          setAttempts(history => [...history, {
+            id: event.model_id, name: event.model_name,
+            status: 'testing', position: event.position, total: event.total,
+          }])
+        } else if (event.type === 'failed') {
+          setAttempts(history => history.map(entry => entry.id === event.model_id ? {
+            ...entry, status: 'failed', reason: event.message,
+            category: event.category, httpStatus: event.http_status,
+            nextModel: event.next_model,
+          } : entry))
+          setBusy(event.next_model ? 'Próximo modelo: ' + event.next_model.name : 'Finalizando tentativa...')
+        } else if (event.type === 'passed') {
+          setAttempts(history => history.map(entry => entry.id === event.model_id ? {
+            ...entry, status: 'passed', latency: event.latency_ms,
+          } : entry))
+          setBusy('Modelo validado. Salvando conexão...')
+        }
+      })
+      setKey('')
+      setModels(data.models)
+      setResult(data)
       try { await onConnected() } catch { setError('Conexão salva. Atualize a página para recarregar a lista.') }
-    } catch (e) { setError(e.message) }
-    finally { setBusy('') }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy('')
+    }
   }
   const visible = (models || []).filter(m => `${m.id} ${m.name}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))
   const accessLabel = m => m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? (service.kind === 'sambanova' ? 'Free Tier documentado' : 'Gratuito elegível') : m.billing === 'local' ? 'Local' : 'Preço não confirmado'
@@ -110,6 +140,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
           <p className="mt-2 text-sm">{result.provider.name}</p><p className="mt-1 break-all font-mono text-xs text-muted">{result.model.id}</p>
           <p className="mt-3 text-xs text-muted">{result.models.length} modelos de chat encontrados. A chave foi armazenada com criptografia.</p>
         </div>
+        <AttemptHistory attempts={attempts} />
         <button className={primary + ' mt-5 w-full'} onClick={onClose}>Concluir e conectar o próximo</button>
       </> : <form onSubmit={connect}>
         <p className="mt-4 text-xs leading-5 text-muted">{service.note}</p>
@@ -134,6 +165,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
             <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="ml-2 text-[10px] text-lilac">{accessLabel(m)}</span><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
           </>}
         </details>
+        <AttemptHistory attempts={attempts} />
         {error && <div role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/5 p-3">
           <p className="text-sm text-rose-300">{error}</p>
           {service.kind === 'sambanova' && /crédit|saldo|cobrança/i.test(error) &&
@@ -147,4 +179,40 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
       </form>}
     </section>
   </div>
+}
+
+
+function AttemptHistory({ attempts }) {
+  if (!attempts.length) return null
+  return <section aria-label="Histórico de tentativas de conexão" className="mt-5 rounded-2xl border border-white/10 bg-black/15 p-4">
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h3 className="text-sm font-semibold">Histórico de tentativas</h3>
+      <span className="text-[11px] text-muted">{attempts.length} modelo(s) testado(s)</span>
+    </div>
+    <ol className="space-y-3">
+      {attempts.map(attempt => <li key={attempt.id} className="rounded-xl border border-white/10 bg-white/[.03] p-3 text-xs">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <strong className="break-words text-copy">{attempt.position}. {attempt.name}</strong>
+            <span className="mt-1 block break-all font-mono text-[10px] text-muted">{attempt.id}</span>
+          </div>
+          <span className={'shrink-0 rounded-lg px-2 py-1 text-[10px] ' +
+            (attempt.status === 'passed' ? 'bg-emerald-400/10 text-emerald-300' :
+              attempt.status === 'failed' ? 'bg-rose-400/10 text-rose-300' :
+                'bg-lilac/15 text-lilac')}>
+            {attempt.status === 'passed' ? 'Aprovado' : attempt.status === 'failed' ? 'Falhou' : 'Testando...'}
+          </span>
+        </div>
+        {attempt.status === 'failed' && <>
+          <p className="mt-2 break-words leading-5 text-rose-200">{attempt.reason}</p>
+          <p className="mt-1 text-[10px] text-muted">Categoria: {attempt.category || 'desconhecida'}{attempt.httpStatus ? ' · HTTP ' + attempt.httpStatus : ''}</p>
+          <p className="mt-2 text-[11px] text-muted">
+            {attempt.nextModel ? <>Próximo modelo: <strong className="text-lilac">{attempt.nextModel.name}</strong></> :
+              'Sem nova tentativa automática após este erro.'}
+          </p>
+        </>}
+        {attempt.status === 'passed' && <p className="mt-2 text-emerald-200">Resposta validada{attempt.latency != null ? ' · ' + attempt.latency + ' ms' : ''}.</p>}
+      </li>)}
+    </ol>
+  </section>
 }
