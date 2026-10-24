@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS computer_access_approvals (
 );
 CREATE INDEX IF NOT EXISTS idx_computer_access_approvals_user
  ON computer_access_approvals(user_id,status,created_at);
+CREATE TABLE IF NOT EXISTS workspace_action_approvals (
+ id TEXT PRIMARY KEY,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ step_id TEXT NOT NULL REFERENCES steps(id) ON DELETE CASCADE,
+ folder TEXT NOT NULL, request_json TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'pending',
+ expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_action_status
+ ON workspace_action_approvals(run_id,user_id,status);
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition TEXT NOT NULL,
@@ -122,6 +133,9 @@ class Database:
                 self.conn.execute("ALTER TABLE projects ADD COLUMN memory_notes TEXT NOT NULL DEFAULT ''")
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(user_id,project_id,updated_at)')
             self.conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id,conversation_id)')
+            run_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(runs)')}
+            if 'autonomous' not in run_cols:
+                self.conn.execute("ALTER TABLE runs ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
 
     def execute(self, query, args=()):
         with self.lock:
