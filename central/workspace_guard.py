@@ -87,6 +87,11 @@ def enforce_run_scope(db, user_id, run_id, *, write=False):
 
 
 def enforce_host_command_policy(db,user_id,run_id):
+    # An isolated Docker command does not require opt-in for uncontained host
+    # scripts, but still passes RBAC and individual team approval.
+    from .sandbox_executor import backend
+    if backend() == 'docker':
+        return
     org_id = current_organization(db,run_id)
     if not org_id:
         return
