@@ -41,6 +41,9 @@ def policy(db, user_id):
 def allowed_folder(folder):
     if not isinstance(folder, str) or not folder.strip() or len(folder) > 1024:
         raise HTTPException(422, 'Informe o caminho completo de uma pasta.')
+    # Only local folders: network shares/UNC paths are outside this permission boundary.
+    if folder.strip().startswith(('\\\\', '//')):
+        raise HTTPException(422, 'Selecione uma pasta do disco local, não um compartilhamento de rede.')
     path = Path(folder.strip()).expanduser()
     if not path.is_absolute() or not path.is_dir():
         raise HTTPException(422, 'A pasta precisa existir neste computador e ter um caminho absoluto.')
@@ -146,6 +149,8 @@ def request_action(db, user_id, action, relative):
         raise HTTPException(403, 'Acesso ao computador bloqueado. Altere as permissões primeiro.')
     if not config['folder'] or not Path(config['folder']).is_dir():
         raise HTTPException(409, 'A pasta autorizada não está mais disponível.')
+    if allowed_folder(config['folder']) != config['folder']:
+        raise HTTPException(409, 'A pasta autorizada mudou. Configure as permissões novamente.')
     # Check the path before issuing approval, and check it again upon approval.
     scoped_path(config['folder'], relative, allow_root=action == 'list')
     if config['mode'] == 'full':
@@ -173,6 +178,8 @@ def decide_action(db, user_id, request_id, approve):
             datetime.fromisoformat(entry['expires_at']) <= datetime.now(timezone.utc)):
         db.execute("UPDATE computer_access_approvals SET status='expired' WHERE id=?", (request_id,))
         raise HTTPException(409, 'Solicitação expirada ou permissões alteradas.')
+    if allowed_folder(entry['folder']) != entry['folder']:
+        raise HTTPException(409, 'A pasta autorizada mudou. Configure as permissões novamente.')
     db.execute('UPDATE computer_access_approvals SET status=? WHERE id=? AND status=?',
                ('approved' if approve else 'denied', request_id, 'pending'))
     if not approve:
