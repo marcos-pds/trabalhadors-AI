@@ -187,74 +187,134 @@ async def provider_models(data: QuickProviderIn, request: Request, user=Depends(
         raise HTTPException(422, str(exc))
 
 
-@app.post('/api/provider-catalog/connect')
-async def connect_provider(data: QuickProviderIn, request: Request, user=Depends(current_user)):
+def connection_error_message(kind, key, exc):
+    """Return a bounded diagnostic without leaking the API key to the browser."""
+    if kind == 'sambanova' and exc.category == 'credits':
+        status = f' (HTTP {exc.http_status})' if exc.http_status else ''
+        return ('A SambaNova recusou o teste por falta de créditos/saldo ou '
+                'cobrança não habilitada' + status + '. '
+                'O catálogo não garante cota gratuita para sua conta. '
+                'Confira o plano e os créditos no painel da SambaNova.')
+    message = str(exc).replace(key, '[chave omitida]') if key else str(exc)
+    return message.replace('\r', ' ').replace('\n', ' ')[:360]
+
+
+async def connection_events(data, user, key):
+    """One connection engine shared by JSON and real-time SSE endpoints.
+
+    Events are transient and belong only to this authenticated request.
+    No keys, prompt text, or upstream headers are included in the trace.
+    """
+    models = catalog_with_connections(await discover_models(data.kind, key), user['id'], data.kind)
+    options = candidates([m for m in models if not m['connected']], data.kind, data.model)
+    if data.model and not any(m['id'] == data.model for m in models):
+        raise ProviderError('catalog', 'Modelo não encontrado no catálogo de chat do provedor.')
+    if not options and any(m['eligible'] and m['connected'] for m in models) and not data.model:
+        raise HTTPException(409, 'Todos os modelos elegíveis deste provedor já estão cadastrados. Use Editar para gerenciar suas conexões.')
+    if not options:
+        raise ProviderError('catalog', 'Nenhum modelo de chat elegível encontrado. Confira o plano e o catálogo; nenhum modelo pago será selecionado como alternativa.')
+
+    provider = {'kind': data.kind, 'base_url': DEFAULT_ENDPOINTS[data.kind]}
+    attempts = options[:3]
+    failures = []
+    for index, model in enumerate(attempts):
+        yield {'type': 'testing', 'model_id': model['id'], 'model_name': model['name'],
+               'position': index + 1, 'total': len(attempts)}
+        started = time.monotonic()
+        stream = ENGINE.client.stream(provider, key, model['id'], 'Seja conciso.',
+                                      [{'role': 'user', 'content': 'Responda somente OK.'}])
+        failed = None
+        try:
+            answer = ''
+            async for part in stream:
+                answer += part
+                if answer.strip():
+                    break
+            if not answer.strip():
+                raise ProviderError('response', 'O modelo não retornou texto.', True)
+        except ProviderError as exc:
+            failed = exc
+        finally:
+            await stream.aclose()
+
+        latency = (time.monotonic() - started) * 1000
+        if failed:
+            stop = failed.category in ('authentication', 'credits')
+            next_model = attempts[index + 1] if not stop and index + 1 < len(attempts) else None
+            yield {'type': 'failed', 'model_id': model['id'], 'model_name': model['name'],
+                   'category': failed.category, 'http_status': failed.http_status,
+                   'message': connection_error_message(data.kind, key, failed),
+                   'next_model': {'id': next_model['id'], 'name': next_model['name']} if next_model else None}
+            if stop:
+                raise failed
+            failures.append(failed.category)
+            continue
+
+        yield {'type': 'passed', 'model_id': model['id'], 'model_name': model['name'],
+               'latency_ms': round(latency)}
+        break
+    else:
+        raise ProviderError('validation', 'Os modelos encontrados não responderam ao teste (' +
+                            ', '.join(failures) + '). Nenhuma conexão foi alterada. Tente novamente.')
+
+    # Recheck inside the write transaction to cover simultaneous connections.
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        reject_duplicate_model(user['id'], data.kind, model['id'])
+        pid = uid()
+        DB.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,created_at) VALUES(?,?,?,?,?,?,?)',
+                   (pid, user['id'], BY_KIND[data.kind]['name'], data.kind, provider['base_url'], model['id'], utcnow()))
+        if data.kind == 'ollama':
+            DB.execute("UPDATE providers SET enabled=0 WHERE user_id=? AND kind='ollama' AND id<>?", (user['id'], pid))
+        # Free-tier quota is not necessarily a zero token price.
+        price = 0 if model.get('billing') in ('free', 'local') and data.kind in ('ollama', 'openrouter', 'zai') else None
+        DB.execute('UPDATE providers SET api_key_enc=?,enabled=1,priority=?,last_error=NULL,input_price=?,output_price=? WHERE id=?',
+                   (SEC.encrypt(key), 10 if data.kind == 'ollama' else 5, price, price, pid))
+        ENGINE.health.record(pid, model['id'], success=True, latency_ms=latency)
+    yield {'type': 'connected', 'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
+           'model': model, 'models': catalog_with_connections(models, user['id'], data.kind),
+           'message': 'Conexão testada e salva.'}
+
+
+def prepare_connection(data, request, user):
     require_csrf(request)
     key = quick_key(data, user)
     if data.model:
         reject_duplicate_model(user['id'], data.kind, data.model)
+    return key
+
+
+@app.post('/api/provider-catalog/connect')
+async def connect_provider(data: QuickProviderIn, request: Request, user=Depends(current_user)):
+    """Backward-compatible JSON API, also used by existing tests and clients."""
+    key = prepare_connection(data, request, user)
     try:
-        models = catalog_with_connections(await discover_models(data.kind, key), user['id'], data.kind)
-        options = candidates([m for m in models if not m['connected']], data.kind, data.model)
-        if data.model and not any(m['id'] == data.model for m in models):
-            raise ProviderError('catalog', 'Modelo não encontrado no catálogo de chat do provedor.')
-        if not options and any(m['eligible'] and m['connected'] for m in models) and not data.model:
-            raise HTTPException(409, 'Todos os modelos elegíveis deste provedor já estão cadastrados. Use Editar para gerenciar suas conexões.')
-        if not options:
-            raise ProviderError('catalog', 'Nenhum modelo de chat elegível encontrado. Confira o plano e o catálogo; nenhum modelo pago será selecionado como alternativa.')
-        provider = {'kind': data.kind, 'base_url': DEFAULT_ENDPOINTS[data.kind]}
-        failures = []
-        for model in options[:3]:
-            started = time.monotonic()
-            stream = ENGINE.client.stream(provider, key, model['id'], 'Seja conciso.',
-                                          [{'role': 'user', 'content': 'Responda somente OK.'}])
-            try:
-                answer = ''
-                async for part in stream:
-                    answer += part
-                    if answer.strip():
-                        break
-                if not answer.strip():
-                    raise ProviderError('response', 'O modelo não retornou texto.', True)
-                latency = (time.monotonic() - started) * 1000
-                break
-            except ProviderError as exc:
-                if exc.category in ('authentication', 'credits'):
-                    raise
-                failures.append(exc.category)
-            finally:
-                await stream.aclose()
-        else:
-            raise ProviderError('validation', 'Os modelos encontrados não responderam ao teste (' + ', '.join(failures) + '). Nenhuma conexão foi alterada. Tente novamente.')
-        # Recheck inside the write transaction to cover simultaneous connections.
-        with DB.lock, DB.conn:
-            DB.conn.execute('BEGIN IMMEDIATE')
-            reject_duplicate_model(user['id'], data.kind, model['id'])
-            pid = uid()
-            DB.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,created_at) VALUES(?,?,?,?,?,?,?)',
-                       (pid, user['id'], BY_KIND[data.kind]['name'], data.kind, provider['base_url'], model['id'], utcnow()))
-            if data.kind == 'ollama':
-                DB.execute("UPDATE providers SET enabled=0 WHERE user_id=? AND kind='ollama' AND id<>?", (user['id'], pid))
-            # Only model-level zero prices are stored as zero. Account quotas are not token prices.
-            price = 0 if model.get('billing') in ('free', 'local') and data.kind in ('ollama', 'openrouter', 'zai') else None
-            DB.execute('UPDATE providers SET api_key_enc=?,enabled=1,priority=?,last_error=NULL,input_price=?,output_price=? WHERE id=?',
-                       (SEC.encrypt(key), 10 if data.kind == 'ollama' else 5, price, price, pid))
-            ENGINE.health.record(pid, model['id'], success=True, latency_ms=latency)
-        return {'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
-                'model': model, 'models': catalog_with_connections(models, user['id'], data.kind), 'message': 'Conexão testada e salva.'}
+        async for event in connection_events(data, user, key):
+            if event['type'] == 'connected':
+                return {k: v for k, v in event.items() if k != 'type'}
     except ProviderError as exc:
-        # A listed model is not evidence of billing entitlement. Stop on credit errors
-        # rather than probing other models with the same account.
-        if data.kind == 'sambanova' and exc.category == 'credits':
-            status = f' (HTTP {exc.http_status})' if exc.http_status else ''
-            message = ('A SambaNova recusou o teste por falta de créditos/saldo ou '
-                       'cobrança não habilitada' + status + '. '
-                       'O catálogo não garante cota gratuita para sua conta. '
-                       'Confira o plano e os créditos no painel da SambaNova.')
-        else:
-            # Never echo a key even if an upstream service includes it in an error.
-            message = str(exc).replace(key, '[chave omitida]') if key else str(exc)
-        raise HTTPException(422, message)
+        raise HTTPException(422, connection_error_message(data.kind, key, exc))
+
+
+@app.post('/api/provider-catalog/connect/stream')
+async def connect_provider_stream(data: QuickProviderIn, request: Request, user=Depends(current_user)):
+    """Authenticated SSE-over-POST stream for the catalogue's live attempt history."""
+    key = prepare_connection(data, request, user)
+
+    async def events():
+        try:
+            async for event in connection_events(data, user, key):
+                yield 'data: ' + json.dumps(event, ensure_ascii=False) + '\n\n'
+        except ProviderError as exc:
+            message = connection_error_message(data.kind, key, exc)
+            yield 'data: ' + json.dumps({'type': 'error', 'message': message,
+                                           'category': exc.category}, ensure_ascii=False) + '\n\n'
+        except HTTPException as exc:
+            yield 'data: ' + json.dumps({'type': 'error', 'message': str(exc.detail)[:360]},
+                                           ensure_ascii=False) + '\n\n'
+
+    return StreamingResponse(events(), media_type='text/event-stream',
+                             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @app.post('/api/providers')
