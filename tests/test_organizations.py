@@ -162,3 +162,36 @@ def test_upgrade_old_projects_without_copying_or_sharing_other_user_data(tmp_pat
     try:
         assert len(again.all('SELECT id FROM organizations WHERE created_by=?',('old',)))==1
     finally:again.close()
+
+
+
+def test_removing_member_blocks_completed_run_and_history(monkeypatch):
+    monkeypatch.setattr(ENGINE,'schedule',lambda _:None)
+    with TestClient(app) as owner, TestClient(app) as member:
+        admin,ae=register(owner)
+        user,email=register(member)
+        org=org_create(owner,'Org revogacao')
+        pid=project_create(owner,'Codigo interno',org)
+        assert owner.put(f'/api/organizations/{org}/members',headers=HEADERS,
+                         json={'email':email,'role':'operator'}).status_code==200
+        cid=member.post('/api/conversations',headers=HEADERS,
+                        json={'project_id':pid}).json()['id']
+        started=member.post('/api/runs',headers=HEADERS,json={
+            'conversation_id':cid,'prompt':'Explique padrões de projeto',
+            'mode':'auto'})
+        assert started.status_code==200,started.text
+        rid=started.json()['id']
+        # Simulate terminal task; active jobs forbid revocation.
+        assert owner.delete(f'/api/organizations/{org}/members/{user["id"]}',
+                            headers=HEADERS).status_code==409
+        DB.execute("UPDATE runs SET status='failed' WHERE id=?",(rid,))
+        removed=owner.delete(f'/api/organizations/{org}/members/{user["id"]}',
+                             headers=HEADERS)
+        assert removed.status_code==200,removed.text
+        assert member.get('/api/runs/'+rid).status_code==404
+        assert rid not in {r['id'] for r in member.get('/api/runs').json()}
+        assert member.get(f'/api/runs/{rid}/activity').status_code==404
+        assert member.get(f'/api/conversations/{cid}/context-policy').status_code==404
+        search=member.get('/api/conversations/search',params={'q':'padrões','scope':'all'})
+        assert search.status_code==200 and search.json()==[]
+        assert member.post(f'/api/runs/{rid}/resume',headers=HEADERS).status_code==404
