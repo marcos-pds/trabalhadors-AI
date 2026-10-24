@@ -24,6 +24,12 @@ from .database import uid, utcnow
 
 _process_lock = threading.RLock()
 _active_commands = {}
+_cancelled_command_runs = set()
+
+
+def reset_run_commands(run_id):
+    with _process_lock:
+        _cancelled_command_runs.discard(run_id)
 
 
 def _kill_tree(process):
@@ -45,6 +51,7 @@ def _kill_tree(process):
 def stop_run_commands(run_id):
     """Stop only a process launched by this run; never affect unrelated Windows apps."""
     with _process_lock:
+        _cancelled_command_runs.add(run_id)
         process = _active_commands.get(run_id)
     if process is not None:
         _kill_tree(process)
@@ -298,14 +305,19 @@ def execute(folder, request, run_id=None):
                 'PYTHONUNBUFFERED': '1', 'npm_config_update_notifier': 'false'})
     proc = None
     try:
-        proc = subprocess.Popen(
-            spec['argv'], cwd=str(spec['root']), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            errors='replace', shell=False,
-            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
-            start_new_session=(os.name != 'nt'))
-        if run_id:
-            with _process_lock:
+        # Serialize spawning with cancellation: after stop is requested, a
+        # worker thread may not start a late new subprocess.
+        with _process_lock:
+            if run_id and run_id in _cancelled_command_runs:
+                return {'command': spec['label'], 'exit_code': None,
+                        'output': 'Execução cancelada pelo usuário.', 'success': False}
+            proc = subprocess.Popen(
+                spec['argv'], cwd=str(spec['root']), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                errors='replace', shell=False,
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
+                start_new_session=(os.name != 'nt'))
+            if run_id:
                 _active_commands[run_id] = proc
         try:
             stdout, stderr = proc.communicate(timeout=COMMAND_TIMEOUT)
