@@ -378,3 +378,78 @@ def test_sambanova_credit_error_does_not_try_other_models_or_save(connection_app
     assert 'secret-key' not in error.value.detail
     assert attempted == ['DeepSeek-V3.1']
     assert db.all('SELECT * FROM providers') == []
+
+
+
+def test_live_history_records_failed_model_and_next_candidate(connection_app, monkeypatch):
+    main, db = connection_app
+
+    async def discover(kind, key):
+        return normalize_models(kind, [{'id': 'model-a'}, {'id': 'model-b'}])
+
+    async def stream(provider, key, model, *args):
+        if model == 'model-a':
+            raise ProviderError('request', 'HTTP 400: secret-key invalid generation parameters', False, 400)
+        yield 'OK'
+
+    monkeypatch.setattr(main, 'discover_models', discover)
+    monkeypatch.setattr(main.ENGINE.client, 'stream', stream)
+
+    async def run():
+        return [event async for event in main.connection_events(
+            main.QuickProviderIn(kind='groq', api_key='secret-key'), {'id': 'user'}, 'secret-key')]
+
+    events = complete(run())
+    assert [e['type'] for e in events] == [
+        'testing', 'failed', 'testing', 'passed', 'connected'
+    ]
+    first_failure = events[1]
+    assert first_failure['model_id'] == 'model-a'
+    assert first_failure['category'] == 'request'
+    assert first_failure['http_status'] == 400
+    assert first_failure['next_model'] == {'id': 'model-b', 'name': 'model-b'}
+    assert 'HTTP 400' in first_failure['message']
+    assert 'secret-key' not in json.dumps(events)
+    assert events[3]['model_id'] == 'model-b'
+    assert events[4]['model']['id'] == 'model-b'
+    assert len(db.all('SELECT * FROM providers')) == 1
+
+
+def test_streaming_endpoint_reports_failures_and_stops_after_credit_error(connection_app, monkeypatch):
+    main, db = connection_app
+    async def discover(kind, key):
+        return normalize_models(kind, [{'id': 'model-a'}, {'id': 'model-b'}])
+
+    attempted = []
+    async def stream(provider, key, model, *args):
+        attempted.append(model)
+        raise ProviderError('credits', 'insufficient_quota secret-key', False, 402)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(main, 'discover_models', discover)
+    monkeypatch.setattr(main.ENGINE.client, 'stream', stream)
+    response = complete(main.connect_provider_stream(
+        main.QuickProviderIn(kind='groq', api_key='secret-key'),
+        request(), {'id': 'user'}))
+
+    async def read_events():
+        chunks = [chunk async for chunk in response.body_iterator]
+        return [json.loads(chunk.removeprefix('data: ').strip()) for chunk in chunks]
+
+    events = complete(read_events())
+    assert response.media_type == 'text/event-stream'
+    assert [e['type'] for e in events] == ['testing', 'failed', 'error']
+    assert events[1]['next_model'] is None
+    assert events[1]['http_status'] == 402
+    assert 'secret-key' not in json.dumps(events)
+    assert attempted == ['model-a']
+    assert db.all('SELECT * FROM providers') == []
+
+
+def test_streaming_connection_requires_csrf(connection_app):
+    main, _ = connection_app
+    bad_request = Request({'type': 'http', 'method': 'POST', 'headers': []})
+    with pytest.raises(HTTPException) as error:
+        complete(main.connect_provider_stream(
+            main.QuickProviderIn(kind='groq', api_key='key'), bad_request, {'id': 'user'}))
+    assert error.value.status_code == 403
