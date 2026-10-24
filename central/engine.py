@@ -110,7 +110,7 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
         # 'Equipe' must never be silently reduced to the single keyword match.
         selected = filtered[:2]
         for specialty in ('architecture', 'code', 'review'):
-            agent = next((a for a in candidates if a['specialty'] == specialty), None)
+            agent = next((a for a in candidates if effective_specialty(a) == specialty), None)
             if agent and agent not in selected:
                 selected.append(agent)
             if len(selected) >= 3:
@@ -118,7 +118,7 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
         if len(selected) < 2:
             selected.extend(a for a in candidates if a not in selected)
         return selected[:3]
-    return filtered[:3] if filtered else [next((a for a in candidates if a['specialty']=='coordination'), candidates[0])]
+    return filtered[:3] if filtered else [next((a for a in candidates if effective_specialty(a)=='coordination'), candidates[0])]
 
 
 def create_plan(agents, sequential=False):
