@@ -786,3 +786,13 @@ Diagnostico:
 
 Nenhuma das fases futuras deve ser apresentada como concluida antes
 de implementacao, testes e validacao em ambiente real.
+
+### Executor por tarefa: modo imutavel
+
+Novas tarefas autonomas persistem o modo host/docker no vinculo de
+workspace. O worker valida o mesmo modo antes de executar ferramentas.
+Se a API criar uma tarefa em Docker mas o worker estiver em host, a
+execucao e bloqueada, sem fallback. Para continuar, reinicie API e
+worker com CENTRAL_COMMAND_RUNNER igual ao modo autorizado na tarefa.
+Para uma tarefa ja vinculada, alternar o modo exige uma nova tarefa;
+isso evita enfraquecer acidentalmente as politicas de uma execucao.
