@@ -211,3 +211,26 @@ def test_no_project_with_real_build_or_python_files_cannot_fake_validation(tmp_p
         json.dumps({'scripts': {'dev': 'vite'}}), encoding='utf-8')
     with pytest.raises(RuntimeError, match='Nenhum build'):
         validation_commands(str(root))
+
+
+
+def test_legacy_failed_run_recovers_real_previous_edits_without_replaying_them(workspace):
+    db, folder = workspace
+    set_policy(db, 'user', 'full', str(folder))
+    # Simulate a pre-checkpoint task that wrote a file and failed on 12 cycles.
+    (folder / 'hello.py').write_bytes(b"print('already done')\n")
+    db.execute("UPDATE steps SET attempts=2,status='running' WHERE id='step'")
+    db.event('run', 'workspace_action_result', {
+        'step_id': 'step', 'success': True,
+        'summary': {'action': 'replace', 'path': 'hello.py'}})
+    db.event('run', 'worker_message', {
+        'step_id': 'step', 'action': 'read', 'path': 'hello.py'})
+    model = FakeModel([
+        json.dumps({'action': 'finish', 'message': 'O código anterior foi preservado.'})])
+    result = asyncio.run(autonomous_worker(
+        model, db, 'user', 'run', 'step', {'kind': 'openai'},
+        'key', 'mock', 'Implementador', [{'role':'user','content':'Conclua o trabalho'}],
+        lambda *args: None, require_code_changes=True))
+    assert 'Validações executadas' in result
+    assert (folder / 'hello.py').read_bytes() == b"print('already done')\n"
+    assert 'Progresso recuperado' in model.seen[0][1][1]['content']
