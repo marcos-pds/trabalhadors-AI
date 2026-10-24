@@ -489,3 +489,42 @@ pode precisar ser conferido manualmente após falha elétrica. Use Git
 ou backup do workspace antes de permitir alterações amplas.
 
 Verificação: `npm run build` e `python -m pytest -q`.
+
+## Fase operacional 1 — observabilidade e governança local
+
+Sem alterar o modo local de execução, a Central agora possui:
+
+- Logs estruturados JSON no stdout do processo (`central/observability.py`),
+  com `X-Request-ID` em cada resposta HTTP. Identificadores válidos
+  enviados pelo cliente são preservados para correlação; entradas
+  inválidas recebem um ID novo. Os logs usam apenas metadados permitidos
+  (rota normalizada, duração, status, IDs de run/step e categoria).
+  Não registram corpo HTTP, prompt, senhas, cookies, API keys ou conteúdo de arquivos.
+- Evento `task_classified` por run, com política explícita versionada
+  (`central/run_policy.py`). Tipos: `code`, `inspection` e `conversation`;
+  critérios de entrega real permanecem em `central/task_contract.py`.
+- Métricas operacionais por usuário em `GET /api/operations/overview`:
+  contagem de estados, execuções/falhas/pausas em 24h, latência média das
+  tentativas por provedor, taxa de sucesso, categorias de falhas, custo
+  **estimado** e duração terminal média. Alertas indicam falhas frequentes,
+  pausas por limite e provedores com erros consecutivos.
+- Auditoria persistente (`ops_audit`) com registro de criação/retomada/
+  cancelamento de tarefas, alterações nas permissões locais e decisões
+  humanas sobre ações e etapas. `GET /api/operations/audit?limit=50`
+  mostra apenas as ações do usuário autenticado. Sem conteúdo de comandos.
+- Checagem de prontidão `GET /api/health/ready`, que confirma a conexão
+  com o banco. Ela informa expressamente que a fila ainda roda
+  **dentro do processo** e não testa a disponibilidade dos provedores.
+- Painel **Monitoramento** com os novos indicadores e auditoria, sem
+  substituir o histórico detalhado e a saúde dos provedores existentes.
+
+Notas operacionais: as métricas dependem dos eventos/medições reais
+armazenados no SQLite. O custo estimado não é uma fatura nem limite
+de cobrança garantido. O monitoramento não constitui uma solução
+de multi-tenancy organizacional, observabilidade distribuída ou
+tracing OpenTelemetry. Em produção hospedada ainda serão necessários
+fila de jobs persistente com leases, isolamento de workspace por
+usuário/organização, autenticação/roles, migrações controladas, TLS
+via proxy reverso, rate limiting e armazenamento seguro de segredos.
+
+Verificação: `npm run build` e `python -m pytest -q`.
