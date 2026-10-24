@@ -69,6 +69,139 @@ def status(db, user_id, plan_id):
             'result': json.loads(row['result_json']) if row['result_json'] else None}
 
 
+
+
+def history(db, user_id, connection_id, limit=15):
+    """Recover plans after a page refresh without ever exposing approval hashes."""
+    connection(db, user_id, connection_id)
+    if type(limit) is not int or not 1 <= limit <= 30:
+        raise HTTPException(422, 'Limite de histórico inválido.')
+    rows = db.all(
+        'SELECT id,state,plan_json,result_json,expires_at,created_at '
+        'FROM git_change_plans WHERE user_id=? AND connection_id=? '
+        'ORDER BY created_at DESC,id DESC LIMIT ?',
+        (user_id, connection_id, limit))
+    result = []
+    for row in rows:
+        plan = json.loads(row['plan_json'])
+        result.append({
+            'id': row['id'],
+            'head': plan['head'], 'base': plan['base'], 'title': plan['title'],
+            'service': plan['service'], 'repository': plan['repository'],
+            'state': ('expired' if row['state'] == 'pending'
+                      and row['expires_at'] <= utcnow() else row['state']),
+            'expires_at': row['expires_at'], 'created_at': row['created_at'],
+            'result': json.loads(row['result_json']) if row['result_json'] else None,
+        })
+    return result
+
+
+def reconcile(db, security, user_id, plan_id, transport=None):
+    """Read-only remote recovery; never POST, retry or infer absence from a partial scan.
+
+    A marker alone does not prove that the PR matches the planned branches or
+    commits. Verified unique matches are recorded, but any discrepancy is
+    flagged for human review. A partial scan or duplicate remains uncertain.
+    """
+    row = db.one('SELECT * FROM git_change_plans WHERE id=? AND user_id=?',
+                 (plan_id, user_id))
+    if not row:
+        raise HTTPException(404, 'Plano não encontrado.')
+    if row['state'] == 'completed':
+        return {**status(db, user_id, plan_id), 'reconciliation': 'already_confirmed'}
+    if row['state'] not in ('uncertain', 'executing'):
+        raise HTTPException(409, 'Somente planos com resultado incerto podem ser reconciliados.')
+    plan = json.loads(row['plan_json'])
+    current = connection(db, user_id, row['connection_id'])
+    if current['service'] != plan['service'] or current['repository'] != plan['repository']:
+        raise HTTPException(409, 'A conexão não corresponde ao repositório original.')
+    gateway = Gateway(current, security, transport)
+    suffix = '/pulls' if gateway.github else '/merge_requests'
+    needle = '<!-- central-plan:' + plan_id + ' -->'
+    matches = []
+    scanned_pages = 0
+    complete = False
+    try:
+        for page in range(1, 6):
+            # Fixed API origin, bounded pages. Never follow the returned Link.
+            query = ('?state=all&per_page=100&page=' + str(page))
+            data, headers = gateway.request('GET', suffix + query)
+            if not isinstance(data, list):
+                raise ValueError('Expected Git review list')
+            scanned_pages += 1
+            for item in data[:100]:
+                if not isinstance(item, dict):
+                    continue
+                description = item.get('body' if gateway.github else 'description')
+                if not isinstance(description, str) or needle not in description:
+                    continue
+                number = item.get('number' if gateway.github else 'iid')
+                if type(number) is not int or not 1 <= number <= 2147483647:
+                    continue
+                if gateway.github:
+                    remote_head = item.get('head') or {}
+                    remote_base = item.get('base') or {}
+                    if not isinstance(remote_head, dict) or not isinstance(remote_base, dict):
+                        continue
+                    head, base = remote_head.get('ref'), remote_base.get('ref')
+                    head_sha, base_sha = remote_head.get('sha'), remote_base.get('sha')
+                    draft = item.get('draft') is True
+                else:
+                    head, base = item.get('source_branch'), item.get('target_branch')
+                    head_sha = item.get('sha')
+                    refs = item.get('diff_refs') or {}
+                    base_sha = refs.get('start_sha') if isinstance(refs, dict) else None
+                    draft = (item.get('draft') is True or item.get('work_in_progress') is True
+                             or str(item.get('title','')).startswith('Draft: '))
+                branch_matches = head == plan['head'] and base == plan['base']
+                head_matches = head_sha == plan['head_sha']
+                base_matches = base_sha == plan['base_sha']
+                matches.append({
+                    'number': number,
+                    'url': ('https://github.com/' + plan['repository'] + '/pull/' + str(number)
+                            if gateway.github else 'https://gitlab.com/' + plan['repository']
+                            + '/-/merge_requests/' + str(number)),
+                    'draft': draft, 'head_matches_plan': head_matches,
+                    'base_matches_plan': base_matches,
+                    'branch_matches_plan': branch_matches,
+                    'requires_review': not (draft and branch_matches and head_matches and base_matches),
+                    'reconciled_by_read': True,
+                })
+                if len(matches) > 1:
+                    break
+            if len(matches) > 1:
+                break
+            if gateway.github:
+                has_next = 'rel="next"' in headers.get('link', '').lower()
+            else:
+                next_page = headers.get('x-next-page', '')
+                has_next = bool(next_page)
+            if not has_next or len(data) == 0:
+                complete = True
+                break
+    except (httpx.HTTPError, RemoteRejected, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, 'Falha na consulta de reconciliação; '
+                                 'o resultado remoto continua incerto.') from exc
+    if len(matches) != 1 or not complete:
+        return {
+            **status(db, user_id, plan_id),
+            'reconciliation': ('ambiguous' if len(matches) > 1 else
+                               'incomplete' if not complete else 'not_found'),
+            'scanned_pages': scanned_pages,
+            'notice': ('Nenhuma operação foi repetida. Confira as revisões no serviço remoto; '
+                       'a ausência nos resultados consultados não prova que o PR/MR não existe.'),
+        }
+    result = matches[0]
+    changed = db.execute(
+        "UPDATE git_change_plans SET state='completed',result_json=? "
+        "WHERE id=? AND user_id=? AND state IN ('uncertain','executing')",
+        (json.dumps(result, ensure_ascii=False), plan_id, user_id))
+    final = status(db, user_id, plan_id)
+    if not changed and final['state'] != 'completed':
+        raise HTTPException(409, 'O estado do plano mudou durante a reconciliação.')
+    return {**final, 'reconciliation': 'unique_remote_match', 'scanned_pages': scanned_pages}
+
+
 def execute(db, security, user_id, plan_id, confirmation, transport=None):
     row = db.one('SELECT * FROM git_change_plans WHERE id=? AND user_id=?', (plan_id, user_id))
     if not row:
