@@ -136,6 +136,16 @@ def set_member(db,org_id,acting_user,member_user,role):
         if not person:
             raise HTTPException(404,'Usuário não encontrado.')
         old=membership(db,org_id,member_user)
+        if old and old['role'] in WRITE_ROLES and role=='analyst':
+            active=db.one(
+                """SELECT COUNT(*) AS n FROM runs r
+                   JOIN organization_runs x ON x.run_id=r.id
+                   WHERE x.organization_id=? AND r.user_id=?
+                   AND r.status IN ('queued','running','awaiting_approval')""",
+                (org_id,member_user))['n']
+            if active:
+                raise HTTPException(
+                    409,'Finalize ou cancele as tarefas ativas antes de reduzir o papel.')
         if old and old['role']=='admin' and role!='admin':
             n=db.one("SELECT COUNT(*) n FROM organization_members "
                      "WHERE organization_id=? AND role='admin'",(org_id,))['n']
