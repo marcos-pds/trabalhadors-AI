@@ -452,7 +452,7 @@ def projects(user=Depends(current_user)):
 @app.post('/api/projects')
 def add_project(data:ProjectIn,user=Depends(current_user)):
     pid=uid()
-    DB.execute('INSERT INTO projects VALUES(?,?,?,?,?)',(pid,user['id'],data.name,data.description,utcnow()))
+    DB.execute('INSERT INTO projects(id,user_id,name,description,created_at) VALUES(?,?,?,?,?)',(pid,user['id'],data.name,data.description,utcnow()))
     return require_owned(DB,'projects',pid,user['id'])
 
 class ProjectMemoryIn(BaseModel):
