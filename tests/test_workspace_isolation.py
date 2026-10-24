@@ -173,3 +173,40 @@ def test_team_host_policy_api_requires_local_admin_and_confirmation():
         assert next(item for item in orgs if item['id']==org)['host_commands_enabled']==1
         denied=admin.put(uri,headers=HEADERS,json={'enabled':False})
         assert denied.status_code==200,denied.text
+
+
+
+def test_command_streams_only_bounded_tail_even_for_megabyte_of_output(tmp_path,monkeypatch):
+    import sys
+    from central import workspace_tools as tools
+    folder=tmp_path/'bounded'
+    folder.mkdir()
+    monkeypatch.setattr(tools,'command_spec',lambda *a:{
+        'cwd':'','root':folder,'argv':[sys.executable,'-c',
+               'import sys;sys.stdout.write("x"*1000000)'],
+        'label':'bounded-output'})
+    result=tools.execute(str(folder),{'action':'command','command':'python_test'},
+                         run_id='logs-1')
+    assert result['success'] is True, result
+    assert result['output_truncated'] is True
+    assert 0<len(result['output'])<=tools.MAX_OUTPUT
+    assert set(result['output'])=={'x'}
+
+
+def test_global_local_process_slots_fail_closed(tmp_path,monkeypatch):
+    from central import workspace_tools as tools
+    folder=tmp_path/'limited'
+    folder.mkdir()
+    monkeypatch.setattr(tools,'command_spec',lambda *a:{
+        'cwd':'','root':folder,'argv':['no-spawn'],
+        'label':'not-spawned'})
+    assert tools._command_slots.acquire(blocking=False)
+    assert tools._command_slots.acquire(blocking=False)
+    try:
+        outcome=tools.execute(str(folder),
+            {'action':'command','command':'python_compile'},run_id='at-capacity')
+        assert outcome['success'] is False
+        assert 'simultâneos' in outcome['output']
+    finally:
+        tools._command_slots.release()
+        tools._command_slots.release()
