@@ -1,6 +1,8 @@
 """Durable SQLite job dispatch with atomic leases for a local or split-process MVP.
 
 Queue status is not business run status. The queue is an execution transport.
+A fresh opaque lease_token identifies each claim, even if a worker ID is reused.
+Acknowledgements without that token fail closed. Tokens are never in summaries.
 Workers acquire with BEGIN IMMEDIATE to prevent simultaneous claims across
 connections/processes. Crashed jobs are reclaimable only after lease expiry.
 """
@@ -45,6 +47,9 @@ class JobQueue:
                        last_error=CASE WHEN job_queue.state IN
                             ('completed','paused','failed','cancelled')
                             THEN NULL ELSE job_queue.last_error END,
+                       lease_token=CASE WHEN job_queue.state IN
+                            ('completed','paused','failed','cancelled')
+                            THEN NULL ELSE job_queue.lease_token END,
                        updated_at=excluded.updated_at""",
                 (run_id, utcnow(), utcnow()))
         return True
@@ -91,7 +96,7 @@ class JobQueue:
                                      'e retome manualmente se for seguro.')
                         self.db.conn.execute(
                             """UPDATE job_queue SET state='failed',lease_owner=NULL,
-                               lease_until=NULL,last_error=?,updated_at=?
+                               lease_until=NULL,lease_token=NULL,last_error=?,updated_at=?
                                WHERE run_id=? AND state='claimed'""",
                             ('lease_attempts_exhausted',utcnow(),rid))
                         self.db.conn.execute(
@@ -104,11 +109,12 @@ class JobQueue:
                             (rid,'queue_attempts_exhausted',
                              '{"reason":"lease_attempts_exhausted"}',utcnow()))
                         continue
+                    lease_token = uuid.uuid4().hex
                     self.db.conn.execute(
                         """UPDATE job_queue SET state='claimed',lease_owner=?,
-                           lease_until=?,attempts=attempts+1,updated_at=?
+                           lease_token=?,lease_until=?,attempts=attempts+1,updated_at=?
                            WHERE run_id=?""",
-                        (owner, now+self.lease_seconds, utcnow(), candidate['run_id']))
+                        (owner,lease_token,now+self.lease_seconds,utcnow(),candidate['run_id']))
                     row = candidate
                     break
                 self.db.conn.execute('COMMIT')
@@ -116,35 +122,40 @@ class JobQueue:
                 self.db.conn.execute('ROLLBACK')
                 raise
         return {'run_id':row['run_id'],'owner':owner,
+                'lease_token':lease_token,
                 'recovered':row['state']=='claimed',
                 'attempt':row['attempts']+1} if row else None
 
-    def heartbeat(self, run_id, owner):
+    def heartbeat(self, run_id, owner, lease_token=None):
+        if not isinstance(lease_token, str) or not lease_token:
+            return False
         with self.db.lock, self.db.conn:
             changed = self.db.conn.execute(
                 """UPDATE job_queue SET lease_until=?,updated_at=?
                    WHERE run_id=? AND state='claimed' AND lease_owner=?
-                         AND lease_until>?""",
-                (self.clock()+self.lease_seconds,utcnow(),run_id,owner,self.clock())).rowcount
+                         AND lease_token=? AND lease_until>?""",
+                (self.clock()+self.lease_seconds,utcnow(),run_id,owner,lease_token,self.clock())).rowcount
         return bool(changed)
 
-    def finish(self, run_id, owner, state, error=None):
+    def finish(self, run_id, owner, state, error=None, lease_token=None):
         if state not in ('completed','paused','failed','cancelled','queued'):
             raise ValueError('Invalid queue terminal state')
+        if not isinstance(lease_token, str) or not lease_token:
+            return False
         with self.db.lock, self.db.conn:
             changed = self.db.conn.execute(
                 """UPDATE job_queue SET state=?,lease_owner=NULL,
-                       lease_until=NULL,last_error=?,updated_at=?
-                   WHERE run_id=? AND lease_owner=? AND state='claimed'
+                       lease_until=NULL,lease_token=NULL,last_error=?,updated_at=?
+                   WHERE run_id=? AND lease_owner=? AND lease_token=? AND state='claimed'
                          AND lease_until>?""",
-                (state, str(error)[:240] if error else None,utcnow(),run_id,owner,self.clock())).rowcount
+                (state,str(error)[:240] if error else None,utcnow(),run_id,owner,lease_token,self.clock())).rowcount
         return bool(changed)
 
     def cancel(self, run_id):
         with self.db.lock, self.db.conn:
             self.db.conn.execute(
                 """UPDATE job_queue SET state='cancelled',
-                   lease_owner=NULL,lease_until=NULL,updated_at=?
+                   lease_owner=NULL,lease_until=NULL,lease_token=NULL,updated_at=?
                    WHERE run_id=?""", (utcnow(),run_id))
 
     def reconcile(self):
@@ -155,7 +166,7 @@ class JobQueue:
                 ('paused_limit','paused'), ('cancelled','cancelled')):
                 self.db.conn.execute(
                     """UPDATE job_queue SET state=?,lease_owner=NULL,
-                       lease_until=NULL,updated_at=?
+                       lease_until=NULL,lease_token=NULL,updated_at=?
                        WHERE run_id IN (SELECT id FROM runs WHERE status=?)
                          AND state!=?""",
                     (queue_state,utcnow(),status,queue_state))
