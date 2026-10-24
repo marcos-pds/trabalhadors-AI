@@ -6,6 +6,7 @@ Every worker must still poll the database periodically: Redis Pub/Sub drops
 messages when subscribers are offline or connections are interrupted.
 """
 from contextlib import contextmanager
+import time
 from urllib.parse import urlsplit
 
 CHANNEL = "central:experimental-queue:ready:v1"
@@ -50,12 +51,21 @@ class _RedisListener(_UnavailableListener):
 
     def wait(self, timeout=0.5):
         super().wait(timeout)
+        deadline = time.monotonic() + timeout
         try:
-            message = self._pubsub.get_message(
-                ignore_subscribe_messages=True, timeout=timeout
-            )
-            return bool(message and message.get("type") == "message"
-                        and message.get("data") == MESSAGE)
+            # redis-py may return None after consuming SUBSCRIBE's own ack,
+            # even when a published message is already buffered behind it.
+            # Continue until the requested timeout, not just one read.
+            while True:
+                remaining = max(0.0, deadline - time.monotonic())
+                message = self._pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=remaining
+                )
+                if (message and message.get("type") == "message"
+                        and message.get("data") == MESSAGE):
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
         except (self._redis.exceptions.RedisError, OSError):
             # Caller must resume periodic database polls on connection loss.
             return False
