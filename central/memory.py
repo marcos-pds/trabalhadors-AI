@@ -147,13 +147,13 @@ def search_history(db, user_id, query, project_id=None, all_projects=False, limi
     if not tokens:
         return []
     scope = '' if all_projects else 'AND c.project_id=?' if project_id else 'AND c.project_id IS NULL'
-    args = [user_id, user_id] + ([project_id] if not all_projects and project_id else [])
+    args = [user_id, user_id, user_id] + ([project_id] if not all_projects and project_id else [])
     rows = db.all(
         f'''SELECT m.conversation_id, c.title, c.project_id, p.name AS project_name,
                    m.content, m.role, m.created_at
             FROM messages m JOIN conversations c ON c.id=m.conversation_id
             LEFT JOIN projects p ON p.id=c.project_id AND p.user_id=?
-            WHERE c.user_id=? {scope} AND m.role IN ('user','assistant')
+            WHERE c.user_id=? AND m.user_id=? {scope} AND m.role IN ('user','assistant')
             ORDER BY m.rowid DESC LIMIT 2500''',
         # Left join and conversation ownership are both user-scoped.
         args)
