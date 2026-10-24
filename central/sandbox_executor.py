@@ -75,14 +75,11 @@ def sandbox_argv(spec, request, name=None):
             if os.name != 'nt' and hasattr(os, 'getuid') else '10001:10001')
     command_map = {
         'npm_build': ['npm','run','build'],
-        'npm_test': ['npm','test','--','--runInBand'],
+        'npm_test': ['npm','test'],
         'python_test': ['python3','-m','pytest','-q'],
         'python_compile': ['python3','-m','compileall','-q','.'],
-        'git_status': ['git','status','--short'],
+        'git_status': ['git','-c','safe.directory=/workspace','status','--short'],
     }
-    # npm test with "--runInBand" is Jest-specific; avoid forcing options on
-    # arbitrary frameworks (Vite/Vitest etc.).
-    command_map['npm_test'] = ['npm','test','--','--run']
     return [
         docker,'run','--rm','--name',container,
         '--network','none','--read-only','--cap-drop','ALL',
