@@ -95,7 +95,7 @@ def test_explicit_repair_preserves_custom_settings_and_requires_authorized_user(
         DB.execute("UPDATE agents SET instructions=? WHERE id=?",
                    ('Instruções personalizadas mantidas', coder['id']))
         before = client.get('/api/agents').json()
-        detected = {a['name'] for a in before if a.get('suggested_specialty') != a['specialty']}
+        detected = {a['name'] for a in before if a.get('suggested_specialty') and a['suggested_specialty'] != a['specialty']}
         assert 'Frontend IA' in detected
         assert 'Programador IA' not in detected
         assert next(a for a in before if a['id'] == frontend['id'])['suggested_specialty'] == 'frontend'
