@@ -22,6 +22,7 @@ from .workspace_tools import decide as decide_workspace_action
 from .task_contract import needs_workspace_tools, delivery_evidence
 from .observability import request_context, correlation_id, log_event, duration_ms
 from .run_policy import classify_task
+from .ops import overview as ops_overview, audit as ops_audit, audit_history
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -464,6 +465,7 @@ def update_computer_access(data: ComputerAccessSettingsIn, request: Request,
     require_csrf(request)
     local_only(request)
     result = set_computer_policy(DB, user['id'], data.mode, data.folder)
+    ops_audit(DB,user['id'],'workspace_policy_changed','workspace',outcome=result['mode'])
     # A preview process must not outlive a revoked or changed workspace grant.
     stop_preview(user['id'])
     return result
@@ -698,6 +700,7 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
     DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
        (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
+    ops_audit(DB,user['id'],'run_created','run',run_id)
     return {'id':run_id}
 
 
@@ -732,14 +735,17 @@ async def resume_run(rid:str,request:Request,user=Depends(current_user)):
         local_only(request)
     try: ENGINE.resume_run(rid)
     except ValueError as e: raise HTTPException(409,str(e))
+    ops_audit(DB,user['id'],'run_resumed','run',rid)
     return {'ok':True,'status':'queued',
             'checkpoints':checkpoint_summary(DB,user['id'],rid)}
 
 
 @app.post('/api/runs/{rid}/cancel')
-async def stop_run(rid:str,user=Depends(current_user)):
+async def stop_run(rid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
     require_owned(DB,'runs',rid,user['id'])
     ENGINE.cancel(rid)
+    ops_audit(DB,user['id'],'run_cancel_requested','run',rid)
     return {'ok':True}
 
 
@@ -993,6 +999,39 @@ def dashboard(user=Depends(current_user)):
      'estimated_cost': DB.one('SELECT COALESCE(SUM(total_cost),0) total FROM runs WHERE user_id=?',(u,))['total'],
      'recent':DB.all('SELECT id,prompt,status,created_at FROM runs WHERE user_id=? ORDER BY created_at DESC LIMIT 8',(u,)),
     }
+
+
+@app.get('/api/operations/overview')
+def operational_overview(user=Depends(current_user)):
+    return ops_overview(DB,user['id'])
+
+
+@app.get('/api/operations/audit')
+def operational_audit(limit:int=50,user=Depends(current_user)):
+    return audit_history(DB,user['id'],limit)
+
+
+@app.get('/api/runs/{rid}/classification')
+def run_classification(rid: str, user=Depends(current_user)):
+    run=require_owned(DB,'runs',rid,user['id'])
+    row=DB.one("SELECT payload FROM events WHERE run_id=? AND event='task_classified' "
+               "ORDER BY seq DESC LIMIT 1", (rid,))
+    return json.loads(row['payload']) if row else classify_task(
+        run['prompt'], bool(run['autonomous']))
+
+
+@app.get('/api/health/ready')
+def readiness(response: Response):
+    try:
+        row=DB.one('SELECT 1 AS ready')
+        if not row or row['ready']!=1:
+            raise RuntimeError('Database unavailable')
+        return {'status':'ready','database':'ready',
+                'job_executor':'in_process','distributed_queue':False,
+                'providers':'not_checked'}
+    except Exception:
+        response.status_code=503
+        return {'status':'unavailable','database':'unavailable'}
 
 
 @app.get('/api/health')
