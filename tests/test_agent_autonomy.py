@@ -241,7 +241,7 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
 def test_windows_crlf_uses_raw_file_checksum_and_preserves_existing_line_endings(workspace):
     """The agent must read the real bytes and apply a patch without changing CRLF."""
     db, root = workspace
-    original = b"print('old')\\r\\nprint('keep')\\r\\n"
+    original = b"print('old')\r\nprint('keep')\r\n"
     path = root / 'hello.py'
     path.write_bytes(original)
     read = execute(str(root), {'action': 'read', 'path': 'hello.py'})
@@ -251,7 +251,7 @@ def test_windows_crlf_uses_raw_file_checksum_and_preserves_existing_line_endings
                'old': "print('old')", 'new': "print('new')",
                'expected_sha256': read['sha256']}
     result = execute(str(root), request)
-    expected = b"print('new')\\r\\nprint('keep')\\r\\n"
+    expected = b"print('new')\r\nprint('keep')\r\n"
     assert path.read_bytes() == expected
     assert result['sha256'] == hashlib.sha256(expected).hexdigest()
     with pytest.raises(HTTPException) as error:
