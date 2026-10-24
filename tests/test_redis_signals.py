@@ -100,3 +100,92 @@ def test_redis_outage_does_not_roll_back_postgres_enqueue():
         conn.execute("TRUNCATE TABLE central_jobs.queue")
         bus.close()
         conn.close()
+
+
+@pytest.mark.skipif(not REDIS_URL or not POSTGRES_DSN,
+                    reason="Real PostgreSQL and Redis test URLs are required")
+def test_experimental_waiter_claims_after_redis_hint():
+    import threading
+    import time
+    from central.postgres_claim_waiter import ExperimentalPostgresClaimWaiter
+
+    bus = RedisQueueSignals(REDIS_URL)
+    conn = connect(POSTGRES_DSN)
+    errors = []
+    try:
+        install_schema(conn)
+        conn.execute("TRUNCATE TABLE central_jobs.queue")
+        queue = PostgresJobQueue(conn)
+        def enqueue_later():
+            other = connect(POSTGRES_DSN)
+            try:
+                time.sleep(0.2)
+                assert PostgresJobQueue(other, signals=bus).enqueue(
+                    "woken-job", "owner"
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                other.close()
+
+        producer = threading.Thread(target=enqueue_later)
+        producer.start()
+        waiter = ExperimentalPostgresClaimWaiter(
+            queue, signals=bus, poll_seconds=1.5
+        )
+        claim = waiter.wait_for_claim("consumer", max_wait_seconds=3)
+        producer.join(timeout=5)
+        assert not producer.is_alive() and not errors
+        assert claim and claim["run_id"] == "woken-job"
+        assert queue.finish(
+            "woken-job", "consumer", "completed",
+            lease_token=claim["lease_token"],
+        )
+    finally:
+        conn.execute("TRUNCATE TABLE central_jobs.queue")
+        conn.close()
+        bus.close()
+
+
+@pytest.mark.skipif(not REDIS_URL or not POSTGRES_DSN,
+                    reason="Real PostgreSQL and Redis test URLs are required")
+def test_experimental_waiter_recovers_when_notification_never_arrives():
+    import threading
+    import time
+    from central.postgres_claim_waiter import ExperimentalPostgresClaimWaiter
+
+    bus = RedisQueueSignals(REDIS_URL)
+    conn = connect(POSTGRES_DSN)
+    errors = []
+    try:
+        install_schema(conn)
+        conn.execute("TRUNCATE TABLE central_jobs.queue")
+        queue = PostgresJobQueue(conn)
+        def silent_enqueue():
+            other = connect(POSTGRES_DSN)
+            try:
+                time.sleep(0.15)
+                # Missing publish is intentional: Pub/Sub is not durable.
+                PostgresJobQueue(other).enqueue("missed-signal", "owner")
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                other.close()
+
+        producer = threading.Thread(target=silent_enqueue)
+        producer.start()
+        waiter = ExperimentalPostgresClaimWaiter(
+            queue, signals=bus, poll_seconds=0.2
+        )
+        claim = waiter.wait_for_claim("consumer", max_wait_seconds=2)
+        producer.join(timeout=5)
+        assert not producer.is_alive() and not errors
+        assert claim and claim["run_id"] == "missed-signal"
+        assert queue.finish(
+            "missed-signal", "consumer", "completed",
+            lease_token=claim["lease_token"],
+        )
+    finally:
+        conn.execute("TRUNCATE TABLE central_jobs.queue")
+        conn.close()
+        bus.close()
