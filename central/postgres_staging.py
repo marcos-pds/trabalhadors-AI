@@ -86,8 +86,11 @@ def _counts(rows):
 
 def _digest(rows):
     # Canonical cross-database representation. No sensitive row data logged.
-    serial = json.dumps([[name, rows[name]] for name in TABLES],
-                        separators=(",", ":"), ensure_ascii=False)
+    # SQLite and PostgreSQL may use different collations for mixed-case or
+    # Unicode identifiers. Order by UTF-8 bytes in Python on both sides.
+    ordered = [[name, sorted(rows[name], key=lambda row: row[0].encode("utf-8"))]
+               for name in TABLES]
+    serial = json.dumps(ordered, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(serial.encode("utf-8")).hexdigest()
 
 
@@ -225,16 +228,20 @@ def verify_staged(conn, batch_id, source_path=None):
     if not isinstance(batch_id, str) or len(batch_id) != 32 or not all(
             char in "0123456789abcdef" for char in batch_id):
         raise ValueError("Invalid batch ID")
-    row = conn.execute(
-        "SELECT row_counts,sha256 FROM central_staging.snapshots WHERE batch_id=%s",
-        (batch_id,),
-    ).fetchone()
-    if row is None:
-        raise ValueError("Staging batch does not exist")
-    current = _read_target(conn, batch_id)
-    counts = _counts(current)
-    expected_counts = json.loads(row[0])
-    verified = counts == expected_counts and _digest(current) == row[1]
+    # Consistent target snapshot: avoid false validations if another
+    # operator discards or modifies staging during a verification.
+    with conn.transaction():
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        row = conn.execute(
+            "SELECT row_counts,sha256 FROM central_staging.snapshots WHERE batch_id=%s",
+            (batch_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Staging batch does not exist")
+        current = _read_target(conn, batch_id)
+        counts = _counts(current)
+        expected_counts = json.loads(row[0])
+        verified = counts == expected_counts and _digest(current) == row[1]
     result = {"batch_id": batch_id, "verified": verified, "counts": counts,
               "scope": "metadata_only_no_secrets"}
     if source_path is not None:
