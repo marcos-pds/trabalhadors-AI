@@ -17,7 +17,9 @@ from central.agent_autonomy import autonomous_worker, parse_tool
 def workspace(tmp_path):
     root = tmp_path / 'repo'
     root.mkdir()
-    (root / 'hello.py').write_text("print('old')\n", encoding='utf-8')
+    # Use exact bytes: Path.write_text translates LF to CRLF on Windows.
+    # Hashes represent actual on-disk bytes, not platform-translated text.
+    (root / 'hello.py').write_bytes(b"print('old')\n")
     (root / 'notes.md').write_text('Projeto sob controle.', encoding='utf-8')
     db = Database(':memory:')
     db.execute('INSERT INTO users VALUES(?,?,?,?)', ('user','u@example.com','hash',utcnow()))
@@ -234,3 +236,24 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
     events = db.all("SELECT payload FROM events WHERE run_id=? AND event='workspace_validation'", (rid,))
     assert len(events) == 2
     assert all(json.loads(event['payload'])['passed'] for event in events)
+
+
+def test_windows_crlf_uses_raw_file_checksum_and_preserves_existing_line_endings(workspace):
+    """The agent must read the real bytes and apply a patch without changing CRLF."""
+    db, root = workspace
+    original = b"print('old')\\r\\nprint('keep')\\r\\n"
+    path = root / 'hello.py'
+    path.write_bytes(original)
+    read = execute(str(root), {'action': 'read', 'path': 'hello.py'})
+    assert read['content'] == original.decode('utf-8')
+    assert read['sha256'] == hashlib.sha256(original).hexdigest()
+    request = {'action': 'replace', 'path': 'hello.py',
+               'old': "print('old')", 'new': "print('new')",
+               'expected_sha256': read['sha256']}
+    result = execute(str(root), request)
+    expected = b"print('new')\\r\\nprint('keep')\\r\\n"
+    assert path.read_bytes() == expected
+    assert result['sha256'] == hashlib.sha256(expected).hexdigest()
+    with pytest.raises(HTTPException) as error:
+        execute(str(root), request)
+    assert error.value.status_code == 409
