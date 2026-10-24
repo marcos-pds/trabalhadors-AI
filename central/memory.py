@@ -147,7 +147,7 @@ def search_history(db, user_id, query, project_id=None, all_projects=False, limi
     if not tokens:
         return []
     scope = '' if all_projects else 'AND c.project_id=?' if project_id else 'AND c.project_id IS NULL'
-    args = [user_id, user_id] + ([] if all_projects or not project_id else [project_id])
+    args = [user_id, user_id] + ([project_id] if not all_projects and project_id else [])
     rows = db.all(
         f'''SELECT m.conversation_id, c.title, c.project_id, p.name AS project_name,
                    m.content, m.role, m.created_at
@@ -156,7 +156,7 @@ def search_history(db, user_id, query, project_id=None, all_projects=False, limi
             WHERE c.user_id=? {scope} AND m.role IN ('user','assistant')
             ORDER BY m.rowid DESC LIMIT 2500''',
         # Left join and conversation ownership are both user-scoped.
-        [user_id] + args)
+        args)
     results = []
     for position, row in enumerate(rows):
         found = tokens & (terms(row['content'][:5000]) | terms(row['title']))
