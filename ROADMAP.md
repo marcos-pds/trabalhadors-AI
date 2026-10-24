@@ -9,7 +9,7 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
 | 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
 | 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
-| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL isolado; notificações Redis Pub/Sub opt-in no protótipo, testadas em serviços reais | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, consumidor Redis da aplicação, fencing de efeitos externos e tracing multihost NÃO implementados |
+| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL isolado; notificações Redis opt-in e consumidor experimental com polling obrigatório | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, worker de execução real em Redis/PostgreSQL, fencing de efeitos externos e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
 | 12 — homologação | CLI de verificações; ferramenta de carga do endpoint de saúde; testes de restauração e acesso | Carga real, pentest independente, recuperação fora da máquina, deploy/escalabilidade |
@@ -324,3 +324,23 @@ migração e rollback verificados, worker consumidor de notificações que mante
 polling, autenticação/TLS do Redis de produção, fencing atômico por ferramenta,
 resiliência sob falhas de rede e operação multihost. O protótipo não é
 deploy ou aprovação para produção.
+
+
+### Fase 9 — Consumidor experimental de notificações com polling
+
+`central/postgres_claim_waiter.py` fornece
+`ExperimentalPostgresClaimWaiter`, que aguarda hints Redis por um intervalo
+limitado e sempre repete `PostgresJobQueue.claim()` no PostgreSQL. Em falha de
+Redis o consumidor espera o mesmo intervalo entre consultas para não gerar
+loop de CPU; eventos Pub/Sub perdidos não impedem eventual detecção no banco.
+O método retorna só um claim já autorizado pela fila, **não executa**
+comandos, agentes, efeitos externos ou código do usuário.
+
+`tests/test_postgres_claim_waiter.py` verifica fallback e limites sem serviços.
+`tests/test_redis_signals.py` testa Redis e PostgreSQL reais para mensagens
+recebidas e mensagens deliberadamente omitidas, via CI.
+
+Essa classe é um componente de laboratório, **não** é usada pelo worker normal
+da Central. Migrar o motor real exige persistência e transações de negócio no
+PostgreSQL, fencing nas ferramentas, implantação segura de Redis e testes de
+recuperação antes da ativação.
