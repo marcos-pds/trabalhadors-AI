@@ -13,6 +13,7 @@ from .observability import log_event
 from .run_policy import classify_task, validate_run_policy
 from .worker_checkpoint import WorkerPaused, MAX_RESUMES, checkpoint_summary
 from .job_queue import JobQueue
+from .quotas import require_capacity
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
                             assert_inspection_performed)
@@ -317,19 +318,37 @@ class Engine:
                 raise ValueError(
                     'Modo Equipe exige um Revisor IA habilitado para verificar a entrega.')
         run_id, now = uid(), utcnow()
-        try:
-            self.db.execute('''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
-             budget_limit,idempotency_key,created_at,updated_at,autonomous) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-             (run_id,user_id,conversation_id,prompt,'queued',mode,json.dumps(agent_ids or []),json.dumps(plan),budget,idempotency_key,now,now,int(autonomous)))
-        except Exception:
-            if idempotency_key:
-                existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
-                if existing: return existing['id']
-            raise
-        for p in plan:
-            self.db.execute('''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,instructions,status,created_at,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?)''',
-             (p['id'],run_id,p['agent_id'],p['kind'],p['name'],json.dumps(p['deps']),p['instructions'],'queued',now,now))
+        # One SQLite write transaction makes quota check, run and DAG inserts
+        # atomic across API processes. Idempotent retries bypass quota counts.
+        with self.db.lock:
+            self.db.conn.execute('BEGIN IMMEDIATE')
+            try:
+                if idempotency_key:
+                    existing = self.db.one(
+                        'SELECT id FROM runs WHERE user_id=? AND idempotency_key=?',
+                        (user_id,idempotency_key))
+                    if existing:
+                        self.db.conn.execute('COMMIT')
+                        return existing['id']
+                require_capacity(self.db, user_id)
+                self.db.conn.execute(
+                    '''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
+                     budget_limit,idempotency_key,created_at,updated_at,autonomous)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (run_id,user_id,conversation_id,prompt,'queued',mode,
+                     json.dumps(agent_ids or []),json.dumps(plan),budget,
+                     idempotency_key,now,now,int(autonomous)))
+                for p in plan:
+                    self.db.conn.execute(
+                        '''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,
+                         instructions,status,created_at,updated_at)
+                         VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                        (p['id'],run_id,p['agent_id'],p['kind'],p['name'],
+                         json.dumps(p['deps']),p['instructions'],'queued',now,now))
+                self.db.conn.execute('COMMIT')
+            except Exception:
+                self.db.conn.execute('ROLLBACK')
+                raise
         self.emit(run_id,'run_created',{'mode':mode,'plan':plan,
                                        'requires_implementation': implementation,
                                        'autonomous': bool(autonomous)})
