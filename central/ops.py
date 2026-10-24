@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from .database import utcnow
 from .observability import request_context, log_event
 from .quotas import limits as quota_limits, usage as quota_usage
+from .worker_liveness import snapshot as worker_snapshot
 
 
 def audit(db, user_id, action, target_type, target_id=None, outcome='accepted'):
@@ -119,6 +120,8 @@ def overview(db, user_id):
     return {
         'quotas': {'limits': quota_limits(), 'usage': quota_usage(db,user_id)},
         'job_queue': {'durable':True, 'backend':'sqlite',
+                      'distributed':False,
+                      'workers':worker_snapshot(db),
                       'states':{row['state']:row['total'] for row in jobs},
                       'max_attempts':max((row['max_attempts'] or 0 for row in jobs),
                                          default=0)},
