@@ -326,6 +326,14 @@ class Engine:
                     except asyncio.CancelledError:
                         if half_open: self.health.release_probe(provider['id'], model)
                         raise
+                    except RuntimeError:
+                        if half_open: self.health.release_probe(provider['id'], model)
+                        if run.get('autonomous'):
+                            # A validation/tool/approval failure is not a provider health failure.
+                            # Do not replay workspace mutations through another provider.
+                            raise
+                        failures.append(f"{provider['name']}/{model}: erro de execução")
+                        break
                     except Exception as e:
                         failure = ProviderError('internal', 'Falha interna durante execução.', False)
                         self.health.record(provider['id'],model,success=False,error=failure,
