@@ -85,6 +85,20 @@ CREATE TABLE IF NOT EXISTS events (
  event TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id,seq);
+CREATE TABLE IF NOT EXISTS job_queue (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ state TEXT NOT NULL DEFAULT 'queued',
+ lease_owner TEXT,
+ lease_until REAL,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ available_at REAL NOT NULL DEFAULT 0,
+ queued_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ last_error TEXT,
+ CHECK(state IN ('queued','claimed','completed','paused','failed','cancelled'))
+);
+CREATE INDEX IF NOT EXISTS idx_job_queue_claim
+ ON job_queue(state,available_at,lease_until,queued_at);
 CREATE TABLE IF NOT EXISTS ops_audit (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
