@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS organization_runs (
  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_org_runs_tenant ON organization_runs(organization_id,run_id);
+CREATE TABLE IF NOT EXISTS run_workspace_bindings (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ organization_id TEXT REFERENCES organizations(id),
+ folder TEXT NOT NULL,
+ initial_mode TEXT NOT NULL CHECK(initial_mode IN ('ask','full')),
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_binding_org
+ ON run_workspace_bindings(organization_id,user_id);
 CREATE TABLE IF NOT EXISTS login_failures (
  identity_hash TEXT NOT NULL,
  attempted_at REAL NOT NULL
