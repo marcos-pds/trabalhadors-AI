@@ -189,3 +189,157 @@ def test_cancel_is_visible_across_processes_without_false_completion(tmp_path, m
     finally:
         db_api.close()
         db_worker.close()
+
+
+
+def test_recovery_attempt_limit_moves_abandoned_run_to_failed_atomically(tmp_path):
+    db=Database(tmp_path/'exhaust.db')
+    now=[1000.0]
+    q=JobQueue(db,lease_seconds=30,clock=lambda:now[0],max_attempts=2)
+    try:
+        seed(db,'u','abandoned')
+        assert q.enqueue('abandoned')
+        first=q.claim('worker-one')
+        assert first['attempt']==1
+        now[0]+=31
+        second=q.claim('worker-two')
+        assert second['recovered'] is True and second['attempt']==2
+        now[0]+=31
+        assert q.claim('worker-three') is None
+        status=q.details('abandoned')
+        assert status['state']=='failed'
+        assert status['last_error']=='lease_attempts_exhausted'
+        assert status['attempts']==2
+        run=db.one('SELECT status,error FROM runs WHERE id=?',('abandoned',))
+        assert run['status']=='failed'
+        assert '2 tentativas' in run['error']
+        events=db.all("SELECT event,payload FROM events WHERE run_id=?",('abandoned',))
+        assert [r['event'] for r in events]==['queue_attempts_exhausted']
+        assert not q.finish('abandoned','worker-two','completed')
+        assert not q.heartbeat('abandoned','worker-two')
+    finally:
+        db.close()
+
+
+def test_expired_lease_owner_cannot_renew_or_ack_even_before_reclaim(tmp_path):
+    db=Database(tmp_path/'expired.db')
+    now=[1000.0]
+    q=JobQueue(db,lease_seconds=30,clock=lambda:now[0])
+    try:
+        seed(db,'u','late')
+        q.enqueue('late')
+        assert q.claim('old')['attempt']==1
+        now[0]+=31
+        assert not q.heartbeat('late','old')
+        assert not q.finish('late','old','completed')
+        assert q.details('late')['state']=='claimed'
+        assert q.claim('fresh')['recovered'] is True
+        assert q.finish('late','fresh','completed')
+    finally:
+        db.close()
+
+
+def test_manual_resume_after_exhaustion_resets_attempt_budget(tmp_path):
+    db=Database(tmp_path/'resume.db')
+    now=[1000.0]
+    q=JobQueue(db,lease_seconds=30,clock=lambda:now[0],max_attempts=1)
+    try:
+        seed(db,'u','task')
+        q.enqueue('task')
+        assert q.claim('old')['attempt']==1
+        now[0]+=31
+        assert q.claim('another') is None
+        assert q.details('task')['state']=='failed'
+        db.execute("UPDATE runs SET status='queued' WHERE id='task'")
+        assert q.enqueue('task')
+        assert q.details('task')['attempts']==0
+        restarted=q.claim('new')
+        assert restarted['attempt']==1 and not restarted['recovered']
+    finally:
+        db.close()
+
+
+def test_exhausted_work_does_not_starve_other_pending_user(tmp_path):
+    db=Database(tmp_path/'fair-dead-letter.db')
+    now=[1000.0]
+    q=JobQueue(db,lease_seconds=30,clock=lambda:now[0],max_attempts=1)
+    try:
+        seed(db,'u1','bad')
+        seed(db,'u2','good')
+        q.enqueue('bad')
+        assert q.claim('dead')['run_id']=='bad'
+        now[0]+=31
+        q.enqueue('good')
+        next_run=q.claim('live')
+        assert next_run['run_id']=='good'
+        assert q.details('bad')['state']=='failed'
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('value', ['0','21','banana','-1'])
+def test_queue_attempt_configuration_fails_closed(tmp_path,monkeypatch,value):
+    db=Database(':memory:')
+    try:
+        monkeypatch.setenv('CENTRAL_MAX_JOB_ATTEMPTS',value)
+        with pytest.raises(ValueError,match='1 e 20'):
+            JobQueue(db)
+    finally:
+        db.close()
+
+
+def test_worker_liveness_distinguishes_active_and_stale_without_exposing_ids(tmp_path):
+    from central.worker_liveness import beat, snapshot, forget, cleanup_stale
+    from datetime import datetime, timedelta, timezone
+    db=Database(tmp_path/'workers.db')
+    try:
+        beat(db,'worker-private-id','worker',2)
+        beat(db,'other-private-id','embedded',1)
+        result=snapshot(db)
+        assert result['active_workers']==2 and result['active_jobs_reported']==3
+        assert result['distributed'] is False
+        assert 'worker-private-id' not in str(result)
+        yesterday=(datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
+        db.execute("UPDATE worker_liveness SET last_seen_at=? WHERE worker_id=?",
+                   (yesterday,'other-private-id'))
+        result=snapshot(db)
+        assert result['active_workers']==1
+        assert result['stale_workers']==1
+        assert cleanup_stale(db)==1
+        forget(db,'worker-private-id')
+        assert snapshot(db)['active_workers']==0
+    finally:
+        db.close()
+
+
+def test_background_worker_emits_heartbeat_and_unregisters_when_stopped(tmp_path):
+    from central.worker_liveness import snapshot
+    db=Database(tmp_path/'registry.db')
+    engine=Engine(db,None)
+    engine.job_mode='worker'
+    async def go():
+        task=asyncio.create_task(engine.poll_jobs())
+        for _ in range(90):
+            if snapshot(db)['active_workers']==1:
+                break
+            await asyncio.sleep(.02)
+        assert snapshot(db)['active_workers']==1
+        engine.shutting_down=True
+        await asyncio.wait_for(task,timeout=2)
+        assert snapshot(db)['active_workers']==0
+    try:
+        asyncio.run(go())
+    finally:
+        db.close()
+
+
+def test_migration_v7_is_additive_and_idempotent(tmp_path):
+    from central.migrations import migrate
+    db=Database(tmp_path/'migrate.db')
+    try:
+        assert [r['version'] for r in db.all('SELECT version FROM schema_migrations')] == list(range(1,8))
+        migrate(db)
+        assert len(db.all('SELECT version FROM schema_migrations'))==7
+        assert db.one("SELECT name FROM sqlite_master WHERE name='worker_liveness'")
+    finally:
+        db.close()
