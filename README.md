@@ -528,3 +528,57 @@ usuário/organização, autenticação/roles, migrações controladas, TLS
 via proxy reverso, rate limiting e armazenamento seguro de segredos.
 
 Verificação: `npm run build` e `python -m pytest -q`.
+
+## Fila persistente e worker separado (MVP local)
+
+A Central agora grava cada execução em `job_queue` (SQLite) ANTES de iniciar
+o motor. A fila usa reserva atômica (`BEGIN IMMEDIATE`), lease temporário
+renovado enquanto o job trabalha, registro de tentativas, limites básicos
+de concorrência por usuário e recuperação de jobs com lease expirado.
+O estado do run e a fila são coisas distintas: `paused_limit`, `failed` e
+`completed` continuam sendo determinados pelo motor e seus testes.
+
+**Opção A — execução local integrada (padrão, recomendada para começar)**
+
+    # Terminal único, sem variáveis extras:
+    python -m uvicorn central.main:app --host 127.0.0.1 --port 8765
+
+`CENTRAL_JOB_MODE=embedded` é o padrão. O FastAPI despacha a fila localmente
+e os jobs reaparecem no banco após interrupção do processo.
+
+**Opção B — API e worker em terminais separados (Windows PowerShell):**
+
+Terminal 1 — FastAPI, sem executar os jobs:
+
+    $env:CENTRAL_JOB_MODE = 'api'
+    python -m uvicorn central.main:app --host 127.0.0.1 --port 8765
+
+Terminal 2 — executa a fila com acesso à mesma pasta de dados:
+
+    python -m central.worker_service
+
+Se definir `CENTRAL_DATA_DIR`, defina **o mesmo caminho absoluto em ambos
+os terminais**. Cada processo deve usar o mesmo ambiente Python e a mesma
+pasta no mesmo computador. Para voltar ao modo integrado, remova a
+variável antes de iniciar o servidor (`Remove-Item Env:CENTRAL_JOB_MODE`).
+**Não execute um worker separado simultaneamente ao modo integrado**;
+embora o lease evite a maioria das execuções duplicadas, scripts npm e
+edições externas não são transacionais.
+
+O endpoint `GET /api/health/ready` informa o modo ativo da API e se a fila
+persistente está habilitada; `GET /api/runs/{id}` inclui a reserva atual,
+e Monitoramento mostra os estados da fila da conta autenticada.
+
+**Limitações importantes:** esta é uma fila SQLite para processos no
+mesmo host, não Celery/Redis nem uma arquitetura multi-host escalável.
+Se o worker morrer, um lease pode levar até 90 segundos para expirar;
+o novo worker revalida autorizações, hashes e checkpoints antes de
+continuar, mas operações externas não são exatamente-once.
+Não hospede em múltiplos servidores ou com workspaces compartilhados
+sem isolamento de contêiner e mecanismo de fencing transacional.
+
+Diagnóstico:
+
+    npm run build
+    python -m pytest tests/test_job_queue.py -q
+    python -m pytest -q
