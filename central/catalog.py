@@ -19,7 +19,7 @@ CATALOG = [
           'https://aistudio.google.com/app/apikey', 'https://ai.google.dev/gemini-api/docs/pricing', quick=True),
     entry('mistral', 'Mistral', 'Faixa gratuita', 'Ative o Studio em Free mode. A chave herda o plano da organização; o catálogo não confirma gratuidade da conta.',
           'https://console.mistral.ai/api-keys', 'https://docs.mistral.ai/admin/billing-usage/subscriptions', quick=True),
-    entry('sambanova', 'SambaNova', 'Faixa gratuita', 'Free Tier disponível para contas sem método de pagamento. Há limites diários por modelo.',
+    entry('sambanova', 'SambaNova', 'Cota gratuita condicionada', 'A documentação lista uma cota Free Tier para cinco modelos específicos, mas a página de planos pode exigir créditos para usar a API. O catálogo não confirma saldo ou autorização da conta.',
           'https://cloud.sambanova.ai/apis', 'https://docs.sambanova.ai/docs/en/models/rate-limits', quick=True),
     entry('zai', 'Z.ai / GLM Flash', 'Modelos de preço zero', 'Somente GLM-4.7-Flash e GLM-4.5-Flash. FlashX e versões mais novas podem ser pagas.',
           'https://z.ai/manage-apikey/apikey-list', 'https://docs.z.ai/guides/overview/pricing', quick=True),
@@ -44,6 +44,10 @@ BY_KIND = {p['kind']: p for p in CATALOG}
 # Explicit IDs, never infer free access from a model name containing "flash".
 GEMINI_FREE = {'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'}
 ZAI_FREE = {'glm-4.7-flash', 'glm-4.5-flash'}
+# Documented SambaNova Free Tier model IDs (rate-limits docs, reviewed 2026-10-23).
+# Other listed models are not assumed free even when the account can see them.
+SAMBANOVA_FREE = {'DeepSeek-V3.1', 'DeepSeek-V3.2', 'Meta-Llama-3.3-70B-Instruct',
+                  'gpt-oss-120b', 'gemma-4-31B-it'}
 NON_CHAT = ('embed', 'whisper', 'tts', 'transcrib', 'moderation', 'rerank', 'guard', 'orpheus', 'image', 'audio', 'video')
 
 
@@ -96,8 +100,10 @@ def normalize_models(kind, items):
             eligible = mid in GEMINI_FREE
         elif kind == 'zai':
             eligible = mid in ZAI_FREE
+        elif kind == 'sambanova':
+            eligible = mid in SAMBANOVA_FREE
         else:
-            eligible = kind in ('groq', 'mistral', 'sambanova', 'ollama')
+            eligible = kind in ('groq', 'mistral', 'ollama')
         # eligible controls ONLY the free-first automatic connection, never manual selection.
         billing = ('local' if kind == 'ollama' else 'free' if eligible else
                    'paid' if kind == 'openrouter' and paid_price(item.get('pricing')) else 'unknown')
