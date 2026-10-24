@@ -85,6 +85,20 @@ CREATE TABLE IF NOT EXISTS events (
  event TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id,seq);
+CREATE TABLE IF NOT EXISTS computer_access_settings (
+ user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ mode TEXT NOT NULL DEFAULT 'blocked' CHECK(mode IN ('blocked','ask','full')),
+ folder TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS computer_access_approvals (
+ id TEXT PRIMARY KEY,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ action TEXT NOT NULL, relative_path TEXT NOT NULL,
+ folder TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+ expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_computer_access_approvals_user
+ ON computer_access_approvals(user_id,status,created_at);
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', definition TEXT NOT NULL,
