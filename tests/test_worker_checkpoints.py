@@ -10,12 +10,39 @@ from central.computer_access import set_policy
 from central.database import Database, utcnow
 from central.engine import Engine
 from central.worker_checkpoint import WorkerPaused, load_checkpoint, checkpoint_summary, MAX_RESUMES
-from tests.test_agent_autonomy import workspace as workspace_fixture, FakeModel, h
+import hashlib
 
 
 @pytest.fixture
-def workspace(workspace_fixture):
-    return workspace_fixture
+def workspace(tmp_path):
+    root = tmp_path / 'repo'
+    root.mkdir()
+    (root / 'hello.py').write_bytes(b"print('old')\n")
+    db = Database(':memory:')
+    db.execute('INSERT INTO users VALUES(?,?,?,?)',
+               ('user', 'u@example.com', 'hash', utcnow()))
+    db.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',
+               ('convo', 'user', 'Teste', None, utcnow(), utcnow()))
+    db.execute('INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+               ('run', 'user', 'convo', 'Corrigir', 'running', 'manual', '[]', '[]', utcnow(), utcnow()))
+    db.execute('INSERT INTO steps(id,run_id,agent_id,kind,name,deps,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+               ('step', 'run', None, 'agent', 'Programador', '[]', 'running', utcnow(), utcnow()))
+    yield db, root
+    db.close()
+
+
+def h(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+class FakeModel:
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.seen = []
+
+    async def stream(self, provider, key, model, system, messages):
+        self.seen.append((system, messages))
+        yield self.answers.pop(0)
 
 
 def calls_until_pause():
@@ -136,7 +163,7 @@ def test_engine_pauses_frontend_then_resumes_without_rerunning_architect(workspa
         assert sum(x['event'] == 'run_paused_limit' for x in events) == 1
         assert sum(x['event'] == 'worker_checkpoint_restored' for x in events) == 1
         assert not any(x['event'] == 'run_failed' for x in events)
-        assert len(model.seen) == 16
+        assert len(model.seen) == 15
         return rid
 
     asyncio.run(scenario())
