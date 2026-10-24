@@ -20,6 +20,7 @@ function eventLabel(item) {
   if (kind === 'run_paused_limit') return 'Limite de ciclos atingido: checkpoint salvo'
   if (kind === 'run_resumed') return 'Tarefa continuada a partir do checkpoint'
   if (kind === 'worker_checkpoint_restored') return 'Contexto anterior do trabalhador restaurado'
+  if (kind === 'worker_budget_warning') return 'Limite próximo: ' + item.remaining_rounds + ' ciclo(s) restante(s); checkpoint automático disponível'
   if (kind === 'run_status') return 'Estado: ' + (item.status || 'alterado')
   if (kind === 'step_status') return 'Etapa: ' + (item.status || 'executando')
   if (kind === 'provider_error') return 'Provedor retornou erro'
