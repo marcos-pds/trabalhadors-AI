@@ -59,6 +59,20 @@ def parse_tool(raw):
     return data
 
 
+def consume_run_feedback(db, user_id, run_id):
+    """Atomically mark pending user notes delivered to this worker."""
+    with db.lock, db.conn:
+        rows = db.all(
+            'SELECT id,content FROM run_feedback WHERE run_id=? AND user_id=? '
+            'AND consumed_at IS NULL ORDER BY created_at,id LIMIT 12',
+            (run_id, user_id))
+        if rows:
+            from .database import utcnow
+            db.conn.executemany('UPDATE run_feedback SET consumed_at=? WHERE id=?',
+                                [(utcnow(), row['id']) for row in rows])
+    return [row['content'] for row in rows]
+
+
 def _feedback(result):
     return json.dumps(result, ensure_ascii=False, default=str)[:12000]
 
@@ -79,11 +93,40 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     validation_failures = 0
 
     for round_number in range(MAX_ROUNDS):
+        feedback = consume_run_feedback(db, user_id, run_id)
+        if feedback:
+            emit(run_id, 'workspace_feedback_applied', {
+                'step_id': step_id, 'count': len(feedback)})
+            transcript.append({
+                'role': 'user',
+                'content': 'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO (prioridade alta; '
+                           'respeite as restrições de permissão):\n' +
+                           '\n'.join('- ' + note for note in feedback)
+            })
         if policy(db, user_id) != grant:
             raise RuntimeError('A permissão da pasta foi alterada ou revogada. Trabalho interrompido.')
+        import asyncio
+        waiting = asyncio.Event()
+
+        async def heartbeat():
+            while not waiting.is_set():
+                try:
+                    await asyncio.wait_for(waiting.wait(), timeout=8)
+                except asyncio.TimeoutError:
+                    emit(run_id, 'worker_heartbeat', {
+                        'step_id': step_id, 'stage': 'Aguardando resposta do modelo'})
+
+        tick = asyncio.create_task(heartbeat())
+        emit(run_id, 'worker_phase', {'step_id': step_id,
+                                     'stage': 'Consultando modelo de IA',
+                                     'round': round_number + 1})
         chunks = []
-        async for part in client.stream(dict(provider, _max_tokens=3000), key, model, system, transcript):
-            chunks.append(part)
+        try:
+            async for part in client.stream(dict(provider, _max_tokens=3000), key, model, system, transcript):
+                chunks.append(part)
+        finally:
+            waiting.set()
+            await tick
         raw = ''.join(chunks)
         try:
             command = parse_tool(raw)
@@ -96,6 +139,18 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             continue
 
         if command['action'] == 'finish':
+            # A note received while the model was thinking still takes precedence.
+            last_feedback = consume_run_feedback(db, user_id, run_id)
+            if last_feedback:
+                emit(run_id, 'workspace_feedback_applied',
+                     {'step_id': step_id, 'count': len(last_feedback)})
+                transcript.extend([
+                    {'role': 'assistant', 'content': raw[:1000]},
+                    {'role': 'user', 'content':
+                     'Novos ajustes chegaram antes de concluir. Aplique-os ou explique '
+                     'se não forem possíveis:\n' + '\n'.join(last_feedback)}
+                ])
+                continue
             finished = str(command.get('message', '')).strip()[:4000]
             needed = {'read'} if require_document_read else {'read', 'list'}
             if require_observation and not observed_actions.intersection(needed):
