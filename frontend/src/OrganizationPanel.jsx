@@ -14,6 +14,7 @@ export default function OrganizationPanel({ api, onProjectCreate, onUpdated }) {
   const [newName, setNewName] = useState('')
   const [memberEmail, setMemberEmail] = useState('')
   const [memberRole, setMemberRole] = useState('operator')
+  const [hostConfirm, setHostConfirm] = useState('')
   const [budget, setBudget] = useState('')
   const [daily, setDaily] = useState(100)
   const [active, setActive] = useState(4)
@@ -104,6 +105,22 @@ export default function OrganizationPanel({ api, onProjectCreate, onUpdated }) {
         </div>)}
       </div>
       {current.role==='admin' && !current.is_personal && <>
+        <section className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/[.04] p-3">
+          <p className="text-xs font-semibold text-amber-200">Execução de comandos no Windows</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted">Por padrão, organizações de equipe não podem executar scripts npm/pip ou testes locais. Habilitar esta opção concede execução com os privilégios do servidor, sem isolamento de sistema operacional. Use apenas projetos confiáveis e pastas dedicadas. Instalações ainda exigem aprovação específica.</p>
+          <p className="mt-2 text-[11px] text-muted">Estado: {current.host_commands_enabled ? 'Habilitado (sem sandbox)' : 'Bloqueado'}</p>
+          {!current.host_commands_enabled && <input aria-label="Confirmação de execução local" placeholder="Digite AUTORIZO EXECUCAO LOCAL" value={hostConfirm}
+            onChange={e => setHostConfirm(e.target.value)} className={field + ' mt-2'} />}
+          <button type="button" disabled={busy || (!current.host_commands_enabled && hostConfirm !== 'AUTORIZO EXECUCAO LOCAL')}
+            className={button + ' mt-2'} onClick={() => action(async () => {
+              await api('/organizations/'+selected+'/host-commands','PUT',
+                        {enabled:!current.host_commands_enabled,
+                         confirmation:current.host_commands_enabled?'':hostConfirm})
+              setHostConfirm('')
+            },current.host_commands_enabled?'Comandos locais bloqueados.':'Execução local autorizada.')}>
+            {current.host_commands_enabled ? 'Bloquear comandos locais' : 'Autorizar execução local'}
+          </button>
+        </section>
         <form className="mt-4 flex flex-wrap gap-2" onSubmit={e=>{
           e.preventDefault()
           action(async ()=>{
