@@ -96,7 +96,10 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 return finished or 'Planejamento registrado para o próximo trabalhador.'
             results = []
             for check in validation_commands(grant['folder']):
-                result = await agent_action(db, user_id, run_id, step_id, check, emit)
+                try:
+                    result = await agent_action(db, user_id, run_id, step_id, check, emit)
+                except HTTPException as exc:
+                    result = {'error': str(exc.detail), 'success': False}
                 results.append({'command': check['command'], 'result': result})
             failed = [x for x in results if
                       x['result'].get('success') is False or 'error' in x['result']]
