@@ -24,6 +24,7 @@ from .observability import request_context, correlation_id, log_event, duration_
 from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
 from .auth_limits import ensure_allowed as allow_login, failed as fail_login, succeeded as login_ok
+from .quotas import QuotaExceeded
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -722,7 +723,7 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     try:
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency,autonomous=data.autonomous)
-    except ValueError as exc: raise HTTPException(422,str(exc))
+    except ValueError as exc: raise HTTPException(429 if isinstance(exc, QuotaExceeded) else 422,str(exc))
     now=utcnow()
     DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
     DB.execute('UPDATE conversations SET updated_at=?,title=? WHERE id=?',
