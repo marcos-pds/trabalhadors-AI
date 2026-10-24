@@ -353,3 +353,61 @@ política no servidor antes de cada operação.
 O backend restringe essas rotas a acesso local, login e proteção contra
 requisições indevidas. O painel guarda somente a pasta autorizada, o modo
 e os registros temporários de aprovação; não copia a pasta para o banco.
+
+
+## Trabalhadores autônomos: escrita de código, execução e recuperação de erros
+
+A partir da versão atual, **Computador** define o escopo local e **Autonomia**
+(no compositor do Chat IA) ativa o uso dessas ferramentas **para uma execução**.
+O modo está desligado por padrão. O servidor também exige login, origem local
+e uma pasta explicitamente autorizada antes de aceitar qualquer execução autônoma.
+
+**Três modos de permissão:**
+- Bloqueado: nenhuma ação local pode ocorrer.
+- Solicitar permissão: cada leitura, escrita, criação de pasta ou comando dos
+  agentes requer uma autorização exclusiva; o chat mostra um resumo e um diff
+  de alterações; aprovação expira em 10 minutos.
+- Acesso total à pasta: trabalhadores podem usar apenas as ferramentas
+  permitidas dentro da pasta escolhida, sem aprovação por ação.
+  Não é acesso irrestrito ao Windows.
+
+**Fluxo padrão:** Arquiteto IA -> Programador IA -> Revisor IA, em sequência,
+com resultados das etapas anteriores repassados às seguintes. As respostas
+dos modelos contêm pedidos de ferramenta em JSON: listar, ler, criar pasta,
+criar arquivo UTF-8, substituir um trecho exato e executar um comando de
+desenvolvimento permitido. Cada acesso passa novamente pela política da pasta.
+
+**Comandos permitidos:** npm run build, npm test, npm ci --ignore-scripts,
+npm install --ignore-scripts PACOTE, python -m pytest -q,
+python -m compileall -q ., python -m venv .venv, pip install -r
+requirements.txt, pip install PACOTE e git status --short. Nomes de pacotes e
+pastas são validados. O pip só pode instalar no ambiente .venv localizado
+dentro do workspace. Não há terminal shell arbitrário nem comandos gerais
+de PowerShell ou cmd.exe, git push/deploy nem exclusão de arquivos.
+Nomes de comandos no protocolo do agente:
+npm_build, npm_test, npm_ci, npm_install, python_test, python_compile,
+venv_create, pip_requirements, pip_package e git_status.
+
+**Validação final:** os agentes de implementação e revisão executam
+automaticamente build e/ou testes quando finalizam. Falhas são repassadas
+ao modelo com logs, permitindo até 2 ciclos extras de correção. A execução
+tem limites de 12 rodadas e 18 ações por agente, tempo máximo de 45 segundos
+por comando e saída de comando limitada a 9 KB por operação. Se falhar,
+a execução é marcada como falha: nenhuma afirmação de teste aprovado é
+inventada. Arquivos já alterados não são revertidos automaticamente.
+A barra de conversa apresenta eventos de ferramentas, erros e pedidos
+de aprovação; resultados de executores ficam no diário de eventos da tarefa.
+
+**Importante:** npm scripts, testes e instaladores podem executar código
+do projeto ou de dependências. Embora os arquivos enviados pelos modelos
+sejam limitados à pasta autorizada, executar esse código **não é uma sandbox
+do sistema operacional**: scripts podem ter acesso aos privilégios do
+usuário do Windows. Use somente em projetos/dependências confiáveis, sem
+executar a Central com privilégios de administrador. Recomenda-se backup/Git
+antes de habilitar o modo de acesso total. Nenhum acesso ocorre se a pessoa
+não ativar Autonomia para o chat. O modo de permissão pode ser revogado
+pelo botão Computador a qualquer momento; novos pedidos deixam de ser aceitos.
+
+Teste local:
+- npm run build
+- python -m pytest tests/test_agent_autonomy.py tests/test_computer_access.py tests/test_app.py -q
