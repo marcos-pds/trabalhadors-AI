@@ -19,7 +19,7 @@ from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
-from .task_contract import needs_workspace_tools
+from .task_contract import needs_workspace_tools, delivery_evidence
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -677,7 +677,14 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
 
 @app.get('/api/runs')
 def list_runs(user=Depends(current_user)):
-    return DB.all('SELECT id,conversation_id,prompt,status,mode,error,total_cost,budget_limit,created_at,updated_at FROM runs WHERE user_id=? ORDER BY created_at DESC LIMIT 100',(user['id'],))
+    rows=DB.all('SELECT id,conversation_id,prompt,status,mode,error,total_cost,budget_limit,created_at,updated_at FROM runs WHERE user_id=? ORDER BY created_at DESC LIMIT 100',(user['id'],))
+    for row in rows:
+        row['delivery_verified']=False
+        if row['status']=='completed':
+            proof=delivery_evidence(DB,row['id'])
+            row['delivery_verified']=bool(proof['changed_files'] and proof['tests_passed']
+                                          and proof['validation_after_last_change'])
+    return rows
 
 
 @app.get('/api/runs/{rid}')
@@ -685,6 +692,9 @@ def get_run(rid:str,user=Depends(current_user)):
     run=require_owned(DB,'runs',rid,user['id'])
     run['steps']=DB.all('SELECT * FROM steps WHERE run_id=?',(rid,))
     run['checkpoints']=checkpoint_summary(DB,user['id'],rid)
+    proof=delivery_evidence(DB,rid) if run['status']=='completed' else None
+    run['delivery_verified']=bool(proof and proof['changed_files'] and proof['tests_passed']
+                                   and proof['validation_after_last_change'])
     return run
 
 
@@ -862,7 +872,11 @@ def run_activity(rid: str, user=Depends(current_user)):
         })
     last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
                         'ORDER BY seq DESC LIMIT 1', (rid,))
+    proof=delivery_evidence(DB,rid) if run['status']=='completed' else None
+    delivered=bool(proof and proof['changed_files'] and proof['tests_passed']
+                   and proof['validation_after_last_change'])
     return {'run_id': rid, 'status': run['status'], 'error': run['error'],
+            'delivery_verified': delivered,
             'updated_at': run['updated_at'],
             'checkpoints': checkpoint_summary(DB,user['id'],rid),
             'steps': [{'id':step['id'],'name':step['name'],'status':step['status'],
