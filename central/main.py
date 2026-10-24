@@ -16,6 +16,7 @@ from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
+from .workspace_tools import decide as decide_workspace_action
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -603,12 +604,18 @@ class RunIn(BaseModel):
     agent_ids: list[str] = Field(default_factory=list,max_length=5)
     workflow_id: str | None = None
     budget_limit: float | None = Field(default=None,ge=0)
+    autonomous: bool = False
 
 
 @app.post('/api/runs')
 async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     convo=require_owned(DB,'conversations',data.conversation_id,user['id'])
     if data.mode not in ('auto','manual','team'): raise HTTPException(422,'Modo inválido.')
+    if data.autonomous:
+        local_only(request)
+        grant = computer_policy(DB, user['id'])
+        if grant['mode'] not in ('full','ask') or not grant['folder']:
+            raise HTTPException(403,'Autorize uma pasta no botão Computador antes de ativar a autonomia.')
     if data.agent_ids:
         for aid in data.agent_ids: require_owned(DB,'agents',aid,user['id'])
     flow=None
@@ -626,7 +633,7 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
        (now,data.prompt[:60] if convo['title']=='Nova conversa' else convo['title'],convo['id']))
     try:
         run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
-                                 flow,data.budget_limit,idempotency)
+                                 flow,data.budget_limit,idempotency,autonomous=data.autonomous)
     except ValueError as exc: raise HTTPException(422,str(exc))
     return {'id':run_id}
 
@@ -670,6 +677,38 @@ async def approve_step(rid:str,sid:str,data:ApprovalIn,user=Depends(current_user
         raise HTTPException(409,'Não há aprovação pendente.')
     ENGINE.approve(rid,sid,data.approved)
     return {'ok':True}
+
+
+@app.post('/api/runs/{rid}/workspace/approvals/{approval_id}')
+async def approve_workspace_action(rid: str, approval_id: str,
+                                   data: ApprovalIn, request: Request,
+                                   user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    run = require_owned(DB, 'runs', rid, user['id'])
+    if not run['autonomous'] or run['status'] not in ('running', 'awaiting_approval'):
+        raise HTTPException(409, 'A execução não está aguardando autorização de ferramentas.')
+    return decide_workspace_action(DB, user['id'], rid, approval_id, data.approved)
+
+
+@app.get('/api/runs/{rid}/workspace/approvals')
+def pending_workspace_approvals(rid: str, request: Request, user=Depends(current_user)):
+    local_only(request)
+    require_owned(DB, 'runs', rid, user['id'])
+    rows = DB.all("""SELECT id,request_json,step_id,created_at FROM workspace_action_approvals
+                     WHERE run_id=? AND user_id=? AND status='pending' ORDER BY created_at""",
+                  (rid, user['id']))
+    from .workspace_tools import preview
+    import json as _json
+    folder = computer_policy(DB, user['id'])['folder']
+    result = []
+    for row in rows:
+        try:
+            result.append({'approval_id': row['id'], 'step_id': row['step_id'],
+                           'summary': preview(folder, _json.loads(row['request_json']))})
+        except (HTTPException, ValueError):
+            continue
+    return result
 
 
 @app.get('/api/runs/{rid}/events')
