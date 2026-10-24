@@ -182,6 +182,18 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
 }
 
 
+const connectionErrorLabels = {
+  authentication: 'Autenticação ou permissão',
+  credits: 'Créditos / faturamento',
+  request: 'Requisição rejeitada',
+  response: 'Resposta inválida',
+  rate_limit: 'Limite de requisições',
+  timeout: 'Tempo limite',
+  unavailable: 'Provedor indisponível',
+  network: 'Erro de rede',
+  validation: 'Falha na validação',
+}
+
 function AttemptHistory({ attempts }) {
   if (!attempts.length) return null
   return <section aria-label="Histórico de tentativas de conexão" className="mt-5 rounded-2xl border border-white/10 bg-black/15 p-4">
@@ -205,7 +217,7 @@ function AttemptHistory({ attempts }) {
         </div>
         {attempt.status === 'failed' && <>
           <p className="mt-2 break-words leading-5 text-rose-200">{attempt.reason}</p>
-          <p className="mt-1 text-[10px] text-muted">Categoria: {attempt.category || 'desconhecida'}{attempt.httpStatus ? ' · HTTP ' + attempt.httpStatus : ''}</p>
+          <p className="mt-1 text-[10px] text-muted">Categoria: {connectionErrorLabels[attempt.category] || attempt.category || 'Desconhecida'}{attempt.httpStatus ? ' · HTTP ' + attempt.httpStatus : ''}</p>
           <p className="mt-2 text-[11px] text-muted">
             {attempt.nextModel ? <>Próximo modelo: <strong className="text-lilac">{attempt.nextModel.name}</strong></> :
               'Sem nova tentativa automática após este erro.'}
