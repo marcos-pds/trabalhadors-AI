@@ -1421,6 +1421,22 @@ def create_git_plan(connection_id: str, data: GitDraftPlanIn, user=Depends(curre
     return result
 
 
+@app.get('/api/git/connections/{connection_id}/draft-plans')
+def git_plan_history(connection_id: str, limit: int = 15, user=Depends(current_user)):
+    from .git_change_plans import history
+    return history(DB, user['id'], connection_id, limit)
+
+
+@app.post('/api/git/draft-plans/{plan_id}/reconcile')
+def reconcile_git_plan(plan_id: str, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    from .git_change_plans import reconcile
+    result = reconcile(DB, SEC, user['id'], plan_id)
+    ops_audit(DB, user['id'], 'git_draft_reconciled', 'git_plan', plan_id,
+              outcome=result['reconciliation'])
+    return result
+
+
 @app.get('/api/git/draft-plans/{plan_id}')
 def git_plan_status(plan_id: str, user=Depends(current_user)):
     from .git_change_plans import status
