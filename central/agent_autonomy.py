@@ -64,7 +64,8 @@ def _feedback(result):
 
 
 async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
-                            model, system, messages, emit, validate_at_finish=True):
+                            model, system, messages, emit, validate_at_finish=True,
+                            require_code_changes=False):
     """Requires an enabled scoped grant, returning only genuinely validated results."""
     grant = policy(db, user_id)
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
@@ -72,6 +73,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     system = system + '\n\n' + INSTRUCTIONS
     transcript = list(messages)
     action_count = 0
+    changed_files = set()
     validation_failures = 0
 
     for round_number in range(MAX_ROUNDS):
@@ -93,6 +95,17 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
 
         if command['action'] == 'finish':
             finished = str(command.get('message', '')).strip()[:4000]
+            if require_code_changes and not changed_files:
+                transcript.extend([
+                    {'role': 'assistant', 'content': raw[:1000]},
+                    {'role': 'user', 'content': (
+                        'Você solicitou concluir sem modificar arquivos. Esta é uma '
+                        'tarefa de implementação: use read e write/replace para criar '
+                        'uma alteração verificável. Se não houver necessidade de '
+                        'alterações ou não houver permissão, informe o bloqueio '
+                        'em vez de alegar que implementou. Próxima ação JSON:')},
+                ])
+                continue
             if not validate_at_finish:
                 return finished or 'Planejamento registrado para o próximo trabalhador.'
             results = []
@@ -137,6 +150,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             result = {'error': str(exc.detail), 'success': False}
         if result.get('approved') is False:
             raise RuntimeError('Operação negada pelo usuário. A execução foi interrompida.')
+        if command['action'] in ('write', 'replace') and result.get('sha256') and 'error' not in result:
+            changed_files.add(result.get('path', command.get('path', '')))
         emit(run_id, 'worker_message', {
             'step_id': step_id, 'action': command['action'],
             'path': command.get('path', ''),
@@ -151,6 +166,9 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
         ])
         if len(transcript) > 13:
             transcript = [transcript[0]] + transcript[-12:]
+    if require_code_changes and not changed_files:
+        raise RuntimeError('Nenhum arquivo foi realmente criado ou editado; '
+                           'a tarefa de implementação não pode ser declarada concluída.')
     raise RuntimeError('O trabalhador atingiu o limite de ' + str(MAX_ROUNDS) +
                        ' ciclos sem concluir. Alterações realizadas foram mantidas; '
                        'consulte o histórico para decidir como continuar.')
