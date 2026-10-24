@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 from .computer_access import allowed_folder, policy, scoped_path, RESTRICTED_NAMES
 from .database import uid, utcnow
-from .workspace_guard import enforce_run_scope
+from .workspace_guard import enforce_run_scope, enforce_host_command_policy
 
 _process_lock = threading.RLock()
 _active_commands = {}
@@ -391,6 +391,8 @@ def decide(db, user_id, run_id, approval_id, approved):
 async def agent_action(db, user_id, run_id, step_id, request, emit):
     requires_write = request.get('action') in ('mkdir','write','replace','command')
     folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
+    if request.get('action') == 'command':
+        enforce_host_command_policy(db,user_id,run_id)
     config = policy(db, user_id)
     summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
@@ -413,6 +415,8 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     if policy(db, user_id) != config:
         return {'error': 'Permissão revogada ou alterada.', 'approved': False}
     enforce_run_scope(db,user_id,run_id,write=requires_write)
+    if request.get('action') == 'command':
+        enforce_host_command_policy(db,user_id,run_id)
     try:
         result = await asyncio.to_thread(execute, folder, request, run_id)
     except HTTPException as exc:
