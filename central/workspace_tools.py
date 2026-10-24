@@ -410,15 +410,71 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     return result
 
 
-def validation_commands(folder):
-    root = Path(folder)
+def validation_commands(folder, changed_files=None):
+    """Run real checks in the nearest applicable workspace, never an empty build.
+
+    A monorepo can be nested several levels below the granted folder. Validate
+    the project actually touched rather than compiling unrelated root files.
+    """
+    root = Path(allowed_folder(folder))
+    candidates = []
+    for relative in changed_files or []:
+        if not isinstance(relative, str):
+            continue
+        try:
+            path = target(folder, relative, creating=False)
+        except HTTPException:
+            continue
+        for directory in (path.parent, *path.parent.parents):
+            if not directory.is_relative_to(root):
+                break
+            pkg = directory / 'package.json'
+            if pkg.is_file():
+                try:
+                    scripts = json.loads(pkg.read_text(encoding='utf-8')).get('scripts') or {}
+                except (OSError, ValueError, AttributeError):
+                    scripts = {}
+                if isinstance(scripts, dict):
+                    if 'build' in scripts:
+                        candidates.append((directory, 'npm_build'))
+                    elif 'test' in scripts:
+                        candidates.append((directory, 'npm_test'))
+                if 'build' in scripts or 'test' in scripts:
+                    break
+
+    if not candidates:
+        for directory in (root, root / 'frontend'):
+            pkg = directory / 'package.json'
+            if not pkg.is_file():
+                continue
+            try:
+                scripts = json.loads(pkg.read_text(encoding='utf-8')).get('scripts') or {}
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(scripts, dict):
+                if 'build' in scripts:
+                    candidates.append((directory, 'npm_build'))
+                elif 'test' in scripts:
+                    candidates.append((directory, 'npm_test'))
+
     commands = []
-    if (root / 'package.json').is_file():
-        commands.append({'action': 'command', 'command': 'npm_build'})
-    elif (root / 'frontend' / 'package.json').is_file():
-        commands.append({'action': 'command', 'command': 'npm_build', 'cwd': 'frontend'})
-    if (root / 'tests').is_dir() or (root / 'pytest.ini').exists() or (root / 'pyproject.toml').exists():
+    for directory, name in candidates:
+        command = {'action': 'command', 'command': name}
+        if directory != root:
+            command['cwd'] = directory.relative_to(root).as_posix()
+        if command not in commands:
+            commands.append(command)
+
+    if (root / 'tests').is_dir() or (root / 'pytest.ini').exists() or
+            (root / 'pyproject.toml').exists()):
         commands.append({'action': 'command', 'command': 'python_test'})
     if not commands:
-        commands.append({'action': 'command', 'command': 'python_compile'})
+        # Never claim a JavaScript app was validated by an empty compileall.
+        python_files = any(root.glob('*.py')) or any(root.glob('src/*.py'))
+        if python_files:
+            commands.append({'action': 'command', 'command': 'python_compile'})
+    if not commands:
+        raise RuntimeError(
+            'Nenhum build ou teste aplicável foi encontrado nos projetos modificados. '
+            'Crie/configure scripts de validação antes de declarar a entrega concluída.')
     return commands[:2]
