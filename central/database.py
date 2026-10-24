@@ -85,6 +85,15 @@ CREATE TABLE IF NOT EXISTS events (
  event TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id,seq);
+CREATE TABLE IF NOT EXISTS run_feedback (
+ id TEXT PRIMARY KEY,
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ content TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_run_feedback_pending ON run_feedback(run_id,user_id,consumed_at,created_at);
 CREATE TABLE IF NOT EXISTS computer_access_settings (
  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
  mode TEXT NOT NULL DEFAULT 'blocked' CHECK(mode IN ('blocked','ask','full')),
