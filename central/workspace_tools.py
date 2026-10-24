@@ -21,6 +21,7 @@ from fastapi import HTTPException
 
 from .computer_access import allowed_folder, policy, scoped_path, RESTRICTED_NAMES
 from .database import uid, utcnow
+from .workspace_guard import enforce_run_scope
 
 _process_lock = threading.RLock()
 _active_commands = {}
@@ -63,6 +64,16 @@ MAX_ACTIONS = 18
 MAX_ROUNDS = 12
 MAX_VALIDATION_RETRIES = 2
 COMMAND_TIMEOUT = 45
+# Installers can execute package hooks, even when npm --ignore-scripts is set
+# (pip builds and environment setup remain executable code).
+APPROVAL_REQUIRED_COMMANDS = frozenset({
+    'npm_install','npm_ci','pip_requirements','pip_package','venv_create'
+})
+
+
+def critical_action(request):
+    return (request.get('action') == 'command'
+            and request.get('command') in APPROVAL_REQUIRED_COMMANDS)
 PACKAGE = re.compile(r'^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(?:@[0-9][a-z0-9._-]*)?$', re.I)
 PIP_PACKAGE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*(?:==[0-9][a-zA-Z0-9_.-]*)?$')
 
@@ -365,8 +376,11 @@ def decide(db, user_id, run_id, approval_id, approved):
     if not row or row['status'] != 'pending':
         raise HTTPException(409, 'Autorização indisponível ou já respondida.')
     current = policy(db, user_id)
-    if current['mode'] != 'ask' or current['folder'] != row['folder']:
+    requested = json.loads(row['request_json'])
+    if (current['mode'] not in ('full','ask') or current['folder'] != row['folder']
+            or (current['mode'] == 'full' and not critical_action(requested))):
         raise HTTPException(409, 'Permissão alterada ou revogada.')
+    enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Autorização expirada.')
     db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",
@@ -375,13 +389,12 @@ def decide(db, user_id, run_id, approval_id, approved):
 
 
 async def agent_action(db, user_id, run_id, step_id, request, emit):
+    requires_write = request.get('action') in ('mkdir','write','replace','command')
+    folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
     config = policy(db, user_id)
-    if config['mode'] == 'blocked':
-        raise HTTPException(403, 'Acesso bloqueado. Autorize uma pasta no chat.')
-    folder = allowed_folder(config['folder'])
     summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
-    if config['mode'] == 'ask':
+    if config['mode'] == 'ask' or critical_action(request):
         token = issue_approval(db, user_id, run_id, step_id, folder, request, summary)
         emit(run_id, 'workspace_approval_required', {
             'step_id': step_id, 'approval_id': token, 'summary': summary})
@@ -399,6 +412,7 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
             return {'error': 'Aprovação expirou após 10 minutos.', 'approved': False}
     if policy(db, user_id) != config:
         return {'error': 'Permissão revogada ou alterada.', 'approved': False}
+    enforce_run_scope(db,user_id,run_id,write=requires_write)
     try:
         result = await asyncio.to_thread(execute, folder, request, run_id)
     except HTTPException as exc:
