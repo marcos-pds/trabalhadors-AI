@@ -130,6 +130,8 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         <div className="flex items-center gap-2">
           {isRunning && <button type="button" onClick={onStop} className={btn + ' border-rose-300/30 text-rose-200'}>■ Parar tarefa</button>}
           {canContinue && <button type="button" onClick={onResume} className={btn + ' border-violet-400/40 text-violet-200'}>↻ Continuar execução</button>}
+          {runId && <a href={'/api/runs/' + encodeURIComponent(runId) + '/export?format=md'}
+            download className={btn}>Exportar relatório</a>}
           <button type="button" aria-label="Fechar painel" onClick={onClose} className={btn}>✕</button>
         </div>
       </div>

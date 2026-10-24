@@ -1,0 +1,41 @@
+import httpx
+import pytest
+from central.database import Database
+from central.release_checks import report
+from central.load_probe import run
+
+
+def test_readiness_never_passes_unperformed_external_validation(monkeypatch):
+    monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE', 'local')
+    db = Database(':memory:')
+    result = report(db)
+    assert result['production_ready'] is False
+    checks = {row['name']: row['status'] for row in result['checks']}
+    assert checks['database_integrity'] == 'passed'
+    assert checks['docker_daemon'] == 'not_checked'
+    assert checks['independent_security_review'] == 'requires_external_validation'
+    db.close()
+
+
+def test_load_probe_counts_errors_and_restricts_target_and_work():
+    responses = []
+    def respond(request):
+        assert request.url.path == '/api/health'
+        responses.append(request)
+        return httpx.Response(503)
+    result = run('https://central.example.com', requests=3, workers=1,
+                 transport=httpx.MockTransport(respond))
+    assert result['failed'] == 3 and result['successful'] == 0 and result['p95_ms'] >= 0
+    assert len(responses) == 3
+    with pytest.raises(ValueError):
+        run('https://user:password@example.com')
+    with pytest.raises(ValueError):
+        run('https://example.com', requests=100000)
+
+
+def test_release_cli_fails_gate_when_external_checks_are_pending(tmp_path, capsys, monkeypatch):
+    from central.cli import main
+    monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE', 'local')
+    db = Database(tmp_path / 'central.sqlite3'); db.close()
+    assert main(['--data-dir', str(tmp_path), 'release-check']) == 2
+    assert 'production_ready' in capsys.readouterr().out

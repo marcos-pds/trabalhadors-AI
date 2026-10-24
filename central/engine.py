@@ -6,7 +6,6 @@ import time
 from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
-from .health import ProviderHealth
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
 from .observability import log_event
@@ -19,148 +18,13 @@ from .task_contract import (is_implementation_request, is_workspace_inspection_r
                             needs_workspace_tools, assert_implementation_delivered,
                             assert_inspection_performed)
 
-TEMPLATES = [
- ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
- ('Frontend IA','frontend','Implemente frontend com foco em UX, acessibilidade, componentes reais e responsividade.','◇'),
- ('Backend IA','backend','Projete e implemente APIs, autenticação, persistência, validações e segurança.','⬡'),
- ('Designer IA','design','Produza direção visual, UI elegante, microinterações, hierarquia tipográfica e experiência do usuário.','✺'),
- ('Programador IA','code','Implemente código completo, coerente, legível e testável.','⌘'),
- ('Revisor IA','review','Analise resultados criticamente, aponte defeitos e valide critérios com rigor.','✓'),
- ('Pesquisador IA','research','Pesquise e compare alternativas. Sem ferramenta de busca, reconheça limitações e não invente referências.','◎'),
- ('DevOps IA','devops','Pipelines, infraestrutura, observabilidade, confiabilidade e execução segura.','⚙'),
- ('Vídeo e Legendas IA','video','Oriente transcrição, legendagem, edição e automação de vídeos.','▣'),
- ('Coordenador IA','coordination','Una resultados, priorize entregas e explique decisões e pendências.','✦'),
-]
+from .agent_registry import (
+    TEMPLATES, STANDARD_SPECIALTIES, KEYWORDS, suggested_default_specialty,
+    effective_specialty, recoverable_default_agents, team_for_task, discover_agents,
+)
+from .provider_manager import ProviderManager
 
-
-STANDARD_SPECIALTIES = {name: (specialty, instructions)
-                        for name, specialty, instructions, _avatar in TEMPLATES}
-
-
-def suggested_default_specialty(agent):
-    """Recover the role of an unchanged factory agent, never an arbitrary custom agent.
-
-    Only the exact built-in name plus the original system instructions qualifies.
-    User-customized instructions and renamed workers keep their configured role.
-    """
-    template = STANDARD_SPECIALTIES.get(agent.get('name'))
-    if template and (agent.get('instructions') or '').strip() == template[1].strip():
-        return template[0]
-    return None
-
-
-def effective_specialty(agent):
-    return suggested_default_specialty(agent) or agent['specialty']
-
-
-def recoverable_default_agents(agents):
-    """Offer an explicit migration to fix incorrectly saved factory specialties."""
-    return [dict(agent, suggested_specialty=suggested_default_specialty(agent))
-            for agent in agents if suggested_default_specialty(agent)
-            and agent['specialty'] != suggested_default_specialty(agent)]
-
-
-def team_for_task(agents, prompt):
-    """Select planning, an implementation specialist, and review in order."""
-    available = [a for a in agents if a['enabled']]
-    if not available:
-        return []
-    lowered = prompt.casefold()
-    from .task_contract import _plain
-    normalized = _plain(prompt)
-    ui = any(x in normalized for x in
-             ('landing page', 'landing-page', 'frontend', 'front-end', 'interface',
-              'react', 'pagina', 'website', 'design visual', 'layout'))
-    api = any(x in normalized for x in
-              ('backend', 'back-end', 'api', 'autenticacao', 'servidor', 'banco de dados'))
-    order = (('frontend', 'code', 'backend') if ui else
-             ('backend', 'code', 'frontend') if api else
-             ('code', 'frontend', 'backend'))
-    def select(specialties, exclude):
-        return next((a for specialty in specialties for a in available
-                     if effective_specialty(a) == specialty and a['id'] not in exclude), None)
-    result = []
-    for candidates in (('architecture', 'coordination'), order,
-                       ('review',)):
-        pick = select(candidates, {a['id'] for a in result})
-        if pick is not None:
-            result.append(pick)
-    return result
-
-
-KEYWORDS = {
- 'architecture': ['arquitet','arquitetura','sistema','estrutura','dependência','design técnico'],
- 'frontend': ['frontend','front-end','react','interface','componente','css','html','tela','página','dashboard'],
- 'backend': ['backend','back-end','api','servidor','banco','database','autenticação','login','endpoint'],
- 'design': ['design','layout','visual','estilo','figma','ui','identidade'],
- 'research': ['pesquis','compare','compar','estud','analis'],
- 'devops': ['deploy','docker','devops','infra','ci/cd','pipeline'],
- 'video': ['vídeo','video','legenda','transcri','reels'],
- 'code': ['código','program','função','script','bug','corrij'],
- 'review': ['revis','avalie','valid','auditoria','qualidade','critique'],
- 'coordination': ['coordene','organize','resuma','sintetize','equipe','multiagente'],
-}
-
-
-def discover_agents(agents, prompt, mode='auto', agent_ids=None):
-    candidates = [a for a in agents if a['enabled']]
-    if agent_ids:
-        selected = [a for a in candidates if a['id'] in agent_ids]
-        return selected[:5]
-    if not candidates: return []
-    if mode == 'manual': return candidates[:1]
-    lower = prompt.lower()
-    specialties = [name for name, words in KEYWORDS.items() if any(w in lower for w in words)]
-    filtered = [a for a in candidates if effective_specialty(a) in specialties]
-    if mode == 'team':
-        # 'Equipe' must never be silently reduced to the single keyword match.
-        selected = filtered[:2]
-        for specialty in ('architecture', 'code', 'review'):
-            agent = next((a for a in candidates if effective_specialty(a) == specialty), None)
-            if agent and agent not in selected:
-                selected.append(agent)
-            if len(selected) >= 3:
-                break
-        if len(selected) < 2:
-            selected.extend(a for a in candidates if a not in selected)
-        return selected[:3]
-    return filtered[:3] if filtered else [next((a for a in candidates if effective_specialty(a)=='coordination'), candidates[0])]
-
-
-def create_plan(agents, sequential=False):
-    if not agents: return []
-    jobs = []
-    for a in agents:
-        deps = [jobs[-1]['id']] if sequential and jobs else []
-        jobs.append({'id': uid(), 'agent_id': a['id'], 'name': a['name'],
-                     'kind': 'agent', 'deps': deps, 'instructions': ''})
-    return jobs
-
-
-def validate_flow(definition, agents):
-    """Small DAG workflow builder, with agent and human approval nodes."""
-    nodes = definition.get('nodes', [])
-    if not isinstance(nodes, list) or len(nodes) > 20 or not nodes:
-        raise ValueError('O fluxo deve conter entre 1 e 20 blocos.')
-    ids = {n.get('id') for n in nodes}
-    if len(ids) != len(nodes) or None in ids: raise ValueError('IDs de blocos duplicados/inválidos.')
-    known_agents = {a['id'] for a in agents}
-    for n in nodes:
-        if n.get('kind') not in ('agent','approval'):
-            raise ValueError('Somente blocos de agente e aprovação são executáveis nesta versão.')
-        if n['kind']=='agent' and n.get('agent_id') not in known_agents:
-            raise ValueError('O fluxo referencia trabalhador indisponível.')
-        if not isinstance(n.get('deps', []),list) or any(d not in ids or d==n['id'] for d in n.get('deps',[])):
-            raise ValueError('Dependências de fluxo inválidas.')
-    seen = set()
-    remaining = nodes[:]
-    while remaining:
-        ready = [n for n in remaining if all(d in seen for d in n.get('deps',[]))]
-        if not ready: raise ValueError('Fluxo contém dependências cíclicas.')
-        for n in ready:
-            seen.add(n['id'])
-            remaining.remove(n)
-    return nodes
+from .workflows import create_plan, validate_flow
 
 
 class Engine:
@@ -172,7 +36,8 @@ class Engine:
         self.shutting_down = False
         self.sem = asyncio.Semaphore(5)
         self.agent_sems = {}
-        self.health = ProviderHealth(db)  # persistent across restarts
+        self.providers = ProviderManager(db)
+        self.health = self.providers.health  # backward compatible public instrumentation
         self.approvals = defaultdict(asyncio.Event)
         self.queue = JobQueue(db)
         self.job_mode = __import__('os').environ.get('CENTRAL_JOB_MODE', 'embedded')
@@ -180,6 +45,14 @@ class Engine:
             raise ValueError('CENTRAL_JOB_MODE must be embedded, api, or worker')
         self.dispatch_task = None
         self.worker_owner = uid()
+
+    @property
+    def health(self):
+        return self.providers.health
+
+    @health.setter
+    def health(self, value):
+        self.providers.health = value
 
     def emit(self, run_id, kind, data):
         self.db.event(run_id, kind, data)
@@ -498,7 +371,7 @@ class Engine:
         specialty = effective_specialty(agent)
         prev = self.db.all('SELECT name,output FROM steps WHERE run_id=? AND status=? AND output IS NOT NULL', (run['id'],'completed'))
         context = '\n\n'.join(f"{p['name']}:\n{p['output'][:2500]}" for p in prev)[:5500]
-        memory = build_memory(self.db, user, run['conversation_id'], run['prompt'])
+        memory = await asyncio.to_thread(build_memory, self.db, user, run['conversation_id'], run['prompt'])
         prompt_parts = []
         if memory['text']:
             prompt_parts.append(memory['text'])
@@ -528,8 +401,7 @@ class Engine:
                             for x in memory['sources']],
             })
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
-        providers = self.db.all('SELECT * FROM providers WHERE user_id=? AND enabled=1 ORDER BY priority ASC,created_at ASC', (user,))
-        providers = self.health.rank(providers, preferred=agent['provider_id'], preferred_model=agent['model'])
+        providers = self.providers.candidates(user, agent)
         if not providers:
             raise RuntimeError('Nenhum provedor configurado. Abra Provedores e adicione uma API válida.')
         failures = []

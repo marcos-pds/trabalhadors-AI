@@ -29,7 +29,7 @@ Formas aceitas (uma operação por resposta):
 {"action":"finish","message":"Resumo objetivo do que foi feito e do que falta."}
 
 Comandos: npm_build, npm_test, npm_ci, npm_install, python_test,
-python_compile, pip_requirements, pip_package, venv_create, git_status.
+python_compile, pip_requirements, pip_package, venv_create, git_status, git_diff, git_log.
 Não é possível chamar shell arbitrário, apagar arquivos, acessar outra pasta,
 fazer deploy, git push, mexer no registro do Windows ou manipular segredos.
 Leia o arquivo ANTES de modificá-lo; use replace + sha256 para edições pequenas.

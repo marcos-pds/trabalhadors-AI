@@ -742,10 +742,10 @@ Para voltar ao modo local: Remove-Item Env:CENTRAL_COMMAND_RUNNER
   por worker e limpeza best effort do container no cancelamento.
 - Organizacoes continuam exigindo aprovacao humana por comando.
   A autorizacao de scripts no host deixa de ser necessaria no Docker.
-- Instalacao de dependencias e criacao de ambientes sao bloqueadas
-  no modo Docker por exigir politica de rede e cache propria.
-- A previa npm dev ainda nao esta isolada: o endpoint bloqueia
-  a inicializacao no host quando o modo Docker estiver ativo.
+- Dependencias npm/Python possuem instalacao isolada com aprovacao e
+  cache por projeto; veja ROADMAP.md para rede e homologacao pendente.
+- A previa Vite agora executa no conteiner sem rede por proxy HTTP local
+  separado; veja limites e homologacao pendente em ROADMAP.md.
 - Falta de Docker, erro de imagem ou daemon parado nao provocam
   fallback automatico para execucao no Windows.
 
@@ -796,3 +796,12 @@ execucao e bloqueada, sem fallback. Para continuar, reinicie API e
 worker com CENTRAL_COMMAND_RUNNER igual ao modo autorizado na tarefa.
 Para uma tarefa ja vinculada, alternar o modo exige uma nova tarefa;
 isso evita enfraquecer acidentalmente as politicas de uma execucao.
+
+
+## Fases 5 a 12: implementação e homologação
+
+O status atualizado, comandos e critérios pendentes estão em [ROADMAP.md](ROADMAP.md).
+A implementação local inclui dependências npm/Python, prévia HTTP Docker,
+memória semântica opcional, serviços separados, revisões GitHub/GitLab,
+exportação, migrações SQLite, convites e backup criptografado.
+PostgreSQL, Redis distribuído, SSO e homologação de produção continuam pendentes.

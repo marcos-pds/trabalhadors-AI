@@ -126,6 +126,12 @@ def build_memory(db, user_id, conversation_id, prompt):
         if project['memory_notes']:
             context.append('Notas fixadas pelo usuário:\n' + project['memory_notes'][:PROJECT_NOTES_CHARS])
         sources = matching_project_messages(db, user_id, project['id'], conversation_id, prompt)
+        from .semantic_memory import retrieve
+        semantic = retrieve(db, user_id, project['id'], conversation_id, prompt)
+        seen = {(r['conversation_id'], r['content'][:100]) for r in semantic}
+        sources = (semantic + [r for r in sources
+                   if (r['conversation_id'], r['content'][:100]) not in seen])[:PROJECT_RECALL_COUNT]
+
 
     if history:
         context.append('Trechos recentes desta conversa:\n' + '\n'.join(

@@ -47,3 +47,9 @@ dist/
 build/
 /static/build/
 /data/
+
+.central-npm-cache/
+
+.central-python/
+.central-pip-cache/
+.central-wheels/

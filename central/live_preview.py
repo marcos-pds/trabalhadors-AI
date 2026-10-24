@@ -15,6 +15,8 @@ from fastapi import HTTPException
 
 from .computer_access import allowed_folder, policy
 from .workspace_tools import target, _kill_tree
+from .sandbox_executor import backend
+from . import docker_preview
 
 _LOCK = threading.RLock()
 _SESSIONS = {}
@@ -59,18 +61,25 @@ def _alive(entry):
 def info(user_id):
     with _LOCK:
         entry = _SESSIONS.get(user_id)
-        if not _alive(entry):
-            _SESSIONS.pop(user_id, None)
+        if not _alive(entry) or (entry.get('authorized') and not entry['authorized']()):
+            stop(user_id)
             return {'status': 'stopped'}
         return {'status': 'running', 'cwd': entry['cwd'],
-                'url': 'http://127.0.0.1:' + str(entry['port']) + '/',
+                'backend': entry.get('backend', 'host'),
+                'url': 'http://127.0.0.1:' + str(entry['port']) + entry.get('prefix', '/'),
                 'port': entry['port']}
 
 
-def stop(user_id):
+def stop(user_id, expected=None):
     with _LOCK:
+        if expected is not None and _SESSIONS.get(user_id) is not expected:
+            return {'status': 'stopped'}
         entry = _SESSIONS.pop(user_id, None)
     if entry:
+        if entry.get('timer'):
+            entry['timer'].cancel()
+        if entry.get('container'):
+            docker_preview.cleanup(entry)
         _kill_tree(entry['process'])
     return {'status': 'stopped'}
 
@@ -91,15 +100,60 @@ def start(db, user_id, relative):
     if relative not in [item['cwd'] for item in available]:
         raise HTTPException(422, 'Escolha um projeto com script npm dev listado dentro da pasta autorizada.')
     directory = target(folder, relative, directory=True)
-    npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+    runner = backend()
+    npm = 'npm' if runner == 'docker' else shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
     if not npm:
         raise HTTPException(422, 'npm não encontrado. Instale Node.js neste computador.')
     with _LOCK:
         previous = _SESSIONS.get(user_id)
         if _alive(previous):
-            if previous['cwd'] == relative and previous['folder'] == folder:
+            if (previous['cwd'] == relative and previous['folder'] == folder
+                    and previous.get('backend', 'host') == runner):
                 return info(user_id)
             raise HTTPException(409, 'Pare a prévia atual antes de iniciar outra.')
+    if runner == 'docker':
+        with _LOCK:
+            # Recheck under the creation lock: simultaneous requests must not
+            # overwrite a live session and leak its proxy/container.
+            previous = _SESSIONS.get(user_id)
+            if _alive(previous):
+                if (previous['cwd'] == relative and previous['folder'] == folder
+                        and previous.get('backend', 'host') == runner):
+                    return info(user_id)
+                raise HTTPException(409, 'Pare a prévia atual antes de iniciar outra.')
+            if previous:
+                stop(user_id)
+            if len(_SESSIONS) >= 4:
+                raise HTTPException(429, 'Limite de quatro prévias simultâneas atingido.')
+            def authorized():
+                return policy(db, user_id) == permission
+            entry = docker_preview.start(directory, authorized)
+            entry.update(folder=folder, cwd=relative, backend='docker', authorized=authorized)
+            _SESSIONS[user_id] = entry
+            timer = threading.Timer(1800, stop, args=(user_id, entry))
+            timer.daemon = True
+            entry['timer'] = timer
+            timer.start()
+        # Check the actual container HTTP server, not merely the proxy listener.
+        for _ in range(24):
+            if entry['process'].poll() is not None:
+                break
+            try:
+                check = subprocess.run(
+                    [shutil.which('docker.exe' if os.name == 'nt' else 'docker'),
+                     'exec', entry['container'], 'python3', '-c',
+                     'import socket;s=socket.create_connection(("127.0.0.1",4173),1);s.close()'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                if check.returncode == 0:
+                    with _LOCK:
+                        if _SESSIONS.get(user_id) is not entry:
+                            raise HTTPException(409, 'Prévia substituída ou encerrada.')
+                    return info(user_id)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            time.sleep(.25)
+        stop(user_id, expected=entry)
+        raise HTTPException(504, 'A prévia Docker não iniciou; verifique a imagem e as dependências.')
     port = _port()
     # npm scripts execute third-party code with the local Windows user's privileges.
     # The UI asks for explicit preview startup confirmation.

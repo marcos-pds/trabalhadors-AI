@@ -3,8 +3,10 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pytest git ca-certificates \
+    && apt-get install -y --no-install-recommends python3 python3-venv python3-pytest git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv --system-site-packages /opt/central-python
 
 WORKDIR /workspace
 ENV HOME=/tmp \

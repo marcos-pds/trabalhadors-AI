@@ -23,6 +23,7 @@ from .computer_access import allowed_folder, policy, scoped_path, RESTRICTED_NAM
 from .database import uid, utcnow
 from .workspace_guard import enforce_run_scope, enforce_host_command_policy
 from .sandbox_executor import backend as command_backend, sandbox_argv, force_remove
+from .approval_engine import issue_approval, decide
 
 _process_lock = threading.RLock()
 _active_commands = {}
@@ -111,6 +112,8 @@ COMMAND_LABELS = {
     'pip_package': 'python -m pip install [pacote]',
     'venv_create': 'python -m venv .venv',
     'git_status': 'git status --short',
+    'git_diff': 'git diff --no-ext-diff --no-textconv',
+    'git_log': 'git log --oneline -20',
 }
 
 
@@ -224,10 +227,6 @@ def command_spec(folder, request):
     cwd = request.get('cwd', '')
     root = target(folder, cwd, directory=True)
     docker_mode = command_backend() == 'docker'
-    if docker_mode and code in ('npm_ci','npm_install','pip_requirements',
-                                'pip_package','venv_create'):
-        raise HTTPException(
-            409,'Instalação de pacotes não suportada no executor isolado sem rede.')
     npm = ('npm' if docker_mode else
            shutil.which('npm.cmd' if os.name == 'nt' else 'npm'))
     git = 'git' if docker_mode else shutil.which('git.exe' if os.name == 'nt' else 'git')
@@ -240,7 +239,7 @@ def command_spec(folder, request):
                   str(local_python) if local_python.is_file() else sys.executable)
     if code.startswith('npm_') and not npm:
         raise HTTPException(422, 'npm não encontrado no PATH do Windows.')
-    if code == 'git_status' and not git:
+    if code.startswith('git_') and not git:
         raise HTTPException(422, 'Git não instalado.')
     commands = {
         'npm_build': [npm, 'run', 'build'],
@@ -250,7 +249,9 @@ def command_spec(folder, request):
         'python_compile': [python_bin, '-m', 'compileall', '-q', '.'],
         'pip_requirements': [python_bin, '-m', 'pip', 'install', '-r', 'requirements.txt'],
         'venv_create': [sys.executable, '-m', 'venv', '.venv'],
-        'git_status': [git, 'status', '--short'],
+        'git_status': [git, '-c', 'core.fsmonitor=false', 'status', '--short'],
+        'git_diff': [git, '-c', 'core.fsmonitor=false', 'diff', '--no-ext-diff', '--no-textconv'],
+        'git_log': [git, '-c', 'core.fsmonitor=false', 'log', '--no-show-signature', '--oneline', '-20'],
     }
     package = request.get('package', '')
     if code == 'npm_install':
@@ -441,37 +442,6 @@ def execute(folder, request, run_id=None):
                 if _active_containers.get(run_id) == container_name:
                     _active_containers.pop(run_id, None)
         _command_slots.release()
-
-def issue_approval(db, user_id, run_id, step_id, folder, request, summary):
-    # Store pending edits/commands inside the local DB; no secrets are returned to other users.
-    token = uid()
-    expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
-    db.execute('''INSERT INTO workspace_action_approvals
-      (id,user_id,run_id,step_id,folder,request_json,status,expires_at,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?)''',
-      (token, user_id, run_id, step_id, folder, json.dumps(request, ensure_ascii=False),
-       'pending', expires, utcnow()))
-    return token
-
-
-def decide(db, user_id, run_id, approval_id, approved):
-    row = db.one('''SELECT * FROM workspace_action_approvals
-      WHERE id=? AND user_id=? AND run_id=?''', (approval_id, user_id, run_id))
-    if not row or row['status'] != 'pending':
-        raise HTTPException(409, 'Autorização indisponível ou já respondida.')
-    current = policy(db, user_id)
-    requested = json.loads(row['request_json'])
-    if (current['mode'] not in ('full','ask') or current['folder'] != row['folder']
-            or (current['mode'] == 'full' and
-                not needs_explicit_approval(db,user_id,run_id,requested))):
-        raise HTTPException(409, 'Permissão alterada ou revogada.')
-    enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
-    if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
-        raise HTTPException(409, 'Autorização expirada.')
-    db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",
-               ('approved' if approved else 'denied', approval_id))
-    return {'ok': True, 'approved': approved}
-
 
 async def agent_action(db, user_id, run_id, step_id, request, emit):
     requires_write = request.get('action') in ('mkdir','write','replace','command')

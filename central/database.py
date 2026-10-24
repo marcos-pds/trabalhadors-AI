@@ -285,6 +285,8 @@ class Database:
             except Exception:
                 self.conn.execute('ROLLBACK')
                 raise
+        from .migrations import migrate
+        migrate(self)
 
     def execute(self, query, args=()):
         with self.lock:

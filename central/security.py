@@ -28,6 +28,12 @@ class Security:
     def __init__(self, db, data_dir):
         self.db = db
         keyfile = Path(data_dir) / 'secret.key'
+        configured_key = os.environ.get('CENTRAL_SECRET_KEY')
+        if configured_key:
+            self.fernet = Fernet(configured_key.encode())
+            if keyfile.exists() and keyfile.read_bytes().strip() != configured_key.encode():
+                raise ValueError('CENTRAL_SECRET_KEY differs from existing secret.key; migrate keys explicitly')
+            return
         if not keyfile.exists():
             try:
                 with keyfile.open('xb') as f:

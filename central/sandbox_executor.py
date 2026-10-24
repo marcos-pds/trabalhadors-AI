@@ -14,10 +14,9 @@ from fastapi import HTTPException
 
 IMAGE = 'central-ai-executor:py311-node22'
 SUPPORTED = frozenset({
-    'npm_build', 'npm_test', 'python_test', 'python_compile', 'git_status'
-})
-BLOCKED = frozenset({
-    'npm_ci', 'npm_install', 'pip_requirements', 'pip_package', 'venv_create'
+    'npm_build', 'npm_test', 'python_test', 'python_compile', 'git_status',
+    'npm_ci', 'npm_install', 'pip_package', 'pip_requirements', 'venv_create',
+    'git_diff', 'git_log'
 })
 _IMAGE_NAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,159}$')
 
@@ -48,11 +47,6 @@ def sandbox_argv(spec, request, name=None):
     if backend() != 'docker':
         raise RuntimeError('Executor Docker não está ativo.')
     code = request.get('command')
-    if code in BLOCKED:
-        raise HTTPException(
-            409, 'Instalações e criação de ambientes ainda não são suportadas '
-                 'na sandbox sem rede. Prepare dependências fora da Central '
-                 'antes de executar builds ou testes isolados.')
     if code not in SUPPORTED:
         raise HTTPException(422, 'Comando não compatível com executor isolado.')
     docker = shutil.which('docker.exe' if os.name == 'nt' else 'docker')
@@ -64,6 +58,13 @@ def sandbox_argv(spec, request, name=None):
     image = os.environ.get('CENTRAL_DOCKER_IMAGE', IMAGE).strip()
     if not _IMAGE_NAME.fullmatch(image) or image.startswith(('-', '/')):
         raise HTTPException(422, 'Imagem Docker configurada é inválida.')
+    installation = code in ('npm_ci', 'npm_install', 'pip_package', 'pip_requirements')
+    # Only an operator environment setting may enable egress. AI/request fields
+    # cannot choose network names, registries or Docker options.
+    install_network = os.environ.get('CENTRAL_DOCKER_INSTALL_NETWORK', 'none').strip()
+    if install_network not in ('none', 'bridge'):
+        raise HTTPException(422, 'CENTRAL_DOCKER_INSTALL_NETWORK deve ser none ou bridge.')
+    network = install_network if installation else 'none'
     source = _workspace_source(spec['root'])
     workdir = '/workspace'
     # Bind the selected project subfolder ONLY. A sibling repository or home
@@ -76,13 +77,66 @@ def sandbox_argv(spec, request, name=None):
     command_map = {
         'npm_build': ['npm','run','build'],
         'npm_test': ['npm','test'],
-        'python_test': ['python3','-m','pytest','-q'],
+        'python_test': ['/opt/central-python/bin/python','-m','pytest','-q'],
         'python_compile': ['python3','-m','compileall','-q','.'],
-        'git_status': ['git','-c','safe.directory=/workspace','status','--short'],
+        'git_status': ['git','-c','safe.directory=/workspace','-c','core.fsmonitor=false','status','--short'],
+        'git_diff': ['git','-c','safe.directory=/workspace','-c','core.fsmonitor=false',
+                     'diff','--no-ext-diff','--no-textconv'],
+        'git_log': ['git','-c','safe.directory=/workspace','-c','core.fsmonitor=false',
+                    'log','--no-show-signature','--oneline','-20'],
     }
+    if code in ('npm_ci', 'npm_install'):
+        from .workspace_tools import PACKAGE
+        command = ['npm', 'ci' if code == 'npm_ci' else 'install',
+                   '--ignore-scripts', '--no-audit', '--no-fund',
+                   '--cache', '/workspace/.central-npm-cache']
+        if network == 'none':
+            command.append('--offline')
+        if code == 'npm_install':
+            package = request.get('package', '')
+            if not isinstance(package, str) or not PACKAGE.fullmatch(package):
+                raise HTTPException(422, 'Nome do pacote npm inválido.')
+            command.append(package)
+    elif code in ('pip_package', 'pip_requirements'):
+        from .workspace_tools import PIP_PACKAGE
+        command = ['/opt/central-python/bin/python', '-m', 'pip', '--isolated',
+                   'install', '--only-binary=:all:', '--no-compile',
+                   '--target', '/workspace/.central-python',
+                   '--cache-dir', '/workspace/.central-pip-cache']
+        if network == 'none':
+            command += ['--no-index', '--find-links', '/workspace/.central-wheels']
+        if code == 'pip_package':
+            package = request.get('package', '')
+            if not isinstance(package, str) or not PIP_PACKAGE.fullmatch(package):
+                raise HTTPException(422, 'Nome do pacote Python inválido.')
+            command.append(package)
+        else:
+            # Validate requirements even when called without command_spec.
+            from .workspace_tools import command_spec
+            command_spec(str(spec['root']), dict(request, cwd=''))
+            command += ['-r', '/workspace/requirements.txt']
+        if network == 'bridge':
+            # Cache wheel archives, not merely pip's HTTP cache, so later
+            # offline installs are reproducible without enabling egress.
+            import json
+            requirement = (['-r', '/workspace/requirements.txt'] if code == 'pip_requirements'
+                           else [request['package']])
+            download = ['/opt/central-python/bin/python', '-m', 'pip', '--isolated',
+                        'download', '--only-binary=:all:', '--dest', '/workspace/.central-wheels',
+                        '--cache-dir', '/workspace/.central-pip-cache', *requirement]
+            install = command + ['--no-index', '--find-links', '/workspace/.central-wheels']
+            program = ('import json,subprocess,sys;'
+                       'a=json.loads(sys.argv[1]);b=json.loads(sys.argv[2]);'
+                       'r=subprocess.run(a);'
+                       'sys.exit(r.returncode if r.returncode else subprocess.run(b).returncode)')
+            command = ['python3', '-c', program, json.dumps(download), json.dumps(install)]
+    elif code == 'venv_create':
+        command = ['python3', '-m', 'venv', '.venv']
+    else:
+        command = command_map[code]
     return [
         docker,'run','--rm','--name',container,
-        '--network','none','--read-only','--cap-drop','ALL',
+        '--network',network,'--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges',
         '--pids-limit','128','--memory','512m','--memory-swap','512m',
         '--cpus','1','--user',user,
@@ -90,7 +144,8 @@ def sandbox_argv(spec, request, name=None):
         '--mount','type=bind,source='+source+',target=/workspace',
         '--workdir',workdir,
         '-e','HOME=/tmp','-e','CI=1','-e','PYTHONDONTWRITEBYTECODE=1',
-        image,*command_map[code],
+        '-e','PYTHONPATH=/workspace/.central-python',
+        image,*command,
     ], container
 
 
@@ -118,8 +173,10 @@ def status():
         'cpu_limit': 1 if runner == 'docker' else None,
         'pids_limit': 128 if runner == 'docker' else None,
         'docker_image': os.environ.get('CENTRAL_DOCKER_IMAGE', IMAGE) if runner == 'docker' else None,
-        'dependency_installation': False if runner == 'docker' else 'requires_approval',
-        'live_preview': False if runner == 'docker' else 'host_only',
+        'dependency_installation': 'requires_approval' if runner == 'docker' else 'requires_approval',
+        'dependency_network': os.environ.get('CENTRAL_DOCKER_INSTALL_NETWORK', 'none') if runner == 'docker' else 'host',
+        'dependency_cache': 'project/.central-npm-cache' if runner == 'docker' else None,
+        'live_preview': 'isolated_http_proxy' if runner == 'docker' else 'host_only',
         'note': ('A sandbox isola comandos, não as ferramentas de arquivo, a API ou o Docker daemon.'
                  if runner == 'docker'
                  else 'Comandos executam diretamente com os privilégios do usuário local.'),

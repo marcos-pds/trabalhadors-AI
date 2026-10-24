@@ -32,10 +32,14 @@ from .organizations import (
     create_organization, set_member, remove_member, all_organizations, require_run_write)
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
+from .runtime_config import validate_runtime, registration_allowed
+validate_runtime()
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB = Database(DATA_DIR/'central.sqlite3')
+from .semantic_memory import preference as memory_preference
 SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
 
@@ -129,6 +133,8 @@ class Credentials(BaseModel):
 @app.post('/api/register')
 def register(data: Credentials, request: Request, response: Response):
     require_csrf(request)
+    if not registration_allowed():
+        raise HTTPException(403, 'Cadastro público desativado pelo administrador.')
     email = data.email.strip().lower()
     if '@' not in email: raise HTTPException(422,'E-mail inválido.')
     if DB.one('SELECT id FROM users WHERE email=?',(email,)):
@@ -1048,9 +1054,6 @@ def preview_start(data: PreviewStartIn, request: Request,
                   user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
-    if sandbox_status()['backend'] == 'docker':
-        raise HTTPException(409, 'Prévia npm dev em Docker ainda não está isolada. '
-                                 'Não será executada no host enquanto o modo Docker estiver ativo.')
     return start_preview(DB, user['id'], data.cwd)
 
 
@@ -1243,3 +1246,115 @@ def readiness(response: Response):
 @app.get('/api/health')
 def health():
     return {'status':'ok','note':'Saúde da API local. Não significa que provedores estejam disponíveis.'}
+
+
+class MemoryRetrievalIn(BaseModel):
+    enabled: bool
+
+
+@app.get('/api/projects/{project_id}/retrieval')
+def get_memory_retrieval(project_id: str, user=Depends(current_user)):
+    return memory_preference(DB, user['id'], project_id)
+
+
+@app.put('/api/projects/{project_id}/retrieval')
+def set_memory_retrieval(project_id: str, data: MemoryRetrievalIn,
+                         user=Depends(current_user)):
+    result = memory_preference(DB, user['id'], project_id, data.enabled)
+    ops_audit(DB, user['id'], 'memory_retrieval_changed', 'project', project_id)
+    return result
+
+
+@app.get('/api/providers/comparison')
+def compare_providers(user=Depends(current_user)):
+    return ENGINE.providers.comparison(user['id'])
+
+
+@app.get('/api/operations/release-check')
+def release_check(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .release_checks import report
+    return report(DB)
+
+
+class InvitationIn(BaseModel):
+    invited_user_id: str = Field(min_length=1, max_length=100)
+    role: str = Field(default='analyst', max_length=20)
+
+
+class AcceptInvitationIn(BaseModel):
+    token: str = Field(min_length=20, max_length=100)
+
+
+@app.post('/api/organizations/{oid}/invitations')
+def create_invitation(oid: str, data: InvitationIn, user=Depends(current_user)):
+    from .invitations import create
+    result = create(DB, user['id'], oid, data.invited_user_id, data.role)
+    ops_audit(DB, user['id'], 'invitation_created', 'organization', oid)
+    return result
+
+
+@app.post('/api/invitations/accept')
+def accept_invitation(data: AcceptInvitationIn, user=Depends(current_user)):
+    from .invitations import accept
+    result = accept(DB, user['id'], data.token)
+    ops_audit(DB, user['id'], 'invitation_accepted', 'organization', result['organization_id'])
+    return result
+
+
+@app.delete('/api/organizations/{oid}/invitations/{invitation_id}')
+def revoke_invitation(oid: str, invitation_id: str, user=Depends(current_user)):
+    from .invitations import revoke
+    result = revoke(DB, user['id'], oid, invitation_id)
+    ops_audit(DB, user['id'], 'invitation_revoked', 'organization', oid)
+    return result
+
+
+@app.get('/api/runs/{rid}/export')
+def export_run(rid: str, format: str = 'json', user=Depends(current_user)):
+    from .exports import run_report, markdown
+    report = run_report(DB, user['id'], rid)
+    if format not in ('json', 'md'):
+        raise HTTPException(422, 'Formato deve ser json ou md.')
+    ops_audit(DB, user['id'], 'run_exported', 'run', rid)
+    content = json.dumps(report, ensure_ascii=False, indent=2) if format == 'json' else markdown(report)
+    # Generated UUID filenames are used only as attachment names, never as paths.
+    return Response(content=content, media_type='application/json' if format == 'json' else 'text/markdown',
+                    headers={'Content-Disposition': 'attachment; filename="run.' + format + '"',
+                             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+class GitConnectionIn(BaseModel):
+    service: str = Field(max_length=20)
+    repository: str = Field(min_length=3, max_length=250)
+    token: str = Field(min_length=1, max_length=4096)
+
+
+@app.get('/api/git/connections')
+def git_connections(user=Depends(current_user)):
+    from .git_integrations import connections
+    return connections(DB, user['id'])
+
+
+@app.post('/api/git/connections')
+def add_git_connection(data: GitConnectionIn, user=Depends(current_user)):
+    from .git_integrations import connect
+    result = connect(DB, SEC, user['id'], data.service, data.repository, data.token)
+    ops_audit(DB, user['id'], 'git_connection_saved', 'git_connection', result['id'])
+    return result
+
+
+@app.delete('/api/git/connections/{connection_id}')
+def delete_git_connection(connection_id: str, user=Depends(current_user)):
+    changed = DB.execute('DELETE FROM git_connections WHERE id=? AND user_id=?',
+                         (connection_id, user['id']))
+    if not changed:
+        raise HTTPException(404, 'Conexão não encontrada.')
+    ops_audit(DB, user['id'], 'git_connection_deleted', 'git_connection', connection_id)
+    return {'deleted': True}
+
+
+@app.get('/api/git/connections/{connection_id}/reviews')
+def git_reviews(connection_id: str, number: int | None = None, user=Depends(current_user)):
+    from .git_integrations import reviews
+    return reviews(DB, SEC, user['id'], connection_id, number)

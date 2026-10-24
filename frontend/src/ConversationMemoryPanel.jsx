@@ -10,6 +10,7 @@ export default function ConversationMemoryPanel({
   const currentProjectId = projectOnly ? initialProjectId : conversation?.project_id || initialProjectId || ''
   const [projectId, setProjectId] = useState(currentProjectId || '')
   const [notes, setNotes] = useState('')
+  const [retrieval, setRetrieval] = useState(null)
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState('project')
   const [results, setResults] = useState(null)
@@ -20,6 +21,23 @@ export default function ConversationMemoryPanel({
   useEffect(() => {
     setNotes(activeProject?.memory_notes || '')
   }, [projectId, activeProject?.memory_notes])
+
+  useEffect(() => {
+    let active = true
+    setRetrieval(null)
+    if (projectId) api('/projects/' + encodeURIComponent(projectId) + '/retrieval')
+      .then(value => { if (active) setRetrieval(value) })
+      .catch(err => { if (active) setError(err.message) })
+    return () => { active = false }
+  }, [projectId, api])
+
+  async function toggleRetrieval() {
+    setBusy('retrieval'); setError('')
+    try {
+      setRetrieval(await api('/projects/' + encodeURIComponent(projectId) + '/retrieval',
+        'PUT', { enabled: !retrieval?.enabled }))
+    } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
 
   async function saveNotes() {
     if (!activeProject) return
@@ -82,6 +100,14 @@ export default function ConversationMemoryPanel({
           {' '}Esses limites são do contexto enviado à IA; suas mensagens não são excluídas.
         </p>
       </section>
+
+      {activeProject && <section className="mt-4 rounded-2xl border border-white/10 p-4">
+        <h3 className="text-sm font-semibold">Busca semântica local</h3>
+        <p className="mt-2 text-xs leading-5 text-muted">Com sua autorização, trechos deste projeto são enviados ao Ollama local para buscar por significado. A busca mantém suas conversas privadas. Se o serviço estiver indisponível, a busca por palavras continua funcionando.</p>
+        <button type="button" onClick={toggleRetrieval} disabled={!!busy || !retrieval} className={action + ' mt-3'}>
+          {retrieval?.enabled ? 'Desativar busca semântica' : 'Ativar busca semântica local'}
+        </button>
+      </section>}
 
       {activeProject && <section className="mt-4 rounded-2xl border border-white/10 p-4">
         <h3 className="text-sm font-semibold">Notas permanentes do projeto</h3>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import GitIntegrationsPanel from './GitIntegrationsPanel'
 
 const status = {
   run_created: 'Tarefa iniciada',
@@ -10,6 +11,7 @@ const status = {
 export default function OperationalOverview({ api }) {
   const [info, setInfo] = useState(null)
   const [audits, setAudits] = useState([])
+  const [comparison, setComparison] = useState([])
   const [error, setError] = useState('')
   const [updated, setUpdated] = useState(null)
 
@@ -17,12 +19,13 @@ export default function OperationalOverview({ api }) {
     let alive = true
     async function reload() {
       try {
-        const [metrics, journal] = await Promise.all([
-          api('/operations/overview'), api('/operations/audit?limit=12'),
+        const [metrics, journal, providers] = await Promise.all([
+          api('/operations/overview'), api('/operations/audit?limit=12'), api('/providers/comparison'),
         ])
         if (!alive) return
         setInfo(metrics)
         setAudits(journal)
+        setComparison(providers)
         setUpdated(new Date())
         setError('')
       } catch (err) { if (alive) setError(err.message) }
@@ -76,7 +79,7 @@ export default function OperationalOverview({ api }) {
           Docker {info.command_executor.docker_installed ? 'disponível no PATH' : 'não encontrado no PATH'}
           {' · '}Rede: desativada · CPU: {info.command_executor.cpu_limit} · Memória: {info.command_executor.memory_limit_mb} MB
           {' · '}Máx. processos: {info.command_executor.pids_limit}
-          {' · '}Prévia npm dev e instalações de dependências desabilitadas neste modo.
+          {' · '}Prévia por proxy local; instalações exigem aprovação. Rede de instalação: {info.command_executor.dependency_network || 'none'}.
         </p>}
         <p className="mt-2 text-[11px] text-muted">{info.command_executor?.note || 'Executor não identificado.'}</p>
       </section>
@@ -102,7 +105,7 @@ export default function OperationalOverview({ api }) {
         <h3 className="px-4 py-4 text-xs font-semibold">Tentativas reais por provedor · 24h</h3>
         <table className="w-full min-w-[620px] text-left text-xs">
           <thead className="border-y border-white/10 text-[10px] uppercase tracking-wide text-muted">
-            <tr>{['Provedor', 'Tentativas', 'Sucesso', 'Latência média'].map(x =>
+            <tr>{['Provedor', 'Tentativas', 'Sucesso', 'Latência média', 'Entrada / saída (US$/1M)'].map(x =>
               <th key={x} className="px-4 py-3">{x}</th>)}</tr>
           </thead>
           <tbody>{info.providers?.map(p => <tr key={p.provider_id} className="border-t border-white/[.06]">
@@ -124,6 +127,7 @@ export default function OperationalOverview({ api }) {
           </time>
         </div>) : <p className="px-4 pb-4 text-xs text-muted">Nenhum evento auditável registrado.</p>}
       </div>
+      <GitIntegrationsPanel api={api} />
       <p className="text-[11px] text-muted">{info.cost_notice}
         {' '}Esse painel monitora o processo local; ainda não existe uma fila de jobs distribuída.
       </p>

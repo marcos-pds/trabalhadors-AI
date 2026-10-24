@@ -77,14 +77,17 @@ def test_nested_project_only_mounts_selected_project(monkeypatch,tmp_path):
     assert 'source='+str(outer.resolve())+',target=' not in mount
 
 
-def test_unsupported_installations_are_denied_in_docker_mode(monkeypatch,project):
+def test_python_dependencies_are_scoped_offline_wheels(monkeypatch, project):
     mock_docker(monkeypatch)
-    monkeypatch.setenv('CENTRAL_COMMAND_RUNNER','docker')
-    for code in ('npm_ci','npm_install','pip_package','pip_requirements','venv_create'):
-        with pytest.raises(HTTPException,match='Instalação'):
-            tools.command_spec(str(project),{'action':'command','command':code})
-    with pytest.raises(HTTPException,match='não compatível'):
-        sb.sandbox_argv({'root':project},{'command':'powershell'})
+    monkeypatch.setenv('CENTRAL_COMMAND_RUNNER', 'docker')
+    monkeypatch.delenv('CENTRAL_DOCKER_INSTALL_NETWORK', raising=False)
+    req = {'command': 'pip_package', 'package': 'requests==2.32.5'}
+    args, _ = sb.sandbox_argv(tools.command_spec(str(project), req), req)
+    assert '--only-binary=:all:' in args and '--no-index' in args
+    assert args[args.index('--target') + 1] == '/workspace/.central-python'
+    assert args[args.index('--network') + 1] == 'none'
+    with pytest.raises(HTTPException):
+        sb.sandbox_argv({'root': project}, {'command': 'powershell'})
 
 
 def test_missing_docker_never_falls_back_to_host(monkeypatch,project):
@@ -159,8 +162,7 @@ def test_docker_mode_disables_host_preview(monkeypatch):
         res=client.post('/api/preview/start',
                         headers={'X-Central-Request':'1'},
                         json={'cwd':''})
-        assert res.status_code==409
-        assert 'host' in res.json()['detail']
+        assert res.status_code==403  # blocked computer policy, never a host spawn
         ready=client.get('/api/health/ready')
         assert ready.status_code==200
         assert ready.json()['command_executor']['backend']=='docker'
@@ -198,3 +200,40 @@ def test_run_binding_blocks_backend_mismatch_between_api_and_worker(tmp_path,mon
         enforce_run_scope(db,'user','run')
     finally:
         db.close()
+
+
+@pytest.mark.parametrize('code', ['npm_ci', 'npm_install'])
+def test_npm_dependencies_offline_and_scoped_by_default(monkeypatch, project, code):
+    mock_docker(monkeypatch)
+    monkeypatch.setenv('CENTRAL_COMMAND_RUNNER', 'docker')
+    monkeypatch.delenv('CENTRAL_DOCKER_INSTALL_NETWORK', raising=False)
+    request = {'command': code, 'package': 'react', 'network': 'host'}
+    spec = tools.command_spec(str(project), request)
+    args, _ = sb.sandbox_argv(spec, request)
+    assert args[args.index('--network') + 1] == 'none'
+    assert '--offline' in args and '--ignore-scripts' in args
+    assert args[args.index('--cache') + 1] == '/workspace/.central-npm-cache'
+    assert args.count('--mount') == 1
+    assert tools.critical_action(dict(request, action='command'))
+
+
+def test_npm_egress_is_operator_only_and_never_applies_to_build(monkeypatch, project):
+    mock_docker(monkeypatch)
+    monkeypatch.setenv('CENTRAL_COMMAND_RUNNER', 'docker')
+    monkeypatch.setenv('CENTRAL_DOCKER_INSTALL_NETWORK', 'bridge')
+    for code, expected in [('npm_ci', 'bridge'), ('npm_build', 'none')]:
+        req = {'command': code}
+        args, _ = sb.sandbox_argv(tools.command_spec(str(project), req), req)
+        assert args[args.index('--network') + 1] == expected
+        assert ('--offline' in args) is False
+    monkeypatch.setenv('CENTRAL_DOCKER_INSTALL_NETWORK', 'host')
+    with pytest.raises(HTTPException):
+        sb.sandbox_argv({'root': project}, {'command': 'npm_ci'})
+
+
+def test_sandbox_revalidates_package_without_shell(monkeypatch, project):
+    mock_docker(monkeypatch)
+    monkeypatch.setenv('CENTRAL_COMMAND_RUNNER', 'docker')
+    for package in ['--prefix=/host', 'https://example.org/pkg', 'react;whoami', '../other']:
+        with pytest.raises(HTTPException):
+            sb.sandbox_argv({'root': project}, {'command': 'npm_install', 'package': package})
