@@ -318,7 +318,15 @@ export default function App() {
   async function logout(){sourceRef.current?.close();await api('/logout','POST');setMenuOpen(false);setUser(null);setCurrentConvo(null);setData(emptyData);setMessages([])}
   const navigate=next=>{sourceRef.current?.close();setPage(next);setMenuOpen(false)}
   function newChat(){sourceRef.current?.close();setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
-  async function openConversation(id){sourceRef.current?.close();setCurrentRun(null);setSteps([]);setCurrentConvo(id);setSelectedProject(null);setPage('chat');setMenuOpen(false)}
+  async function openConversation(id){
+    sourceRef.current?.close();setCurrentRun(null);setSteps([]);setCurrentConvo(id);setSelectedProject(null);setPage('chat');setMenuOpen(false)
+    if (!data.conversations.some(c => c.id === id)) {
+      try {
+        const older = await api('/conversations/' + encodeURIComponent(id))
+        setData(old => ({...old,conversations:[older,...old.conversations.filter(c=>c.id!==id)]}))
+      } catch(error) {notify(error.message)}
+    }
+  }
   async function moveConversationToProject(cid, projectId) {
     await api('/conversations/' + encodeURIComponent(cid) + '/project', 'PATCH', {project_id:projectId})
     await loadAll()
@@ -334,7 +342,7 @@ export default function App() {
   async function testProvider(provider){try{const result=await api(`/providers/${provider.id}/test`,'POST');notify(result.ok?`Conexão validada: ${result.response}`:`Falha: ${result.error}`);await loadAll()}catch(error){notify(error.message)}}
   async function openRun(run){await openConversation(run.conversation_id);try{const detail=await api(`/runs/${run.id}`);if(['running','queued','awaiting_approval'].includes(detail.status)){setCurrentRun(run.id);setSteps(detail.steps||[]);const stream=new EventSource(`/api/runs/${run.id}/events?after=0`);sourceRef.current=stream;stream.onmessage=event=>{const msg=JSON.parse(event.data),d=msg.data||{};if(msg.event==='token')setMessages(old=>{const idx=old.findIndex(item=>item.stepId===d.step_id);return idx<0?[...old,{role:'assistant',agent:d.agent,content:d.text,stepId:d.step_id}]:old.map((item,i)=>i===idx?{...item,content:item.content+d.text}:item)});if(msg.event==='step_status')setSteps(old=>old.map(item=>item.id===d.id?{...item,...d}:item));if(msg.event==='run_completed'||msg.event==='run_failed')finishRun(stream,run.conversation_id,msg.event==='run_completed')}}}catch(error){notify(error.message)}}
   async function resumeRun(id){try{await api(`/runs/${id}/resume`,'POST');await loadAll();await refreshStats();notify('Execução retomada a partir dos checkpoints concluídos.')}catch(error){notify(error.message)}}
-  function useWorkflow(id){setCurrentConvo(null);setMessages([]);setSelectedWorkflow(id);setSelectedAgent('');setMode('team');setPage('chat');notify('Fluxo selecionado. Envie a tarefa para executá-lo.')}
+  function useWorkflow(id){setCurrentConvo(null);setSelectedProject(null);setMessages([]);setSelectedWorkflow(id);setSelectedAgent('');setMode('team');setPage('chat');notify('Fluxo selecionado. Envie a tarefa para executá-lo.')}
   function runCommand(command) {
     setPrompt('')
     if (command === '/novo') return newChat()
