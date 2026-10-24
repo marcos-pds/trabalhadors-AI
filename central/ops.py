@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from .database import utcnow
 from .observability import request_context, log_event
+from .quotas import limits as quota_limits, usage as quota_usage
 
 
 def audit(db, user_id, action, target_type, target_id=None, outcome='accepted'):
@@ -116,6 +117,7 @@ def overview(db, user_id):
            FROM job_queue q JOIN runs r ON r.id=q.run_id
            WHERE r.user_id=? GROUP BY q.state""", (user_id,))
     return {
+        'quotas': {'limits': quota_limits(), 'usage': quota_usage(db,user_id)},
         'job_queue': {'durable':True, 'backend':'sqlite',
                       'states':{row['state']:row['total'] for row in jobs},
                       'max_attempts':max((row['max_attempts'] or 0 for row in jobs),
