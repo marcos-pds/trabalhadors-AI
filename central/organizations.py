@@ -36,7 +36,7 @@ def ensure_personal(db, user_id):
 def membership(db, organization_id, user_id):
     return db.one(
         'SELECT o.id,o.name,o.is_personal,o.daily_run_limit,'
-        'o.active_run_limit,o.estimated_budget_usd,m.role '
+        'o.active_run_limit,o.estimated_budget_usd,o.host_commands_enabled,m.role '
         'FROM organization_members m JOIN organizations o '
         'ON o.id=m.organization_id WHERE m.organization_id=? AND m.user_id=?',
         (organization_id,user_id))
@@ -119,7 +119,7 @@ def require_run_write(db,run_id,user_id):
 def all_organizations(db,user_id):
     return db.all(
         """SELECT o.id,o.name,o.is_personal,m.role,o.daily_run_limit,
-                  o.active_run_limit,o.estimated_budget_usd
+                  o.active_run_limit,o.estimated_budget_usd,o.host_commands_enabled
            FROM organization_members m JOIN organizations o
              ON o.id=m.organization_id
            WHERE m.user_id=? ORDER BY o.is_personal DESC,o.name""", (user_id,))
