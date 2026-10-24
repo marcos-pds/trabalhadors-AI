@@ -21,13 +21,14 @@ Formas aceitas (uma operação por resposta):
 {"action":"replace","path":"src/App.jsx","old":"trecho EXATO único","new":"substituição","expected_sha256":"SHA retornado pelo read"}
 {"action":"command","command":"npm_build","cwd":""}
 {"action":"command","command":"npm_install","cwd":"","package":"lucide-react"}
+{"action":"command","command":"venv_create","cwd":""}
 {"action":"command","command":"pip_requirements","cwd":""}
 {"action":"command","command":"pip_package","package":"pytest"}
 {"action":"command","command":"python_test"}
 {"action":"finish","message":"Resumo objetivo do que foi feito e do que falta."}
 
 Comandos: npm_build, npm_test, npm_ci, npm_install, python_test,
-python_compile, pip_requirements, pip_package, git_status.
+python_compile, pip_requirements, pip_package, venv_create, git_status.
 Não é possível chamar shell arbitrário, apagar arquivos, acessar outra pasta,
 fazer deploy, git push, mexer no registro do Windows ou manipular segredos.
 Leia o arquivo ANTES de modificá-lo; use replace + sha256 para edições pequenas.
