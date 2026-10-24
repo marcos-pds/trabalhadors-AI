@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS events (
  event TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id,seq);
+CREATE TABLE IF NOT EXISTS ops_audit (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ action TEXT NOT NULL, outcome TEXT NOT NULL,
+ target_type TEXT NOT NULL, target_id TEXT,
+ request_id TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ops_audit_user ON ops_audit(user_id,id DESC);
 CREATE TABLE IF NOT EXISTS worker_checkpoints (
  step_id TEXT PRIMARY KEY REFERENCES steps(id) ON DELETE CASCADE,
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
