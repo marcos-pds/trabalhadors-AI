@@ -10,12 +10,18 @@ def main(argv=None):
     parser.add_argument('--data-dir', default=os.environ.get('CENTRAL_DATA_DIR', 'data'))
     actions = parser.add_subparsers(dest='action', required=True)
     actions.add_parser('doctor')
-    actions.add_parser('release-check').add_argument('--probe-docker', action='store_true')
+    release = actions.add_parser('release-check')
+    release.add_argument('--probe-docker', action='store_true')
+    release.add_argument('--backup-file', help='Encrypted backup to verify without restoring')
+    actions.add_parser('verify-backup').add_argument('source')
     actions.add_parser('backup').add_argument('destination')
     restore = actions.add_parser('restore')
     restore.add_argument('source'); restore.add_argument('destination')
     args = parser.parse_args(argv)
-    from .backups import create, restore as restore_backup
+    from .backups import create, restore as restore_backup, verify as verify_backup
+    if args.action == 'verify-backup':
+        print(json.dumps(verify_backup(args.source), indent=2))
+        return 0
     if args.action == 'restore':
         print(json.dumps(restore_backup(args.source, args.destination), indent=2))
         return 0
@@ -30,7 +36,8 @@ def main(argv=None):
             result = create(db, data_dir, args.destination)
         else:
             from .release_checks import report
-            result = report(db, probe_docker=getattr(args, 'probe_docker', False))
+            result = report(db, probe_docker=getattr(args, 'probe_docker', False),
+                            backup_file=getattr(args, 'backup_file', None))
         print(json.dumps(result, indent=2, ensure_ascii=False))
         if any(c['status'] == 'failed' for c in result.get('checks', [])):
             return 1
