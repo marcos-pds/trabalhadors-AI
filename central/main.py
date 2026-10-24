@@ -821,6 +821,13 @@ def run_activity(rid: str, user=Depends(current_user)):
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
                'run_failed','run_completed','provider_error','failover'}
+    import re
+    def safe_log(message):
+        snippet = str(message or '')[-900:]
+        snippet = re.sub(r'(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+',
+                         r'\\1=[oculto]', snippet)
+        snippet = re.sub(r'\\bsk-[A-Za-z0-9_-]{12,}\\b', '[chave ocultada]', snippet)
+        return snippet
     entries = []
     for e in reversed(events):
         if e['event'] not in allowed:
@@ -841,6 +848,7 @@ def run_activity(rid: str, user=Depends(current_user)):
             'model': data.get('model'),
             'status': data.get('status'),
             'error': data.get('error'),
+            'detail': safe_log(data.get('output')) if data.get('success') is False else '',
             'count': data.get('count'),
         })
     last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
