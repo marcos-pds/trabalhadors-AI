@@ -60,6 +60,16 @@ export default function OperationalOverview({ api }) {
           <strong className="mt-2 block text-xl font-semibold">{value ?? '—'}</strong>
         </article>)}
       </div>
+      <section className="rounded-2xl border border-white/10 bg-panel p-4">
+        <h3 className="text-xs font-semibold">Fila persistente local</h3>
+        <p className="mt-1 text-[11px] text-muted">Backend: SQLite · execuções com lease renovável. Para processos separados, inicie o worker dedicado.</p>
+        <div className="mt-3 flex flex-wrap gap-3 text-xs">
+          {Object.entries(info.job_queue?.states || {}).map(([state,total]) =>
+            <span key={state} className="rounded-lg border border-white/10 px-3 py-2">{state}: {total}</span>)}
+          {!Object.keys(info.job_queue?.states || {}).length && <span className="text-muted">Nenhuma tarefa enfileirada.</span>}
+        </div>
+        <p className="mt-2 text-[10px] text-muted">Maior número de reservas por job: {info.job_queue?.max_attempts ?? 0}</p>
+      </section>
       {info.alerts?.length > 0 && <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[.04] p-4">
         <h3 className="mb-3 text-xs font-semibold text-amber-200">Atenção operacional</h3>
         {info.alerts.map((a, i) => <p key={a.code + '-' + (a.provider_id || i)}
