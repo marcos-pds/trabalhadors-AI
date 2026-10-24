@@ -23,7 +23,7 @@ from .database import uid, utcnow
 MAX_WRITE_BYTES = 32000
 MAX_OUTPUT = 9000
 MAX_ACTIONS = 18
-MAX_ROUNDS = 8
+MAX_ROUNDS = 12
 MAX_VALIDATION_RETRIES = 2
 COMMAND_TIMEOUT = 45
 PACKAGE = re.compile(r'^(?:@[-a-z0-9_.]+/)?[-a-z0-9_.]+(?:@[-a-z0-9_.]+)?$', re.I)
@@ -94,10 +94,10 @@ def preview(folder, request):
                                       '.csv', '.bat', '.ps1', '.sh', '.go', '.rs', '.java', '.cpp', '.h'}:
             raise HTTPException(422, 'Somente leitura de texto e código é permitida.')
         return {'action': action, 'path': relative, 'description': 'Ler ' + relative}
-    if action == 'write':
+    if action in ('write', 'replace'):
         if not isinstance(relative, str) or not relative:
             raise HTTPException(422, 'Informe o caminho do arquivo.')
-        content = request.get('content')
+        content = request.get('content') if action == 'write' else request.get('new')
         if not isinstance(content, str) or len(content.encode('utf-8')) > MAX_WRITE_BYTES:
             raise HTTPException(413, 'O conteúdo deve ser texto UTF-8 com até 32 KB.')
         if not relative.lower().endswith(('.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json',
@@ -118,6 +118,13 @@ def preview(folder, request):
             before_text = before.decode('utf-8')
         except UnicodeError as exc:
             raise HTTPException(422, 'Arquivo atual não é UTF-8.') from exc
+        if action == 'replace':
+            old = request.get('old')
+            if not isinstance(old, str) or not old or len(old) > 10000 or before_text.count(old) != 1:
+                raise HTTPException(409, 'Trecho original não encontrado exatamente uma vez. Leia o arquivo novamente.')
+            content = before_text.replace(old, content, 1)
+            if len(content.encode('utf-8')) > MAX_WRITE_BYTES:
+                raise HTTPException(413, 'Arquivo resultante excede 32 KB.')
         difference = ''.join(list(difflib.unified_diff(
             before_text.splitlines(keepends=True), content.splitlines(keepends=True),
             fromfile='antes/' + relative, tofile='depois/' + relative))[:80])[:3600]
@@ -126,7 +133,7 @@ def preview(folder, request):
     if action == 'command':
         spec = command_spec(folder, request)
         return {'action': action, 'path': spec['cwd'], 'description': 'Executar: ' + spec['label']}
-    raise HTTPException(422, 'Ação desconhecida. Use list, read, write ou command.')
+    raise HTTPException(422, 'Ação desconhecida. Use list, read, write, replace ou command.')
 
 
 def command_spec(folder, request):
@@ -196,14 +203,22 @@ def execute(folder, request):
         except UnicodeError as exc:
             raise HTTPException(422, 'Arquivo não é UTF-8.') from exc
         return {'path': relative, 'content': decoded, 'sha256': _sha(data)}
-    if action == 'write':
+    if action in ('write', 'replace'):
         file = target(folder, relative, creating=True)
         # Check version again immediately before atomic replacement.
         old = file.read_bytes() if file.exists() else None
         expected = request.get('expected_sha256')
         if (old is not None and _sha(old) != expected) or (old is None and expected not in ('', None)):
             raise HTTPException(409, 'Conflito de edição: arquivo mudou. Leia novamente.')
-        new_data = request['content'].encode('utf-8')
+        if action == 'replace':
+            before_text = old.decode('utf-8') if old is not None else ''
+            pattern = request['old']
+            if before_text.count(pattern) != 1:
+                raise HTTPException(409, 'Trecho original mudou. Leia novamente.')
+            content = before_text.replace(pattern, request['new'], 1)
+        else:
+            content = request['content']
+        new_data = content.encode('utf-8')
         import tempfile
         tmp = None
         try:
