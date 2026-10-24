@@ -35,22 +35,34 @@ ENGINE = Engine(DB, SEC)
 
 @asynccontextmanager
 async def lifespan(app):
+    # Multiple TestClient lifespans may use different asyncio loops.
+    # Never await or cancel a task that belongs to a different loop.
+    loop = asyncio.get_running_loop()
     ENGINE.shutting_down = False
     if ENGINE.job_mode == 'embedded':
+        if ENGINE.dispatch_task and ENGINE.dispatch_task.get_loop() is not loop:
+            ENGINE.dispatch_task = None
         ENGINE.resume_pending()
         ENGINE.start_dispatcher()
-    yield
-    ENGINE.shutting_down = True
-    if ENGINE.dispatch_task:
-        ENGINE.dispatch_task.cancel()
-        await asyncio.gather(ENGINE.dispatch_task, return_exceptions=True)
-        ENGINE.dispatch_task = None
-    stop_all_previews()
-    pending = list(ENGINE.running.values())
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
+    own_dispatcher = (ENGINE.dispatch_task
+                      if ENGINE.dispatch_task and ENGINE.dispatch_task.get_loop() is loop
+                      else None)
+    try:
+        yield
+    finally:
+        if own_dispatcher:
+            own_dispatcher.cancel()
+            await asyncio.gather(own_dispatcher, return_exceptions=True)
+            if ENGINE.dispatch_task is own_dispatcher:
+                ENGINE.dispatch_task = None
+        stop_all_previews()
+        pending = [task for task in ENGINE.running.values()
+                   if task.get_loop() is loop and not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        ENGINE.shutting_down = False
 
 
 app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
