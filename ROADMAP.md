@@ -167,3 +167,40 @@ permissão adequada no provedor. A implementação foi testada com transportes
 simulados; a homologação em contas reais e o deploy aprovado seguem pendentes.
 
 Validação local da Fase 8: 142 testes Python direcionados aprovados, 4 testes JavaScript aprovados e build React aprovado. Integrações de gravação foram simuladas; nenhuma revisão remota foi criada pelos testes.
+
+
+### Continuação incremental — Fases 8 e 12 (PR #8)
+
+**Reconciliação de operações Git com resultado incerto (Fase 8).**
+A Central agora consulta revisões existentes em GitHub/GitLab por um marcador
+imutável associado ao plano de publicação. A busca é paginada (até cinco
+páginas de 100 registros), não segue URLs de paginação externas e não
+executa nenhum POST/retry. Uma única correspondência encontrada em uma
+varredura completa pode ser registrada como concluída. Desvios de branch,
+commit ou condição de rascunho obrigam conferência humana. Marcadores
+duplicados, paginação truncada, falhas e ausência de resultados permanecem
+incertos, sem serem interpretados como prova de não criação.
+
+A interface Git mostra os 15 planos mais recentes de cada conexão e
+permite consultar os planos incertos mesmo após atualizar a página.
+Confirmações originais não são recuperadas do histórico; um plano que perdeu
+a confirmação não recebe um botão de aprovação automática. A leitura
+não substitui validação em contas reais ou reconciliação após alterações
+manuais e não autoriza merge/deploy.
+
+**Verificação de backup sem restauração (Fase 12).**
+Um backup criptografado pode ser inspecionado sem modificar o banco ativo,
+validando chave, membros do arquivo, formato e integridade SQLite:
+
+    python -m central.cli verify-backup C:\Backups\central.enc
+    python -m central.cli --data-dir data release-check --backup-file C:\Backups\central.enc
+
+O comando de verificação não exige uma pasta de dados ativa. Release-check
+marca a validação como passada, falha ou não checada; ele continua retornando
+código 2 enquanto os gates externos não forem homologados. A confirmação
+de integridade local não substitui teste de recuperação fora da máquina nem
+backup offsite.
+
+A documentação descreve a implementação parcial: homologação em contas Git
+reais, deploy aprovado, PostgreSQL/Redis, SSO e testes de recuperação externa
+permanecem pendentes.
