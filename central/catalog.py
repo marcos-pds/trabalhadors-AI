@@ -59,6 +59,19 @@ def zero_price(pricing):
         return False
 
 
+def paid_price(pricing):
+    """A positive catalog price is known only with complete, valid amounts."""
+    if not isinstance(pricing, dict):
+        return False
+    try:
+        amounts = [Decimal(str(pricing[k])) for k in ('prompt', 'completion')]
+        amounts += [Decimal(str(v)) for k, v in pricing.items()
+                    if k not in ('prompt', 'completion') and v is not None]
+        return all(n.is_finite() and n >= 0 for n in amounts) and any(n > 0 for n in amounts)
+    except (KeyError, InvalidOperation, ValueError):
+        return False
+
+
 def normalize_models(kind, items):
     models = {}
     for item in items:
@@ -85,11 +98,18 @@ def normalize_models(kind, items):
             eligible = mid in ZAI_FREE
         else:
             eligible = kind in ('groq', 'mistral', 'sambanova', 'ollama')
+        # eligible controls ONLY the free-first automatic connection, never manual selection.
+        billing = ('local' if kind == 'ollama' else 'free' if eligible else
+                   'paid' if kind == 'openrouter' and paid_price(item.get('pricing')) else 'unknown')
+        access = {'local': 'Local · sem cobrança por API',
+                  'free': 'Elegível para conexão automática · confirme cotas da conta',
+                  'paid': 'Pago · preço informado pelo catálogo',
+                  'unknown': 'Preço/plano não confirmado · pode gerar cobrança'}[billing]
         models[mid] = dict(id=mid, name=item.get('displayName') or item.get('name') or mid,
                            source=item.get('_catalog_source', 'API do provedor'),
                            context_length=item.get('context_length') or item.get('inputTokenLimit')
                            or item.get('max_model_len'), eligible=eligible,
-                           access='Elegível no plano gratuito' if eligible else 'Preço/plano não confirmado')
+                           billing=billing, access=access)
     return sorted(models.values(), key=lambda m: (not m['eligible'], m['id']))
 
 
@@ -151,7 +171,11 @@ async def discover_models(kind, api_key):
 
 
 def candidates(models, kind, selected=''):
-    eligible = [m for m in models if m['eligible'] and (not selected or m['id'] == selected)]
+    # An explicit choice may be paid/unknown; it must exist in the discovered chat catalog.
+    # Without a choice, preserve the conservative free-first auto policy.
+    if selected:
+        return [m for m in models if m['id'] == selected]
+    eligible = [m for m in models if m['eligible']]
     preferred = {'groq': ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
                  'gemini': ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'],
                  'mistral': ['mistral-small-latest'], 'zai': ['glm-4.7-flash', 'glm-4.5-flash'],
