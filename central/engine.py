@@ -9,7 +9,9 @@ from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
-from .task_contract import is_implementation_request, assert_implementation_delivered
+from .task_contract import (is_implementation_request, is_workspace_inspection_request,
+                            needs_workspace_tools, assert_implementation_delivered,
+                            assert_inspection_performed)
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -132,10 +134,11 @@ class Engine:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
         implementation = is_implementation_request(prompt)
-        if implementation and not autonomous:
+        if needs_workspace_tools(prompt) and not autonomous:
             raise ValueError(
-                'Você pediu implementação real, mas Autonomia está desativada. '
-                'Autorize a pasta correta em Computador e ative Autonomia antes de enviar.')
+                'Esta solicitação depende de acesso real a arquivos locais, mas '
+                'Autonomia está desativada. Autorize a pasta correta em Computador '
+                'e ative Autonomia antes de enviar.')
         agents = self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1', (user_id,))
         if flow:
             nodes = validate_flow(flow, agents)
@@ -209,13 +212,19 @@ class Engine:
             evidence = None
             if is_implementation_request(run['prompt']):
                 evidence = assert_implementation_delivered(self.db, run)
+            elif is_workspace_inspection_request(run['prompt']):
+                evidence = assert_inspection_performed(self.db, run)
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
             if evidence:
-                output += ('\n\n## Evidências verificadas\nArquivos modificados: ' +
-                           ', '.join(evidence['changed_files']) +
-                           '\nTestes/build aprovados após as alterações.')
+                if evidence['changed_files']:
+                    output += ('\n\n## Evidências verificadas\nArquivos modificados: ' +
+                               ', '.join(evidence['changed_files']) +
+                               '\nTestes/build aprovados após as alterações.')
+                elif evidence.get('inspected'):
+                    output += ('\n\n## Evidências verificadas\nItens consultados: ' +
+                               ', '.join(item['path'] or '(raiz)' for item in evidence['inspected'][:8]))
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
@@ -319,10 +328,14 @@ class Engine:
                                 self.client, self.db, user, run['id'], sid, provider,
                                 self.security.decrypt(provider['api_key_enc']), model,
                                 system, messages, self.emit,
-                                validate_at_finish=agent['specialty'] not in (
-                                    'architecture', 'design', 'research', 'coordination'),
+                                validate_at_finish=(is_implementation_request(run['prompt']) and
+                                                    agent['specialty'] not in (
+                                                        'architecture', 'design', 'research', 'coordination')),
                                 require_code_changes=(is_implementation_request(run['prompt']) and
-                                                      agent['specialty'] in ('code', 'frontend', 'backend')))
+                                                      agent['specialty'] in ('code', 'frontend', 'backend')),
+                                require_observation=is_workspace_inspection_request(run['prompt']),
+                                require_document_read=('document' in run['prompt'].lower() or
+                                                       'arquivo' in run['prompt'].lower()))
                             self.emit(run['id'], 'token', {
                                 'step_id': sid, 'agent': agent['name'], 'text': output})
                         else:
