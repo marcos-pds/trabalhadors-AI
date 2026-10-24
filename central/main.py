@@ -418,6 +418,13 @@ def computer_access_settings(request: Request, user=Depends(current_user)):
     return computer_policy(DB, user['id'])
 
 
+@app.get('/api/computer-access/default-folder')
+def computer_access_default_folder(request: Request, user=Depends(current_user)):
+    local_only(request)
+    # Suggest only; never grant a folder without an explicit save.
+    return {'folder': str(ROOT.resolve())}
+
+
 @app.put('/api/computer-access')
 def update_computer_access(data: ComputerAccessSettingsIn, request: Request,
                            user=Depends(current_user)):
