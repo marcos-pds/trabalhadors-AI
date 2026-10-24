@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS organizations (
  CHECK(active_run_limit BETWEEN 1 AND 100000),
  CHECK(estimated_budget_usd IS NULL OR estimated_budget_usd >= 0)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_personal_org
+ ON organizations(created_by) WHERE is_personal=1;
 CREATE TABLE IF NOT EXISTS organization_members (
  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
