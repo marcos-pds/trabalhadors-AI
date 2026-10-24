@@ -50,6 +50,7 @@ async def lifespan(app):
     try:
         yield
     finally:
+        ENGINE.shutting_down = True
         if own_dispatcher:
             own_dispatcher.cancel()
             await asyncio.gather(own_dispatcher, return_exceptions=True)
