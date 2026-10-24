@@ -326,6 +326,15 @@ class Engine:
         if context:
             prompt_parts.append('Resultados dos outros agentes nesta execução:\n' + context)
         prompt_parts.append('Solicitação atual do usuário (prioritária):\n' + run['prompt'])
+        # All approved mid-run adjustments remain visible to subsequent workers,
+        # not only to the worker that first consumed their notification.
+        notes = self.db.all(
+            'SELECT content FROM run_feedback WHERE run_id=? AND user_id=? '
+            'ORDER BY created_at,id DESC LIMIT 12', (run['id'], user))
+        if notes:
+            prompt_parts.append('Ajustes posteriores do usuário (prioridade alta):\n' +
+                                '\n'.join('- ' + row['content'][:1200]
+                                          for row in reversed(notes)))
         messages = [{'role': 'user', 'content': '\n\n'.join(prompt_parts)}]
         system = agent['instructions'] + (
             '\nResponda em português. Indique limitações reais. Não declare ter usado ferramentas que não estão disponíveis.'
@@ -390,7 +399,9 @@ class Engine:
                                                       specialty in ('code', 'frontend', 'backend')),
                                 require_observation=is_workspace_inspection_request(run['prompt']),
                                 require_document_read=('document' in run['prompt'].lower() or
-                                                       'arquivo' in run['prompt'].lower()))
+                                                       'arquivo' in run['prompt'].lower()),
+                                planning_only=specialty in ('architecture', 'coordination',
+                                                            'design', 'research'))
                             self.emit(run['id'], 'token', {
                                 'step_id': sid, 'agent': agent['name'], 'text': output})
                         else:
