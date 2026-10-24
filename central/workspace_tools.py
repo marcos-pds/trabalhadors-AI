@@ -65,7 +65,10 @@ def target(folder, relative, *, creating=False, directory=False):
             raise HTTPException(403, 'Links e junções não são permitidos.')
         if not current.exists() and not creating:
             raise HTTPException(404, 'Arquivo ou pasta não encontrado.')
-    real_parent = current.parent.resolve(strict=True) if not current.exists() else current.resolve(strict=True)
+    try:
+        real_parent = current.parent.resolve(strict=True) if not current.exists() else current.resolve(strict=True)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(404, 'A pasta do arquivo não existe.') from exc
     if not real_parent.is_relative_to(root):
         raise HTTPException(403, 'O caminho está fora da pasta autorizada.')
     if directory:
@@ -144,6 +147,12 @@ def command_spec(folder, request):
     root = target(folder, cwd, directory=True)
     npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
     git = shutil.which('git.exe' if os.name == 'nt' else 'git')
+    local_python = root / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    # Never let a package installation mutate the Central's own interpreter or
+    # another environment outside the granted workspace.
+    if code in ('pip_requirements', 'pip_package') and not local_python.is_file():
+        raise HTTPException(422, 'Crie uma .venv dentro desta pasta antes de instalar pacotes Python.')
+    python_bin = str(local_python) if local_python.is_file() else sys.executable
     if code.startswith('npm_') and not npm:
         raise HTTPException(422, 'npm não encontrado no PATH do Windows.')
     if code == 'git_status' and not git:
@@ -152,9 +161,9 @@ def command_spec(folder, request):
         'npm_build': [npm, 'run', 'build'],
         'npm_test': [npm, 'test'],
         'npm_ci': [npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-        'python_test': [sys.executable, '-m', 'pytest', '-q'],
-        'python_compile': [sys.executable, '-m', 'compileall', '-q', '.'],
-        'pip_requirements': [sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+        'python_test': [python_bin, '-m', 'pytest', '-q'],
+        'python_compile': [python_bin, '-m', 'compileall', '-q', '.'],
+        'pip_requirements': [python_bin, '-m', 'pip', 'install', '-r', 'requirements.txt'],
         'git_status': [git, 'status', '--short'],
     }
     package = request.get('package', '')
@@ -165,7 +174,7 @@ def command_spec(folder, request):
     elif code == 'pip_package':
         if not isinstance(package, str) or not PIP_PACKAGE.fullmatch(package):
             raise HTTPException(422, 'Nome do pacote Python inválido.')
-        argv = [sys.executable, '-m', 'pip', 'install', package]
+        argv = [python_bin, '-m', 'pip', 'install', package]
     else:
         argv = commands[code]
     if code in ('npm_build', 'npm_test', 'npm_ci', 'npm_install') and not (root / 'package.json').is_file():
