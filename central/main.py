@@ -583,6 +583,106 @@ def remove_agent(aid:str,user=Depends(current_user)):
     return {'ok':True}
 
 
+class OrganizationIn(BaseModel):
+    name: str = Field(min_length=2,max_length=90)
+
+
+class MemberIn(BaseModel):
+    email: str = Field(min_length=5,max_length=180)
+    role: str = Field(default='operator')
+
+
+class OrgLimitsIn(BaseModel):
+    daily_run_limit: int = Field(ge=1,le=100000)
+    active_run_limit: int = Field(ge=1,le=100000)
+    estimated_budget_usd: float | None = Field(default=None,ge=0)
+
+
+@app.get('/api/organizations')
+def get_organizations(user=Depends(current_user)):
+    ensure_personal(DB,user['id'])
+    return all_organizations(DB,user['id'])
+
+
+@app.post('/api/organizations')
+def add_organization(data:OrganizationIn,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    oid=create_organization(DB,user['id'],data.name.strip())
+    ops_audit(DB,user['id'],'organization_created','organization',oid)
+    return require_org(DB,oid,user['id'])
+
+
+@app.get('/api/organizations/{oid}/members')
+def get_organization_members(oid:str,user=Depends(current_user)):
+    require_org(DB,oid,user['id'])
+    return DB.all(
+        """SELECT u.id,u.email,m.role FROM organization_members m
+           JOIN users u ON u.id=m.user_id
+           WHERE m.organization_id=? ORDER BY m.created_at""", (oid,))
+
+
+@app.put('/api/organizations/{oid}/members')
+def upsert_organization_member(oid:str,data:MemberIn,request:Request,
+                               user=Depends(current_user)):
+    require_csrf(request)
+    require_org(DB,oid,user['id'],admin=True)
+    member=DB.one('SELECT id FROM users WHERE email=?',(data.email.strip().lower(),))
+    if not member:
+        raise HTTPException(404,'Conta não encontrada. O usuário precisa se cadastrar primeiro.')
+    role=set_member(DB,oid,user['id'],member['id'],data.role)
+    ops_audit(DB,user['id'],'organization_member_changed','organization',oid)
+    return {'user_id':member['id'],'role':role}
+
+
+@app.delete('/api/organizations/{oid}/members/{member_id}')
+def delete_organization_member(oid:str,member_id:str,request:Request,
+                               user=Depends(current_user)):
+    require_csrf(request)
+    remove_member(DB,oid,user['id'],member_id)
+    ops_audit(DB,user['id'],'organization_member_removed','organization',oid)
+    return {'ok':True}
+
+
+@app.put('/api/organizations/{oid}/limits')
+def update_organization_limits(oid:str,data:OrgLimitsIn,request:Request,
+                               user=Depends(current_user)):
+    require_csrf(request)
+    require_org(DB,oid,user['id'],admin=True)
+    DB.execute(
+        'UPDATE organizations SET daily_run_limit=?,active_run_limit=?,'
+        'estimated_budget_usd=? WHERE id=?',
+        (data.daily_run_limit,data.active_run_limit,data.estimated_budget_usd,oid))
+    ops_audit(DB,user['id'],'organization_limits_changed','organization',oid)
+    return require_org(DB,oid,user['id'])
+
+
+@app.get('/api/organizations/{oid}/usage')
+def organization_usage(oid:str,user=Depends(current_user)):
+    org=require_org(DB,oid,user['id'])
+    from datetime import datetime,timedelta,timezone
+    since=(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()
+    data=DB.one(
+        """SELECT COUNT(*) AS daily,
+           COALESCE(SUM(CASE WHEN r.status IN
+              ('queued','running','awaiting_approval') THEN 1 ELSE 0 END),0) AS active,
+           COALESCE(SUM(r.total_cost),0) AS estimated_spend
+           FROM organization_runs x JOIN runs r ON r.id=x.run_id
+           WHERE x.organization_id=? AND r.created_at>=?""",
+        (oid,since))
+    total=DB.one(
+        """SELECT COALESCE(SUM(r.total_cost),0) AS cost,
+                  COALESCE(SUM(CASE WHEN r.status IN
+                    ('queued','running','awaiting_approval') THEN 1 ELSE 0 END),0) AS active
+           FROM organization_runs x JOIN runs r ON r.id=x.run_id
+           WHERE x.organization_id=?""",(oid,))
+    return {'organization_id':oid,'role':org['role'],
+            'daily_runs':data['daily'],'active_runs':total['active'],
+            'estimated_spend_usd':total['cost'],
+            'limits':{'daily_run_limit':org['daily_run_limit'],
+                      'active_run_limit':org['active_run_limit'],
+                      'estimated_budget_usd':org['estimated_budget_usd']}}
+
+
 class ProjectIn(BaseModel):
     name:str = Field(min_length=1,max_length=90)
     description:str = Field(default='',max_length=2000)
