@@ -17,7 +17,7 @@ from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
-from .task_contract import is_implementation_request
+from .task_contract import needs_workspace_tools
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -612,10 +612,11 @@ class RunIn(BaseModel):
 async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     convo=require_owned(DB,'conversations',data.conversation_id,user['id'])
     if data.mode not in ('auto','manual','team'): raise HTTPException(422,'Modo inválido.')
-    if is_implementation_request(data.prompt) and not data.autonomous:
+    if needs_workspace_tools(data.prompt) and not data.autonomous:
         raise HTTPException(
-            409, 'Você solicitou implementar ou corrigir código, mas Autonomia está desligada. '
-                 'Abra Computador, confira a pasta correta e ative Autonomia antes de enviar.')
+            409, 'Este pedido exige consultar ou alterar arquivos reais, mas Autonomia '
+                 'está desligada. Abra Computador, confira a pasta correta e '
+                 'ative Autonomia antes de enviar.')
     if data.autonomous:
         local_only(request)
         grant = computer_policy(DB, user['id'])
