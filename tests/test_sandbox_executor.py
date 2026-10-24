@@ -166,3 +166,35 @@ def test_docker_mode_disables_host_preview(monkeypatch):
         assert ready.json()['command_executor']['backend']=='docker'
         ops=client.get('/api/operations/overview')
         assert ops.json()['command_executor']['backend']=='docker'
+
+
+
+def test_run_binding_blocks_backend_mismatch_between_api_and_worker(tmp_path,monkeypatch):
+    from central.database import Database,utcnow
+    from central.computer_access import set_policy
+    from central.workspace_guard import bind_run,enforce_run_scope
+    db=Database(tmp_path/'scoped.db')
+    folder=tmp_path/'workspace'
+    folder.mkdir()
+    try:
+        db.execute('INSERT INTO users VALUES(?,?,?,?)',
+                   ('user','user@example.org','hash',utcnow()))
+        db.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',
+                   ('chat','user','Teste',None,utcnow(),utcnow()))
+        db.execute(
+            'INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,'
+            'agent_ids,plan,created_at,updated_at,autonomous) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            ('run','user','chat','Trabalhar','running','auto','[]','[]',
+             utcnow(),utcnow(),1))
+        set_policy(db,'user','full',str(folder))
+        monkeypatch.setenv('CENTRAL_COMMAND_RUNNER','docker')
+        assert bind_run(db,'user','run')['command_runner']=='docker'
+        assert enforce_run_scope(db,'user','run')==str(folder.resolve())
+        monkeypatch.setenv('CENTRAL_COMMAND_RUNNER','host')
+        with pytest.raises(HTTPException,match='executor diferente'):
+            enforce_run_scope(db,'user','run')
+        monkeypatch.setenv('CENTRAL_COMMAND_RUNNER','docker')
+        enforce_run_scope(db,'user','run')
+    finally:
+        db.close()
