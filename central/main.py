@@ -196,6 +196,8 @@ async def connect_provider(data: QuickProviderIn, request: Request, user=Depends
     try:
         models = catalog_with_connections(await discover_models(data.kind, key), user['id'], data.kind)
         options = candidates([m for m in models if not m['connected']], data.kind, data.model)
+        if data.model and not any(m['id'] == data.model for m in models):
+            raise ProviderError('catalog', 'Modelo não encontrado no catálogo de chat do provedor.')
         if not options and any(m['eligible'] and m['connected'] for m in models) and not data.model:
             raise HTTPException(409, 'Todos os modelos elegíveis deste provedor já estão cadastrados. Use Editar para gerenciar suas conexões.')
         if not options:
@@ -234,7 +236,7 @@ async def connect_provider(data: QuickProviderIn, request: Request, user=Depends
             if data.kind == 'ollama':
                 DB.execute("UPDATE providers SET enabled=0 WHERE user_id=? AND kind='ollama' AND id<>?", (user['id'], pid))
             # Only model-level zero prices are stored as zero. Account quotas are not token prices.
-            price = 0 if data.kind in ('ollama', 'openrouter', 'zai') else None
+            price = 0 if model.get('billing') in ('free', 'local') and data.kind in ('ollama', 'openrouter', 'zai') else None
             DB.execute('UPDATE providers SET api_key_enc=?,enabled=1,priority=?,last_error=NULL,input_price=?,output_price=? WHERE id=?',
                        (SEC.encrypt(key), 10 if data.kind == 'ollama' else 5, price, price, pid))
             ENGINE.health.record(pid, model['id'], success=True, latency_ms=latency)
