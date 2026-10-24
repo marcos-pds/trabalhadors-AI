@@ -43,7 +43,7 @@ def is_implementation_request(prompt):
     text = re.sub(
         r'\b(?:sem|nao)\s+(?:crie|criar|desenvolva|desenvolver|'
         r'implemente|implementar|corrija|corrigir|modifique|modificar|'
-        r'edite|editar|adicione|adicionar)\s+[^.!?,;\\n]{0,55}', '', text)
+        r'edite|editar|adicione|adicionar)\s+[^.!?,;\n]{0,55}', '', text)
     return bool(ACTION.search(text) and TARGET.search(text))
 
 
