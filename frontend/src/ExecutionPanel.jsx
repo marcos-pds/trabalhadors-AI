@@ -113,7 +113,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
 
   async function send(e) {
     e.preventDefault()
-    if (!active || !note.trim() || loading) return
+    if (!(active || canContinue) || !note.trim() || loading) return
     setLoading('note'); setError('')
     try {
       await onFeedback(note.trim())
@@ -187,9 +187,9 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         <div className="grid min-h-[260px] flex-1 place-items-center rounded-xl border border-dashed border-white/15 text-center text-xs text-muted">Inicie a prévia para visualizar o site aqui.</div>}
     </div>}
 
-    {active && <form onSubmit={send} className="shrink-0 border-t border-white/10 p-3">
+    {(active || canContinue) && <form onSubmit={send} className="shrink-0 border-t border-white/10 p-3">
       <label className="block text-xs font-semibold">Conversar durante a execução</label>
-      <p className="mt-1 text-[10px] text-muted">O próximo ciclo do trabalhador receberá seu ajuste. Isso não interrompe a operação já iniciada.</p>
+      <p className="mt-1 text-[10px] text-muted">{canContinue ? 'Salve um ajuste para o trabalhador ler quando clicar em Continuar execução.' : 'O próximo ciclo do trabalhador receberá seu ajuste. Isso não interrompe a operação já iniciada.'}</p>
       <textarea value={note} onChange={e=>setNote(e.target.value)} maxLength={1800} rows={2}
         placeholder="Ex.: Deixe o título maior e troque a cor do botão..." className={input + ' mt-2 resize-y'}/>
       <button type="submit" disabled={!note.trim() || !!loading} className={btn + ' mt-2 border-violet-400/40'}>Enviar ajuste aos trabalhadores</button>
