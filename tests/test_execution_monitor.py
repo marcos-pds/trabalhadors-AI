@@ -53,7 +53,7 @@ def test_adjustments_are_persistent_scoped_and_consumed_once(monkeypatch, tmp_pa
                    for e in activity.json()['events'])
         assert consume_run_feedback(DB, user, rid) == ['Troque a cor do botão para azul.']
         assert consume_run_feedback(DB, user, rid) == []
-        stopped = client.post('/api/runs/' + rid + '/cancel')
+        stopped = client.post('/api/runs/' + rid + '/cancel', headers=headers)
         assert stopped.status_code == 200, stopped.text
         saved_status = DB.one('SELECT status FROM runs WHERE id=?', (rid,))['status']
         assert saved_status == 'cancelled', saved_status
