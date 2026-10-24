@@ -605,3 +605,55 @@ Diagnóstico:
 Testes:
 
     python -m pytest tests/test_auth_limits.py tests/test_quotas.py -q
+
+## Fase 2 — organizações e permissões por papel
+
+A Central oferece uma primeira camada de multi-tenancy em torno de
+**organizações e projetos**. São criadas apenas tabelas adicionais;
+não ocorre recriação nem exclusão dos projetos ou conversas existentes.
+Na primeira atualização de um banco antigo, cada conta ganha uma
+organização pessoal e seus projetos/runs históricos recebem vínculos
+privados idempotentes. Faça backup da pasta `data/` antes da atualização.
+
+Na tela **Projetos → Organizações e permissões**, um usuário pode criar
+uma organização, adicionar outra conta já cadastrada por e-mail, definir
+papéis e configurar cotas de tarefas por dia, simultâneas e um teto de
+**custo estimado** registrado. Projetos selecionam a organização onde
+serão criados, inclusive quando a equipe tem mais de um membro.
+
+Regras de acesso:
+
+- `admin`: cria projetos, edita notas, inicia tarefas e administra membros
+  e limites da organização; não pode remover o último administrador.
+- `operator`: cria projetos e conversas do projeto compartilhado,
+  atualiza notas e inicia tarefas; não administra membros nem limites.
+- `analyst`: visualiza projetos e notas; não cria tarefas nem modifica
+  memórias ou permissões.
+- Um membro só pode acessar projetos de organizações às quais pertence.
+  Revogar sua associação bloqueia o acesso aos projetos e aos runs desse
+  tenant, inclusive históricos; tarefas ativas precisam terminar ou
+  ser canceladas antes de remover o membro ou rebaixá-lo para analista.
+
+**Privacidade intencional:** agentes, chaves de API, permissões de acesso
+ao computador, conversas e mensagens continuam pessoais. Membros da mesma
+organização veem o projeto e suas notas, mas NÃO recebem o histórico de
+chat de colegas nem seus segredos. Buscar memórias continua limitado às
+conversas do próprio usuário, dentro do mesmo projeto autorizado.
+
+Limites organizacionais são verificados junto com a criação do run em
+uma transação SQLite. O teto de custo usa valores estimados registrados
+e não impede cobrança inesperada do provedor durante chamadas já em curso.
+Ele não deve ser divulgado como um hard cap financeiro. Autonomia ainda
+depende das permissões locais de cada operador e usa os próprios agentes
+e provedores. A organização não concede acesso ao Windows de outro membro.
+
+Essa base **não transforma a Central em um serviço SaaS de produção**:
+faltam convites com verificação, SSO, isolamento de processos/containers
+por tenant, armazenamento de segredos gerenciado, políticas de retenção,
+backup criptografado, testes de carga e revisão de segurança externa.
+
+Teste recomendado:
+
+    npm run build
+    python -m pytest tests/test_organizations.py -q
+    python -m pytest -q
