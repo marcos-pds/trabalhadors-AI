@@ -80,19 +80,25 @@ def _feedback(result):
 async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                             model, system, messages, emit, validate_at_finish=True,
                             require_code_changes=False, require_observation=False,
-                            require_document_read=False):
+                            require_document_read=False, planning_only=False):
     """Requires an enabled scoped grant, returning only genuinely validated results."""
     grant = policy(db, user_id)
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
         raise RuntimeError('Acesso ao workspace bloqueado. Configure Computador no chat.')
     system = system + '\n\n' + INSTRUCTIONS
     transcript = list(messages)
+    if planning_only:
+        system += ('\nPAPEL: PLANEJAMENTO. Liste e leia poucos arquivos, entregue um plano '
+                   'executável para o próximo trabalhador e finalize rapidamente. '
+                   'NÃO crie pastas, NÃO edite arquivos e NÃO execute comandos. '
+                   'O trabalhador seguinte fará a implementação.')
     action_count = 0
     changed_files = set()
     observed_actions = set()
     validation_failures = 0
 
-    for round_number in range(MAX_ROUNDS):
+    max_rounds = min(6, MAX_ROUNDS) if planning_only else MAX_ROUNDS
+    for round_number in range(max_rounds):
         feedback = consume_run_feedback(db, user_id, run_id)
         if feedback:
             emit(run_id, 'workspace_feedback_applied', {
@@ -209,6 +215,14 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             continue
 
         action_count += 1
+        if planning_only and command['action'] not in ('list', 'read'):
+            transcript.extend([
+                {'role': 'assistant', 'content': raw[:1000]},
+                {'role': 'user', 'content':
+                    'Você está na etapa de arquitetura: não execute alterações '
+                    'nem comandos. Finalize agora com um plano para o Frontend/Programador.'},
+            ])
+            continue
         if action_count > MAX_ACTIONS:
             raise RuntimeError('Limite de operações do trabalhador atingido. '
                                'As alterações já realizadas foram preservadas.')
@@ -243,6 +257,6 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             {'read'} if require_document_read else {'read', 'list'}):
         raise RuntimeError('Nenhum documento foi realmente consultado; '
                            'o resumo de arquivos locais não pode ser declarado concluído.')
-    raise RuntimeError('O trabalhador atingiu o limite de ' + str(MAX_ROUNDS) +
+    raise RuntimeError('O trabalhador atingiu o limite de ' + str(max_rounds) +
                        ' ciclos sem concluir. Alterações realizadas foram mantidas; '
                        'consulte o histórico para decidir como continuar.')
