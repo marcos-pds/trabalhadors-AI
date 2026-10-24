@@ -480,6 +480,18 @@ def conversations(user=Depends(current_user)):
     return DB.all('SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC LIMIT 300',(user['id'],))
 
 
+@app.get('/api/conversations/search')
+def search_conversations(q: str = '', project_id: str | None = None,
+                         scope: str = 'project', user=Depends(current_user)):
+    if scope not in ('project', 'all'):
+        raise HTTPException(422, 'Escopo de busca inválido.')
+    if len(q.strip()) < 3 or len(q) > 140:
+        raise HTTPException(422, 'Use entre 3 e 140 caracteres para buscar.')
+    if project_id:
+        require_owned(DB, 'projects', project_id, user['id'])
+    return search_history(DB, user['id'], q, project_id, all_projects=(scope == 'all'))
+
+
 @app.get('/api/conversations/{cid}')
 def conversation_detail(cid: str, user=Depends(current_user)):
     return require_owned(DB, 'conversations', cid, user['id'])
@@ -514,16 +526,6 @@ def change_conversation_project(cid: str, data: ConversationProjectIn, request: 
     return require_owned(DB, 'conversations', cid, user['id'])
 
 
-@app.get('/api/conversations/search')
-def search_conversations(q: str = '', project_id: str | None = None,
-                         scope: str = 'project', user=Depends(current_user)):
-    if scope not in ('project', 'all'):
-        raise HTTPException(422, 'Escopo de busca inválido.')
-    if len(q.strip()) < 3 or len(q) > 140:
-        raise HTTPException(422, 'Use entre 3 e 140 caracteres para buscar.')
-    if project_id:
-        require_owned(DB, 'projects', project_id, user['id'])
-    return search_history(DB, user['id'], q, project_id, all_projects=(scope == 'all'))
 
 
 @app.get('/api/conversations/{cid}/context-policy')
