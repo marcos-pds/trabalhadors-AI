@@ -16,6 +16,7 @@ APENAS UM OBJETO JSON válido (sem Markdown nem texto fora do JSON).
 Formas aceitas (uma operação por resposta):
 {"action":"list","path":""}
 {"action":"read","path":"src/App.jsx"}
+{"action":"mkdir","path":"src/components"}
 {"action":"write","path":"src/new.py","content":"conteúdo UTF-8","expected_sha256":null}
 {"action":"replace","path":"src/App.jsx","old":"trecho EXATO único","new":"substituição","expected_sha256":"SHA retornado pelo read"}
 {"action":"command","command":"npm_build","cwd":""}
@@ -50,7 +51,7 @@ def parse_tool(raw):
     except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError('O modelo não retornou uma ação JSON válida.') from exc
     if not isinstance(data, dict) or data.get('action') not in (
-            'list', 'read', 'write', 'replace', 'command', 'finish'):
+            'list', 'read', 'mkdir', 'write', 'replace', 'command', 'finish'):
         raise ValueError('O modelo retornou uma ferramenta não permitida.')
     if any(not isinstance(k, str) for k in data):
         raise ValueError('Formato inválido.')
@@ -73,6 +74,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     validation_failures = 0
 
     for round_number in range(MAX_ROUNDS):
+        if policy(db, user_id) != grant:
+            raise RuntimeError('A permissão da pasta foi alterada ou revogada. Trabalho interrompido.')
         chunks = []
         async for part in client.stream(provider, key, model, system, transcript):
             chunks.append(part)
@@ -128,6 +131,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             result = await agent_action(db, user_id, run_id, step_id, command, emit)
         except HTTPException as exc:
             result = {'error': str(exc.detail), 'success': False}
+        if result.get('approved') is False:
+            raise RuntimeError('Operação negada pelo usuário. A execução foi interrompida.')
         emit(run_id, 'worker_message', {
             'step_id': step_id, 'action': command['action'],
             'path': command.get('path', ''),
