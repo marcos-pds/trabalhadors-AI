@@ -170,3 +170,67 @@ def test_invalid_model_json_is_rejected():
         parse_tool('execute bash -c rm')
     with pytest.raises(ValueError):
         parse_tool(json.dumps({'action':'delete','path':'notes.md'}))
+
+
+
+def test_can_create_nested_folders_but_cannot_leave_workspace(workspace):
+    db, root = workspace
+    made = execute(str(root), {'action': 'mkdir', 'path': 'src'})
+    assert made['created'] and (root / 'src').is_dir()
+    execute(str(root), {'action': 'mkdir', 'path': 'src/components'})
+    created = execute(str(root), {'action': 'write', 'path': 'src/components/view.tsx',
+                                  'content': 'export default function View() { return null }\n',
+                                  'expected_sha256': None})
+    assert created['bytes'] > 0
+    with pytest.raises(HTTPException):
+        execute(str(root), {'action': 'mkdir', 'path': '../../outside'})
+
+
+def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
+    from central.engine import Engine
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    agents = []
+    for specialty, name in [('architecture', 'Arquiteto'),
+                            ('code', 'Programador'), ('review', 'Revisor')]:
+        agent_id = specialty
+        db.execute('''INSERT INTO agents
+          (id,user_id,name,specialty,instructions,avatar,created_at)
+          VALUES(?,?,?,?,?,?,?)''',
+          (agent_id, 'user', name, specialty, 'Trabalhe com cuidado.', '✦', utcnow()))
+        agents.append(agent_id)
+    db.execute('''INSERT INTO providers
+        (id,user_id,name,kind,base_url,model,api_key_enc,created_at)
+        VALUES(?,?,?,?,?,?,?,?)''',
+        ('prov', 'user', 'Mock', 'openai', 'https://fake.test/v1',
+         'test-model', 'encrypted', utcnow()))
+    class FakeSecurity:
+        def decrypt(self, value):
+            return 'fake-key'
+    model = FakeModel([
+        json.dumps({'action': 'finish', 'message': 'Planejamento definido.'}),
+        json.dumps({'action': 'finish', 'message': 'Implementação pronta.'}),
+        json.dumps({'action': 'finish', 'message': 'Revisão concluída.'}),
+    ])
+    engine = Engine(db, FakeSecurity(), model)
+    async def run():
+        rid = engine.create_run('user', 'convo', 'Desenvolva um módulo com testes',
+                                'team', autonomous=True)
+        for _ in range(120):
+            row = db.one('SELECT status,error FROM runs WHERE id=?', (rid,))
+            if row['status'] in ('completed', 'failed'):
+                return rid, row
+            await asyncio.sleep(0.05)
+        raise AssertionError('Execução não concluiu.')
+    rid, result = asyncio.run(run())
+    assert result['status'] == 'completed', result.get('error')
+    steps = db.all('SELECT * FROM steps WHERE run_id=? ORDER BY rowid', (rid,))
+    assert len(steps) == 3
+    assert json.loads(steps[1]['deps']) == [steps[0]['id']]
+    assert json.loads(steps[2]['deps']) == [steps[1]['id']]
+    assert all(step['status'] == 'completed' for step in steps)
+    assert 'Planejamento definido.' in model.seen[1][1][0]['content']
+    assert 'Implementação pronta.' in model.seen[2][1][0]['content']
+    events = db.all("SELECT payload FROM events WHERE run_id=? AND event='workspace_validation'", (rid,))
+    assert len(events) == 2
+    assert all(json.loads(event['payload'])['passed'] for event in events)
