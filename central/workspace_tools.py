@@ -77,6 +77,22 @@ APPROVAL_REQUIRED_COMMANDS = frozenset({
 def critical_action(request):
     return (request.get('action') == 'command'
             and request.get('command') in APPROVAL_REQUIRED_COMMANDS)
+
+
+def needs_explicit_approval(db,user_id,run_id,request):
+    if critical_action(request):
+        return True
+    if request.get('action') != 'command':
+        return False
+    from .workspace_guard import current_organization
+    from .organizations import require_org
+    org=current_organization(db,run_id)
+    if not org:
+        return False
+    member=require_org(db,org,user_id,write=True)
+    # In organizations, npm build/test and Python tests can execute
+    # project-supplied scripts. Require one-time consent even in full mode.
+    return not bool(member['is_personal'])
 PACKAGE = re.compile(r'^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(?:@[0-9][a-z0-9._-]*)?$', re.I)
 PIP_PACKAGE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*(?:==[0-9][a-zA-Z0-9_.-]*)?$')
 
@@ -422,7 +438,8 @@ def decide(db, user_id, run_id, approval_id, approved):
     current = policy(db, user_id)
     requested = json.loads(row['request_json'])
     if (current['mode'] not in ('full','ask') or current['folder'] != row['folder']
-            or (current['mode'] == 'full' and not critical_action(requested))):
+            or (current['mode'] == 'full' and
+                not needs_explicit_approval(db,user_id,run_id,requested)))):
         raise HTTPException(409, 'Permissão alterada ou revogada.')
     enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
@@ -440,7 +457,7 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     config = policy(db, user_id)
     summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
-    if config['mode'] == 'ask' or critical_action(request):
+    if config['mode'] == 'ask' or needs_explicit_approval(db,user_id,run_id,request):
         token = issue_approval(db, user_id, run_id, step_id, folder, request, summary)
         emit(run_id, 'workspace_approval_required', {
             'step_id': step_id, 'approval_id': token, 'summary': summary})
