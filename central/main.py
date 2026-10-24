@@ -773,8 +773,8 @@ def add_run_feedback(rid: str, data: RunFeedbackIn, request: Request,
     require_csrf(request)
     local_only(request)
     run = require_owned(DB, 'runs', rid, user['id'])
-    if not run['autonomous'] or run['status'] not in ('queued', 'running', 'awaiting_approval'):
-        raise HTTPException(409, 'Não há uma execução autônoma ativa para receber ajustes.')
+    if not run['autonomous'] or run['status'] not in ('queued', 'running', 'awaiting_approval', 'paused_limit', 'failed'):
+        raise HTTPException(409, 'Esta execução não aceita novos ajustes.')
     cleaned = data.message.strip()
     if len(cleaned) < 3:
         raise HTTPException(422, 'Descreva o ajuste desejado.')
@@ -788,7 +788,9 @@ def add_run_feedback(rid: str, data: RunFeedbackIn, request: Request,
     ENGINE.emit(rid, 'workspace_feedback_received',
                 {'id': feedback_id, 'message': cleaned, 'status': 'queued'})
     return {'id': feedback_id, 'status': 'queued',
-            'message': 'Ajuste recebido. Será entregue ao agente na próxima etapa de raciocínio.'}
+            'message': ('Ajuste salvo. Clique em Continuar execução para aplicá-lo.'
+                        if run['status'] in ('paused_limit', 'failed') else
+                        'Ajuste recebido. Será entregue ao agente na próxima etapa de raciocínio.')}
 
 
 class PreviewStartIn(BaseModel):
