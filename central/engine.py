@@ -9,6 +9,8 @@ from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
+from .observability import log_event
+from .run_policy import classify_task, validate_run_policy
 from .worker_checkpoint import WorkerPaused, MAX_RESUMES, checkpoint_summary
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
@@ -172,6 +174,14 @@ class Engine:
 
     def emit(self, run_id, kind, data):
         self.db.event(run_id, kind, data)
+        if kind in ('run_created', 'run_completed', 'run_failed',
+                    'run_paused_limit', 'run_resumed', 'step_status',
+                    'provider_error', 'workspace_validation', 'task_classified'):
+            log_event('run_event', run_id=run_id, event_type=kind,
+                      step_id=data.get('step_id') or data.get('id'),
+                      status=data.get('status'),
+                      category=data.get('category'),
+                      task_type=data.get('task_type'))
 
     def schedule(self, run_id):
         if run_id in self.running and not self.running[run_id].done(): return
@@ -190,12 +200,8 @@ class Engine:
         if idempotency_key:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
-        implementation = is_implementation_request(prompt)
-        if needs_workspace_tools(prompt) and not autonomous:
-            raise ValueError(
-                'Esta solicitação depende de acesso real a arquivos locais, mas '
-                'Autonomia está desativada. Autorize a pasta correta em Computador '
-                'e ative Autonomia antes de enviar.')
+        task_policy = validate_run_policy(classify_task(prompt, autonomous), autonomous)
+        implementation = task_policy['task_type'] == 'code'
         agents = self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1', (user_id,))
         if flow:
             nodes = validate_flow(flow, agents)
@@ -243,6 +249,7 @@ class Engine:
         self.emit(run_id,'run_created',{'mode':mode,'plan':plan,
                                        'requires_implementation': implementation,
                                        'autonomous': bool(autonomous)})
+        self.emit(run_id,'task_classified',task_policy)
         self.schedule(run_id)
         return run_id
 
