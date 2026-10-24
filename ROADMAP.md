@@ -9,7 +9,7 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
 | 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
 | 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
-| 9 — infraestrutura | Migrações SQLite ordenadas com checksum; índices; compatibilidade com bancos legados | PostgreSQL, Redis distribuído e tracing multihost NÃO implementados |
+| 9 — infraestrutura | Migrações SQLite ordenadas com checksum; índices; compatibilidade com bancos legados; leases com token exclusivo por tentativa e confirmação protegida contra tokens expirados | PostgreSQL, Redis distribuído, fencing de efeitos externos e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
 | 12 — homologação | CLI de verificações; ferramenta de carga do endpoint de saúde; testes de restauração e acesso | Carga real, pentest independente, recuperação fora da máquina, deploy/escalabilidade |
@@ -238,3 +238,25 @@ Os proximos passos da fase exigem adapter PostgreSQL transacional,
 migraçao e rollback reais, transporte Redis resiliente, fencing de
 ferramentas e testes com servicos reais antes de permitir multiplos hosts.
 Nao use SQLite em compartilhamento de rede para escalar workers.
+
+
+### Fase 9 — Lease por tentativa (migração SQLite 8)
+
+Cada claim de tarefa gera `lease_token` aleatório e distinto. O worker deve
+apresentar esse token junto ao ID do worker para renovar o lease ou confirmar a
+conclusão; chamadas sem token falham fechadas. Recuperações por outro worker,
+recuperações pelo **mesmo** ID de worker e retomadas após cancelamento invalidam
+tokens anteriores. O token não aparece em detalhes públicos da fila.
+
+A migração com checksum adiciona a coluna sem recriar filas nem apagar dados.
+Leases antigos sem token não podem mais ser confirmados pela API nova; após
+expirarem, poderão ser retomados em uma nova tentativa, dentro do limite de
+retries. Em atualização de processos, interrompa os workers antigos antes de
+subir o código novo, evitando períodos com protocolos misturados.
+
+**Limite essencial:** isso protege o estado da fila, não impede que um processo
+obsoleto faça alterações externas durante a execução. A operação de ferramentas
+precisa receber e validar um fencing token transacional antes de se habilitar
+execução distribuída. PostgreSQL/Redis seguem desabilitados e não homologados.
+
+Verificação recomendada: `python -m pytest tests/test_job_queue.py tests/test_release_checks.py -q`.
