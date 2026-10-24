@@ -55,6 +55,53 @@ def create(db, data_dir, destination):
     return {'file': destination.name, 'encrypted': True}
 
 
+
+
+def verify(source):
+    """Verify an encrypted recovery point without restoring it anywhere permanent.
+
+    Does not expose the embedded credential key or modify the active database.
+    This is not a substitute for a real offsite restoration drill.
+    """
+    source = Path(source)
+    if not source.is_file():
+        raise ValueError('Backup source is not a file')
+    if source.stat().st_size > MAX_ARCHIVE * 2:
+        raise ValueError('Encrypted backup exceeds size limit')
+    raw = _cipher().decrypt(source.read_bytes())
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        if set(archive.namelist()) != {'manifest.json', 'central.sqlite3', 'secret.key'}:
+            raise ValueError('Unexpected backup members')
+        if len(archive.infolist()) != 3 or any(
+                entry.file_size > MAX_ARCHIVE for entry in archive.infolist()):
+            raise ValueError('Archive member count or size is invalid')
+        if json.loads(archive.read('manifest.json')) != {'format': 1, 'engine': 'sqlite'}:
+            raise ValueError('Unsupported backup format')
+        Fernet(archive.read('secret.key'))
+        with tempfile.TemporaryDirectory(prefix='central-backup-verify-') as directory:
+            stage = Path(directory) / 'verification.sqlite3'
+            # Extract no archive paths: only write the known database member.
+            with stage.open('xb') as output:
+                with archive.open('central.sqlite3') as data:
+                    while True:
+                        chunk = data.read(64 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        if output.tell() > MAX_ARCHIVE:
+                            raise ValueError('Backup database exceeds size limit')
+            db = sqlite3.connect('file:' + stage.as_posix() + '?mode=ro', uri=True)
+            try:
+                integrity = db.execute('PRAGMA integrity_check').fetchone()
+                if not integrity or integrity[0] != 'ok':
+                    raise ValueError('Backup SQLite integrity check failed')
+            finally:
+                db.close()
+            return {'verified': True, 'encrypted': True,
+                    'engine': 'sqlite', 'database_bytes': stage.stat().st_size,
+                    'integrity': 'ok', 'restored': False}
+
+
 def restore(source, destination):
     source, destination = Path(source), Path(destination)
     if destination.exists():
