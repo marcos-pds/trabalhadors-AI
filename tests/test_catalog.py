@@ -54,7 +54,9 @@ def test_openrouter_never_infers_zero_price_from_free_suffix():
         {'id': 'safe:free', 'name': 'Safe', 'pricing': {'prompt': '0', 'completion': '0'}},
     ])
     assert [m['id'] for m in candidates(models, 'openrouter')] == ['safe:free']
-    assert candidates(models, 'openrouter', 'paid') == []
+    assert [m['id'] for m in candidates(models, 'openrouter', 'paid')] == ['paid']
+    assert models[1]['billing'] == 'paid'
+    assert models[2]['billing'] == 'free'
 
 
 def test_gemini_filters_generation_methods_and_uses_explicit_free_ids():
@@ -288,3 +290,48 @@ def test_openrouter_discovery_uses_fixed_endpoint_and_bearer_auth():
     with mock_catalog(respond):
         models = complete(discover_models('openrouter', 'secret-key'))
     assert models[0]['eligible'] is True
+
+
+def test_zai_manual_selection_can_use_non_free_catalog_model():
+    models = normalize_models('zai', [{'id': 'glm-4.7-flash'}, {'id': 'glm-5.3'}, {'id': 'glm-5.3-flashx'}])
+    assert {m['id'] for m in candidates(models, 'zai')} == {'glm-4.7-flash'}
+    assert [m['id'] for m in candidates(models, 'zai', 'glm-5.3')] == ['glm-5.3']
+    assert next(m for m in models if m['id'] == 'glm-5.3')['billing'] == 'unknown'
+
+
+def test_manual_paid_model_is_connected_without_false_zero_price(connection_app, monkeypatch):
+    main, db = connection_app
+
+    async def discover(kind, key):
+        return normalize_models(kind, [
+            {'id': 'free', 'pricing': {'prompt': '0', 'completion': '0'}},
+            {'id': 'paid', 'pricing': {'prompt': '1', 'completion': '2'}},
+        ])
+
+    calls = []
+
+    async def stream(provider, key, model, *args):
+        calls.append(model)
+        yield 'OK'
+
+    monkeypatch.setattr(main, 'discover_models', discover)
+    monkeypatch.setattr(main.ENGINE.client, 'stream', stream)
+    response = complete(main.connect_provider(
+        main.QuickProviderIn(kind='openrouter', api_key='key', model='paid'),
+        request(), {'id': 'user'}))
+    assert calls == ['paid']
+    assert response['model']['billing'] == 'paid'
+    row = db.one('SELECT model,input_price,output_price FROM providers')
+    assert row['model'] == 'paid'
+    assert row['input_price'] is None
+    assert row['output_price'] is None
+
+
+def test_manual_model_must_be_in_discovered_catalog(connection_app, monkeypatch):
+    main, db = connection_app
+    with pytest.raises(HTTPException) as error:
+        complete(main.connect_provider(
+            main.QuickProviderIn(kind='groq', api_key='key', model='not-listed'),
+            request(), {'id': 'user'}))
+    assert 'não encontrado' in error.value.detail
+    assert db.all('SELECT * FROM providers') == []
