@@ -21,6 +21,36 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS organizations (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL,
+ created_by TEXT NOT NULL REFERENCES users(id),
+ is_personal INTEGER NOT NULL DEFAULT 0,
+ daily_run_limit INTEGER NOT NULL DEFAULT 100,
+ active_run_limit INTEGER NOT NULL DEFAULT 4,
+ estimated_budget_usd REAL,
+ created_at TEXT NOT NULL,
+ CHECK(daily_run_limit BETWEEN 1 AND 100000),
+ CHECK(active_run_limit BETWEEN 1 AND 100000),
+ CHECK(estimated_budget_usd IS NULL OR estimated_budget_usd >= 0)
+);
+CREATE TABLE IF NOT EXISTS organization_members (
+ organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ role TEXT NOT NULL CHECK(role IN ('admin','operator','analyst')),
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(organization_id,user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id,organization_id);
+CREATE TABLE IF NOT EXISTS organization_projects (
+ project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+ organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_org_projects_tenant ON organization_projects(organization_id,project_id);
+CREATE TABLE IF NOT EXISTS organization_runs (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_org_runs_tenant ON organization_runs(organization_id,run_id);
 CREATE TABLE IF NOT EXISTS login_failures (
  identity_hash TEXT NOT NULL,
  attempted_at REAL NOT NULL
@@ -192,6 +222,45 @@ class Database:
             run_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(runs)')}
             if 'autonomous' not in run_cols:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
+            # Safe, idempotent upgrade: assign existing private projects to
+            # each owner's personal workspace. No existing columns are changed.
+            self.conn.execute('BEGIN IMMEDIATE')
+            try:
+                users = self.conn.execute('SELECT id FROM users').fetchall()
+                for item in users:
+                    user_id = item['id']
+                    personal = self.conn.execute(
+                        'SELECT id FROM organizations WHERE created_by=? AND is_personal=1',
+                        (user_id,)).fetchone()
+                    if personal:
+                        org_id = personal['id']
+                    else:
+                        org_id = uid()
+                        self.conn.execute(
+                            'INSERT INTO organizations(id,name,created_by,is_personal,created_at) '
+                            'VALUES(?,?,?,?,?)',
+                            (org_id,'Meu espaço',user_id,1,utcnow()))
+                    self.conn.execute(
+                        'INSERT OR IGNORE INTO organization_members '
+                        '(organization_id,user_id,role,created_at) VALUES(?,?,?,?)',
+                        (org_id,user_id,'admin',utcnow()))
+                    self.conn.execute(
+                        'INSERT OR IGNORE INTO organization_projects(project_id,organization_id) '
+                        'SELECT id,? FROM projects WHERE user_id=? '
+                        'AND id NOT IN (SELECT project_id FROM organization_projects)',
+                        (org_id,user_id))
+                    self.conn.execute(
+                        'INSERT OR IGNORE INTO organization_runs(run_id,organization_id) '
+                        'SELECT r.id,COALESCE(op.organization_id,?) '
+                        'FROM runs r JOIN conversations c ON c.id=r.conversation_id '
+                        'LEFT JOIN organization_projects op ON op.project_id=c.project_id '
+                        'WHERE r.user_id=? AND r.id NOT IN '
+                        '(SELECT run_id FROM organization_runs)',
+                        (org_id,user_id))
+                self.conn.execute('COMMIT')
+            except Exception:
+                self.conn.execute('ROLLBACK')
+                raise
 
     def execute(self, query, args=()):
         with self.lock:
