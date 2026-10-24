@@ -61,6 +61,14 @@ export default function OperationalOverview({ api }) {
         </article>)}
       </div>
       <section className="rounded-2xl border border-white/10 bg-panel p-4">
+        <h3 className="text-xs font-semibold">Cotas operacionais da conta</h3>
+        <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+          <p>Execuções nas últimas 24h: <strong>{info.quotas?.usage?.runs_last_24h ?? '—'} / {info.quotas?.limits?.runs_per_24h ?? '—'}</strong></p>
+          <p>Em fila ou execução: <strong>{info.quotas?.usage?.active_runs ?? '—'} / {info.quotas?.limits?.active_runs ?? '—'}</strong></p>
+        </div>
+        <p className="mt-2 text-[10px] text-muted">Limites definidos no servidor. Não equivalem ao saldo ou à cobrança real dos provedores.</p>
+      </section>
+      <section className="rounded-2xl border border-white/10 bg-panel p-4">
         <h3 className="text-xs font-semibold">Fila persistente local</h3>
         <p className="mt-1 text-[11px] text-muted">Backend: SQLite · execuções com lease renovável. Para processos separados, inicie o worker dedicado.</p>
         <div className="mt-3 flex flex-wrap gap-3 text-xs">
