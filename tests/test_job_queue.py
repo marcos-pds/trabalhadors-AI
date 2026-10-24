@@ -42,8 +42,8 @@ def test_claim_exclusive_across_two_connections(tmp_path):
         assert len(claimed) == 1
         assert claimed[0]['run_id'] == 'job1'
         assert q1.details('job1')['state'] == 'claimed'
-        assert not q2.finish('job1', 'unknown-owner', 'completed')
-        assert q1.finish('job1', claimed[0]['owner'], 'completed')
+        assert not q2.finish('job1', 'unknown-owner', 'completed', lease_token=claimed[0]['lease_token'])
+        assert q1.finish('job1', claimed[0]['owner'], 'completed', lease_token=claimed[0]['lease_token'])
         assert q2.details('job1')['state'] == 'completed'
     finally:
         first.close()
@@ -60,15 +60,15 @@ def test_expired_lease_recovers_and_stale_owner_cannot_ack(tmp_path):
         old = q.claim('worker-one')
         assert old['attempt'] == 1
         now[0] += 20
-        assert q.heartbeat('r1','worker-one')
+        assert q.heartbeat('r1','worker-one',old['lease_token'])
         now[0] += 15
         assert q.claim('worker-two') is None
         now[0] += 16
         recovered = q.claim('worker-two')
         assert recovered and recovered['recovered'] is True
         assert recovered['attempt'] == 2
-        assert not q.finish('r1','worker-one','completed')
-        assert q.finish('r1','worker-two','completed')
+        assert not q.finish('r1','worker-one','completed',lease_token=old['lease_token'])
+        assert q.finish('r1','worker-two','completed',lease_token=recovered['lease_token'])
         assert q.details('r1')['attempts'] == 2
     finally:
         db.close()
@@ -91,7 +91,7 @@ def test_user_fair_limit_and_cancel_pending(tmp_path):
         q.cancel('b')
         assert q.details('b')['state']=='cancelled'
         assert q.claim('third-worker', per_user_limit=1) is None
-        assert q.finish('a','first-worker','completed')
+        assert q.finish('a','first-worker','completed',lease_token=one['lease_token'])
         assert not q.enqueue('b')  # cancelled business run is not allowed to restart
     finally:
         db.close()
@@ -215,8 +215,8 @@ def test_recovery_attempt_limit_moves_abandoned_run_to_failed_atomically(tmp_pat
         assert '2 tentativas' in run['error']
         events=db.all("SELECT event,payload FROM events WHERE run_id=?",('abandoned',))
         assert [r['event'] for r in events]==['queue_attempts_exhausted']
-        assert not q.finish('abandoned','worker-two','completed')
-        assert not q.heartbeat('abandoned','worker-two')
+        assert not q.finish('abandoned','worker-two','completed',lease_token=second['lease_token'])
+        assert not q.heartbeat('abandoned','worker-two',second['lease_token'])
     finally:
         db.close()
 
@@ -228,13 +228,15 @@ def test_expired_lease_owner_cannot_renew_or_ack_even_before_reclaim(tmp_path):
     try:
         seed(db,'u','late')
         q.enqueue('late')
-        assert q.claim('old')['attempt']==1
+        old=q.claim('old')
+        assert old['attempt']==1
         now[0]+=31
-        assert not q.heartbeat('late','old')
-        assert not q.finish('late','old','completed')
+        assert not q.heartbeat('late','old',old['lease_token'])
+        assert not q.finish('late','old','completed',lease_token=old['lease_token'])
         assert q.details('late')['state']=='claimed'
-        assert q.claim('fresh')['recovered'] is True
-        assert q.finish('late','fresh','completed')
+        fresh=q.claim('fresh')
+        assert fresh['recovered'] is True
+        assert q.finish('late','fresh','completed',lease_token=fresh['lease_token'])
     finally:
         db.close()
 
@@ -246,7 +248,8 @@ def test_manual_resume_after_exhaustion_resets_attempt_budget(tmp_path):
     try:
         seed(db,'u','task')
         q.enqueue('task')
-        assert q.claim('old')['attempt']==1
+        old=q.claim('old')
+        assert old['attempt']==1
         now[0]+=31
         assert q.claim('another') is None
         assert q.details('task')['state']=='failed'
@@ -333,13 +336,60 @@ def test_background_worker_emits_heartbeat_and_unregisters_when_stopped(tmp_path
         db.close()
 
 
-def test_migration_v7_is_additive_and_idempotent(tmp_path):
+def test_migration_v8_is_additive_and_idempotent(tmp_path):
     from central.migrations import migrate
     db=Database(tmp_path/'migrate.db')
     try:
-        assert [r['version'] for r in db.all('SELECT version FROM schema_migrations')] == list(range(1,8))
+        assert [r['version'] for r in db.all('SELECT version FROM schema_migrations')] == list(range(1,9))
         migrate(db)
-        assert len(db.all('SELECT version FROM schema_migrations'))==7
+        assert len(db.all('SELECT version FROM schema_migrations'))==8
         assert db.one("SELECT name FROM sqlite_master WHERE name='worker_liveness'")
+    finally:
+        db.close()
+
+
+def test_fencing_token_blocks_stale_completion_even_when_worker_id_reused(tmp_path):
+    db = Database(tmp_path / 'fencing.db')
+    now = [1000.0]
+    queue = JobQueue(db, lease_seconds=30, clock=lambda: now[0])
+    try:
+        seed(db, 'u', 'same-owner')
+        assert queue.enqueue('same-owner')
+        old = queue.claim('restarted-worker')
+        assert old and old['lease_token']
+        assert not queue.heartbeat('same-owner', 'restarted-worker')
+        assert not queue.finish('same-owner', 'restarted-worker', 'completed')
+        now[0] += 31
+        latest = queue.claim('restarted-worker')
+        assert latest and latest['recovered'] is True
+        assert latest['lease_token'] != old['lease_token']
+        assert not queue.heartbeat('same-owner', 'restarted-worker', old['lease_token'])
+        assert not queue.finish('same-owner', 'restarted-worker', 'completed',
+                                lease_token=old['lease_token'])
+        assert queue.heartbeat('same-owner', 'restarted-worker', latest['lease_token'])
+        assert queue.finish('same-owner', 'restarted-worker', 'completed',
+                            lease_token=latest['lease_token'])
+        assert 'lease_token' not in queue.details('same-owner')
+    finally:
+        db.close()
+
+
+def test_fencing_token_invalid_after_cancel_and_manual_resume(tmp_path):
+    db = Database(tmp_path / 'cancel-fencing.db')
+    try:
+        seed(db, 'u', 'cancel')
+        queue = JobQueue(db)
+        assert queue.enqueue('cancel')
+        old = queue.claim('worker')
+        queue.cancel('cancel')
+        assert not queue.heartbeat('cancel', 'worker', old['lease_token'])
+        assert not queue.finish('cancel', 'worker', 'completed',
+                                lease_token=old['lease_token'])
+        db.execute("UPDATE runs SET status='queued' WHERE id='cancel'")
+        assert queue.enqueue('cancel')
+        new = queue.claim('worker')
+        assert new['lease_token'] != old['lease_token']
+        assert queue.finish('cancel', 'worker', 'completed',
+                            lease_token=new['lease_token'])
     finally:
         db.close()
