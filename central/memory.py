@@ -103,8 +103,14 @@ def build_memory(db, user_id, conversation_id, prompt):
                    (conversation_id, user_id))
     if not convo:
         return {'scope': 'none', 'text': '', 'sources': []}
-    project = (db.one('SELECT id,name,description,memory_notes FROM projects WHERE id=? AND user_id=?',
-                      (convo['project_id'], user_id)) if convo['project_id'] else None)
+    from .organizations import require_project
+    from fastapi import HTTPException
+    project = None
+    if convo['project_id']:
+        try:
+            project = require_project(db,convo['project_id'],user_id)
+        except HTTPException:
+            project = None
     if project is None:
         history = recent_messages(db, user_id, conversation_id, SMALL_HISTORY_COUNT,
                                   SMALL_HISTORY_CHARS, prompt)
@@ -152,10 +158,16 @@ def search_history(db, user_id, query, project_id=None, all_projects=False, limi
         f'''SELECT m.conversation_id, c.title, c.project_id, p.name AS project_name,
                    m.content, m.role, m.created_at
             FROM messages m JOIN conversations c ON c.id=m.conversation_id
-            LEFT JOIN projects p ON p.id=c.project_id AND p.user_id=?
-            WHERE c.user_id=? AND m.user_id=? {scope} AND m.role IN ('user','assistant')
+            LEFT JOIN projects p ON p.id=c.project_id
+            LEFT JOIN organization_projects op ON op.project_id=c.project_id
+            WHERE c.user_id=? AND m.user_id=?
+              AND (c.project_id IS NULL
+                   OR (op.organization_id IS NULL AND p.user_id=?)
+                   OR op.organization_id IN
+                     (SELECT organization_id FROM organization_members
+                      WHERE user_id=c.user_id))
+              {scope} AND m.role IN ('user','assistant')
             ORDER BY m.rowid DESC LIMIT 2500''',
-        # Left join and conversation ownership are both user-scoped.
         args)
     results = []
     for position, row in enumerate(rows):
