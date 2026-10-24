@@ -204,3 +204,37 @@ backup offsite.
 A documentação descreve a implementação parcial: homologação em contas Git
 reais, deploy aprovado, PostgreSQL/Redis, SSO e testes de recuperação externa
 permanecem pendentes.
+
+### Fase 9 - workers SQLite: controle de retomadas e observabilidade
+
+Esta entrega prepara a fila existente para uma futura migracao de infraestrutura.
+PostgreSQL e Redis nao estao implementados nem habilitados nesta entrega.
+
+- CENTRAL_MAX_JOB_ATTEMPTS permite de 1 a 20 tentativas por tarefa
+  (padrao 5). Quando leases expirados consomem o limite, o run e o job
+  recebem falha no mesmo commit SQLite e um evento queue_attempts_exhausted.
+  So uma retomada explicitamente autorizada reinicia o contador.
+- Heartbeat e confirmacao nao podem renovar ou finalizar um lease vencido,
+  mesmo antes de outro processo reclamar a tarefa. E necessario fencing
+  por ferramenta antes de habilitar processos totalmente distribuidos.
+- Migracao checksummed 7 cria worker_liveness. Dispatchers atualizam
+  heartbeat a cada 5 segundos. Um worker sem sinal ha 20 segundos
+  deixa de contar como ativo, mesmo que o processo tenha caido.
+- O painel de Monitoramento mostra contagem agregada de workers ativos
+  e obsoletos, tarefas ativas e limite de novas tentativas por lease.
+- O release-check em CENTRAL_JOB_MODE=api falha quando nao ha worker
+  ativo anunciado na mesma base SQLite. O heartbeat nao e prova
+  de capacidade real de executar um job.
+
+Para atualizar e verificar no Windows:
+
+    git pull --ff-only origin feat/isolated-preview-semantic-memory
+    .\.venv\Scripts\python.exe -m pytest tests/test_job_queue.py tests/test_release_checks.py -q
+    .\.venv\Scripts\python.exe -m central.cli --data-dir data release-check
+
+IMPORTANTE: API e worker continuam compartilhando o mesmo arquivo SQLite
+local e o mesmo workspace. Isso NAO e uma fila distribuida multihost.
+Os proximos passos da fase exigem adapter PostgreSQL transacional,
+migraçao e rollback reais, transporte Redis resiliente, fencing de
+ferramentas e testes com servicos reais antes de permitir multiplos hosts.
+Nao use SQLite em compartilhamento de rede para escalar workers.
