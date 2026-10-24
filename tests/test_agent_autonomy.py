@@ -209,8 +209,13 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
     class FakeSecurity:
         def decrypt(self, value):
             return 'fake-key'
+    # An implementation run must have real edits; a text-only coder is rejected.
     model = FakeModel([
         json.dumps({'action': 'finish', 'message': 'Planejamento definido.'}),
+        json.dumps({'action': 'read', 'path': 'hello.py'}),
+        json.dumps({'action': 'replace', 'path': 'hello.py',
+                    'old': "print('old')", 'new': "print('new')",
+                    'expected_sha256': h("print('old')\n")}),
         json.dumps({'action': 'finish', 'message': 'Implementação pronta.'}),
         json.dumps({'action': 'finish', 'message': 'Revisão concluída.'}),
     ])
@@ -232,7 +237,8 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
     assert json.loads(steps[2]['deps']) == [steps[1]['id']]
     assert all(step['status'] == 'completed' for step in steps)
     assert 'Planejamento definido.' in model.seen[1][1][0]['content']
-    assert 'Implementação pronta.' in model.seen[2][1][0]['content']
+    assert 'Implementação pronta.' in model.seen[4][1][0]['content']
+    assert (root / 'hello.py').read_text() == "print('new')\n"
     events = db.all("SELECT payload FROM events WHERE run_id=? AND event='workspace_validation'", (rid,))
     assert len(events) == 2
     assert all(json.loads(event['payload'])['passed'] for event in events)
@@ -257,3 +263,16 @@ def test_windows_crlf_uses_raw_file_checksum_and_preserves_existing_line_endings
     with pytest.raises(HTTPException) as error:
         execute(str(root), request)
     assert error.value.status_code == 409
+
+
+def test_programming_agent_cannot_finish_from_generic_prose_without_edits(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    model = FakeModel([json.dumps({'action': 'finish', 'message': 'Está pronto.'})
+                       for _ in range(12)])
+    with pytest.raises(RuntimeError, match='Nenhum arquivo'):
+        asyncio.run(autonomous_worker(
+            model, db, 'user', 'run', 'step', {'kind': 'openai'},
+            'key', 'mock', '', [{'role':'user','content':'Desenvolva o site.'}],
+            lambda *args: None, require_code_changes=True))
+    assert (root / 'hello.py').read_text() == "print('old')\n"
