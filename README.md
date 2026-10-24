@@ -410,3 +410,34 @@ pelo botão Computador a qualquer momento; novos pedidos deixam de ser aceitos.
 Teste local:
 - npm run build
 - python -m pytest tests/test_agent_autonomy.py tests/test_computer_access.py tests/test_app.py -q
+
+## Painel de execução, prévia local e ajustes durante uma tarefa
+
+No Chat IA, **Atividade / Prévia** abre um painel ao lado da conversa.
+O botão **Parar** também aparece no cabeçalho do chat enquanto a tarefa executa.
+
+- **Atividade:** consulta eventos reais da execução a cada três segundos.
+  Mostra etapa, horário, ferramenta e status. Os modelos enviam sinais de
+  atividade periódicos; mais de 45 segundos sem eventos gera um aviso de
+  possível inatividade, não uma afirmação de travamento.
+- **Parar:** cancela a tarefa e encerra a árvore de processos de comandos
+  associados àquela execução no Windows. Bloqueia ajustes e aprovações
+  pendentes imediatamente. Arquivos já modificados não são revertidos.
+- **Conversar durante execução:** envie um ajuste pelo painel ou caixa de
+  mensagem principal. Ele é salvo na tarefa e entregue ao trabalhador na
+  próxima rodada, sem interromper operações já iniciadas.
+- **Prévia ao vivo:** escolha um subprojeto autorizado com package.json
+  e script dev. A inicialização exige confirmação e executa npm run dev
+  com host 127.0.0.1 em porta local, usando um iframe restrito ao lado
+  do chat. Há botão para abrir em nova janela se o iframe não renderizar.
+  Projetos com HMR podem atualizar automaticamente; há Atualizar manual.
+- **Parar prévia:** encerra só o servidor local de desenvolvimento.
+  Sair da conta, mudar a permissão da pasta ou encerrar a Central também
+  encerra essa prévia.
+
+A prévia é do aplicativo web, não do desktop Windows. Não fornece
+controle remoto de mouse, teclado ou janelas. Scripts npm de projetos
+e dependências executam código real com os privilégios de sua conta;
+não são uma sandbox de segurança. Use apenas projetos confiáveis.
+
+Verificação: npm run build; python -m pytest -q.
