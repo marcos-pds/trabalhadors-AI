@@ -87,7 +87,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
     ? 'Sem atividade recente — verifique o log'
     : activity?.status === 'awaiting_approval' ? 'Aguardando sua aprovação'
     : isRunning ? 'Trabalhadores em atividade' :
-      activity?.status === 'completed' ? 'Concluído' :
+      activity?.status === 'completed' ? (activity?.delivery_verified ? 'Concluído com testes' : 'Concluído') :
       activity?.status === 'cancelled' ? 'Parado' :
       activity?.status === 'paused_limit' ? 'Pausado por limite · progresso salvo' :
       activity?.status === 'failed' ? 'Falhou por erro' : 'Sem tarefa ativa'
