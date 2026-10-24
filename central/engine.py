@@ -338,8 +338,14 @@ class Engine:
 
     async def process(self, run_id):
         run = self.db.one('SELECT * FROM runs WHERE id=?', (run_id,))
-        if not run: return
-        self.db.execute("UPDATE runs SET status='running',updated_at=? WHERE id=?", (utcnow(),run_id))
+        if not run or run['status'] not in ('queued','running','awaiting_approval'):
+            return
+        changed = self.db.execute(
+            "UPDATE runs SET status='running',updated_at=? WHERE id=? "
+            "AND status IN ('queued','running','awaiting_approval')",
+            (utcnow(),run_id))
+        if not changed:
+            return
         self.emit(run_id,'run_status',{'status':'running'})
         try:
             while True:
@@ -370,7 +376,13 @@ class Engine:
                 elif evidence.get('inspected'):
                     output += ('\n\n## Evidências verificadas\nItens consultados: ' +
                                ', '.join(item['path'] or '(raiz)' for item in evidence['inspected'][:8]))
-            self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
+            committed = self.db.execute(
+                "UPDATE runs SET status='completed',output=?,updated_at=? "
+                "WHERE id=? AND status IN ('running','awaiting_approval')",
+                (output,utcnow(),run_id))
+            if not committed:
+                # Another API process cancelled this run during final validation.
+                return
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
             self.emit(run_id,'run_completed',{'output':output, 'evidence': evidence})
