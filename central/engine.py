@@ -12,6 +12,7 @@ from .agent_autonomy import autonomous_worker
 from .observability import log_event
 from .run_policy import classify_task, validate_run_policy
 from .worker_checkpoint import WorkerPaused, MAX_RESUMES, checkpoint_summary
+from .job_queue import JobQueue
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
                             assert_inspection_performed)
@@ -171,6 +172,12 @@ class Engine:
         self.agent_sems = {}
         self.health = ProviderHealth(db)  # persistent across restarts
         self.approvals = defaultdict(asyncio.Event)
+        self.queue = JobQueue(db)
+        self.job_mode = __import__('os').environ.get('CENTRAL_JOB_MODE', 'embedded')
+        if self.job_mode not in ('embedded','api','worker'):
+            raise ValueError('CENTRAL_JOB_MODE must be embedded, api, or worker')
+        self.dispatch_task = None
+        self.worker_owner = uid()
 
     def emit(self, run_id, kind, data):
         self.db.event(run_id, kind, data)
@@ -184,16 +191,77 @@ class Engine:
                       task_type=data.get('task_type'))
 
     def schedule(self, run_id):
-        if run_id in self.running and not self.running[run_id].done(): return
-        task = asyncio.create_task(self.process(run_id))
-        self.running[run_id] = task
-        task.add_done_callback(lambda _: self.running.pop(run_id, None) if self.running.get(run_id) is task else None)
+        # Persist before dispatch; an API process never executes user code.
+        self.queue.enqueue(run_id)
+        if self.job_mode != 'api':
+            self.dispatch_ready()
+
+    def dispatch_ready(self):
+        if self.job_mode == 'api' or self.shutting_down:
+            return
+        while len([t for t in self.running.values() if not t.done()]) < 5:
+            claimed = self.queue.claim(owner=self.worker_owner)
+            if not claimed:
+                break
+            rid = claimed['run_id']
+            if rid in self.running and not self.running[rid].done():
+                # Defensive guard; normally impossible while its lease is alive.
+                break
+            task = asyncio.create_task(self._run_claim(claimed))
+            self.running[rid] = task
+            task.add_done_callback(
+                lambda _, run_id=rid, current=task:
+                self.running.pop(run_id, None)
+                if self.running.get(run_id) is current else None)
+
+    async def _run_claim(self, claimed):
+        rid, owner = claimed['run_id'], claimed['owner']
+        if claimed['recovered']:
+            # Another process lost its lease. Recheck each tool's normal
+            # permissions/hashes; replay only incomplete steps.
+            self.db.execute(
+                "UPDATE steps SET status='queued' WHERE run_id=? "
+                "AND status IN ('running','awaiting_approval')", (rid,))
+            self.db.execute("UPDATE runs SET status='queued' WHERE id=? "
+                            "AND status IN ('running','awaiting_approval')", (rid,))
+            self.emit(rid, 'run_recovered',
+                      {'message':'Worker anterior perdeu o lease; retomando etapas pendentes.'})
+        async def renew():
+            while True:
+                await asyncio.sleep(max(3, self.queue.lease_seconds // 3))
+                if not self.queue.heartbeat(rid, owner):
+                    raise RuntimeError('O lease do job foi perdido.')
+        heartbeat = asyncio.create_task(renew())
+        try:
+            await self.process(rid)
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            row = self.db.one('SELECT status,error FROM runs WHERE id=?', (rid,))
+            mapping = {'completed':'completed','paused_limit':'paused',
+                       'failed':'failed','cancelled':'cancelled'}
+            state = mapping.get(row['status'] if row else None, 'queued')
+            self.queue.finish(rid, owner, state, row.get('error') if row else None)
+
+    async def poll_jobs(self):
+        try:
+            while not self.shutting_down:
+                self.dispatch_ready()
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            raise
+
+    def start_dispatcher(self):
+        if self.job_mode != 'api' and (self.dispatch_task is None or self.dispatch_task.done()):
+            self.dispatch_task = asyncio.create_task(self.poll_jobs())
 
     def resume_pending(self):
-        # Queued steps can resume, but actions require a new explicit policy check.
+        # Seed queue rows for databases created before durable scheduling.
+        # Never reset a live worker's step while its lease is valid.
         for row in self.db.all("SELECT id FROM runs WHERE status IN ('queued','running','awaiting_approval')"):
-            self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (row['id'],))
-            self.schedule(row['id'])
+            self.queue.enqueue(row['id'])
+        if self.job_mode != 'api':
+            self.dispatch_ready()
 
     def create_run(self, user_id, conversation_id, prompt, mode, agent_ids=None,
                    flow=None, budget=None, idempotency_key=None, autonomous=False):
@@ -569,6 +637,7 @@ class Engine:
                         (utcnow(),run_id))
         self.db.execute("UPDATE workspace_action_approvals SET status='denied' WHERE run_id=? AND status='pending'", (run_id,))
         self.emit(run_id, 'run_status', {'status': 'cancelled'})
+        self.queue.cancel(run_id)
         stop_run_commands(run_id)
         t = self.running.get(run_id)
         if t and not t.done():
