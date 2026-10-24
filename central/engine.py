@@ -226,11 +226,26 @@ class Engine:
                             "AND status IN ('running','awaiting_approval')", (rid,))
             self.emit(rid, 'run_recovered',
                       {'message':'Worker anterior perdeu o lease; retomando etapas pendentes.'})
+        from .workspace_tools import stop_run_commands, reset_run_commands
+        # Clear the in-memory cancellation guard only for a NEW explicit claim.
+        reset_run_commands(rid)
+        parent = asyncio.current_task()
         async def renew():
+            previous = asyncio.get_running_loop().time()
             while True:
-                await asyncio.sleep(max(3, self.queue.lease_seconds // 3))
-                if not self.queue.heartbeat(rid, owner):
-                    raise RuntimeError('O lease do job foi perdido.')
+                await asyncio.sleep(1)
+                row = self.db.one('SELECT status FROM runs WHERE id=?', (rid,))
+                if row is None or row['status'] == 'cancelled':
+                    stop_run_commands(rid)
+                    parent.cancel()
+                    return
+                now = asyncio.get_running_loop().time()
+                if now - previous >= max(3, self.queue.lease_seconds // 3):
+                    if not self.queue.heartbeat(rid, owner):
+                        stop_run_commands(rid)
+                        parent.cancel()
+                        return
+                    previous = now
         heartbeat = asyncio.create_task(renew())
         try:
             await self.process(rid)
@@ -379,7 +394,11 @@ class Engine:
                        'checkpoints': checkpoint_summary(self.db, run['user_id'], run_id)})
             self.emit(run_id, 'run_status', {'status': 'paused_limit'})
         except asyncio.CancelledError:
-            new_status = 'queued' if self.shutting_down else 'cancelled'
+            state = self.db.one('SELECT status FROM runs WHERE id=?',(run_id,))
+            # A cross-process cancellation already set 'cancelled'. Never
+            # overwrite that durable decision with a completed/queued status.
+            new_status = ('cancelled' if state and state['status']=='cancelled'
+                          else 'queued' if self.shutting_down else 'cancelled')
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
             self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (run_id,))
             self.emit(run_id,'run_status',{'status':new_status})
