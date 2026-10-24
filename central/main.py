@@ -23,6 +23,7 @@ from .task_contract import needs_workspace_tools, delivery_evidence
 from .observability import request_context, correlation_id, log_event, duration_ms
 from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
+from .auth_limits import ensure_allowed as allow_login, failed as fail_login, succeeded as login_ok
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -139,9 +140,13 @@ def register(data: Credentials, request: Request, response: Response):
 @app.post('/api/login')
 def login(data: Credentials, request: Request, response: Response):
     require_csrf(request)
-    row = DB.one('SELECT * FROM users WHERE email=?',(data.email.strip().lower(),))
+    email = data.email.strip().lower()
+    allow_login(DB, email)
+    row = DB.one('SELECT * FROM users WHERE email=?',(email,))
     if not row or not verify_password(data.password,row['password_hash']):
+        fail_login(DB, email)
         raise HTTPException(401,'E-mail ou senha incorretos.')
+    login_ok(DB, email)
     token = SEC.create_session(row['id'])
     response.set_cookie('central_session',token,httponly=True,samesite='strict',secure=request.url.scheme=='https',max_age=604800)
     return {'id':row['id'],'email':row['email']}
