@@ -146,3 +146,37 @@ def test_cancel_resume_and_tenant_assignment_cannot_reuse_tokens(pg):
     assert second["lease_token"] != first["lease_token"]
     assert queue.finish("r", "worker", "completed",
                         lease_token=second["lease_token"])
+
+
+def test_concurrent_first_enqueue_cannot_reassign_run_between_users(pg):
+    barrier = threading.Barrier(2)
+    accepted, rejected, errors = [], [], []
+
+    def enqueue(user):
+        conn = connect(DSN)
+        try:
+            barrier.wait(timeout=5)
+            PostgresJobQueue(conn).enqueue("shared-run", user)
+            accepted.append(user)
+        except PermissionError:
+            rejected.append(user)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            conn.close()
+
+    workers = [
+        threading.Thread(target=enqueue, args=(user,))
+        for user in ("owner-a", "owner-b")
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+    assert not any(worker.is_alive() for worker in workers)
+    assert not errors
+    assert len(accepted) == 1 and len(rejected) == 1
+    record = pg.execute(
+        "SELECT user_id FROM central_jobs.queue WHERE run_id='shared-run'"
+    ).fetchone()
+    assert record[0] == accepted[0]
