@@ -5,7 +5,7 @@ import subprocess
 from .runtime_config import validate_runtime
 
 
-def report(db=None, probe_docker=False):
+def report(db=None, probe_docker=False, backup_file=None):
     checks = []
     try:
         mode = validate_runtime()
@@ -28,6 +28,20 @@ def report(db=None, probe_docker=False):
         except (OSError, subprocess.SubprocessError):
             status = 'failed'
     checks.append({'name': 'docker_daemon', 'status': status, 'cli_found': bool(docker)})
+    if backup_file:
+        from .backups import verify
+        try:
+            verified = verify(backup_file)
+            checks.append({'name': 'encrypted_backup_recovery_point',
+                           'status': 'passed', 'verified': verified['verified'],
+                           'database_bytes': verified['database_bytes']})
+        except Exception:
+            # Do not include paths, key material or encrypted payload in logs.
+            checks.append({'name': 'encrypted_backup_recovery_point',
+                           'status': 'failed',
+                           'detail': 'Backup inválido, chave incorreta ou integridade comprometida.'})
+    else:
+        checks.append({'name': 'encrypted_backup_recovery_point', 'status': 'not_checked'})
     checks.extend({'name': name, 'status': 'requires_external_validation'} for name in (
         'docker_real_workloads', 'ollama_embedding_model', 'postgresql_migration',
         'distributed_queue', 'sso_identity_provider', 'tls_public_endpoint',
