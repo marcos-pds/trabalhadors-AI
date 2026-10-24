@@ -139,3 +139,29 @@ def test_live_operations_routes_are_private_and_requests_have_safe_ids():
                    for item in own_audit)
         assert second.get('/api/operations/audit').json() == []
         assert first.get('/api/operations/overview').json()['last_24h']['total'] >= 1
+
+
+
+def test_quiet_job_warning_is_scoped_and_does_not_claim_process_is_hung():
+    from datetime import timedelta
+    db = Database(':memory:')
+    try:
+        old = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+        now = utcnow()
+        for uid in ('first', 'second'):
+            db.execute('INSERT INTO users VALUES(?,?,?,?)',
+                       (uid, uid + '@example.com', 'hash', now))
+            db.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',
+                       ('conv-' + uid, uid, 'Run', None, now, now))
+        db.execute(
+            'INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,'
+            'agent_ids,plan,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            ('inactive', 'first', 'conv-first', 'Task', 'running',
+             'auto', '[]', '[]', old, old))
+        one = overview(db, 'first')
+        assert any(a['code'] == 'run_quiet' and a['run_id'] == 'inactive'
+                   for a in one['alerts'])
+        assert not any('travou' in a['message'].lower() for a in one['alerts'])
+        assert not any(a['code'] == 'run_quiet' for a in overview(db, 'second')['alerts'])
+    finally:
+        db.close()
