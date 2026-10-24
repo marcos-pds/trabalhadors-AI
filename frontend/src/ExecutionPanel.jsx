@@ -142,6 +142,8 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
           </time>
         </div>
         {item.path && <p className="mt-1 break-all font-mono text-[10px] text-muted">{item.path}</p>}
+        {item.detail && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-rose-400/[.04] p-2 font-mono text-[10px] text-rose-200">{item.detail}</pre>}
+        {item.error && <p className="mt-2 break-words text-[11px] text-rose-200">{item.error}</p>}
       </div>) : <p className="p-4 text-xs text-muted">Os eventos de ferramentas, modelos e validações aparecerão aqui.</p>}
     </div> : <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
       <p className="text-[11px] leading-5 text-muted">Escolha o aplicativo da pasta autorizada. A prévia inicia um servidor npm dev apenas em 127.0.0.1. Mudanças podem aparecer via atualização automática do framework.</p>
