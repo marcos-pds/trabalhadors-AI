@@ -72,6 +72,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
   const [error, setError] = useState('')
   const [models, setModels] = useState(null)
   const [model, setModel] = useState('')
+  const [confirmCharges, setConfirmCharges] = useState(false)
   const [search, setSearch] = useState('')
   const [result, setResult] = useState(null)
   const input = useRef(null)
@@ -79,15 +80,18 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
   const payload = () => ({ kind: service.kind, api_key: key, provider_id: saved?.id, model })
   const allowed = service.kind === 'ollama' || !!key.trim() || !!saved
   const hasNewModels = !models || models.some(m => m.eligible && !m.connected)
-  const changeKey = value => { setKey(value); setModels(null); setModel(''); setError('') }
+  const chosen = models?.find(m => m.id === model)
+  const manualAllowed = !!chosen && !chosen.connected && (chosen.billing === 'free' || chosen.billing === 'local' || confirmCharges)
+  const changeKey = value => { setKey(value); setModels(null); setModel(''); setConfirmCharges(false); setError('') }
   async function discover() {
     setBusy('Buscando modelos disponíveis...'); setError('')
-    try { const data = await api('/provider-catalog/models', 'POST', payload()); setModels(data.models); setModel('') }
+    try { const data = await api('/provider-catalog/models', 'POST', payload()); setModels(data.models); setModel(''); setConfirmCharges(false) }
     catch (e) { setError(e.message) }
     finally { setBusy('') }
   }
   async function connect(e) {
-    e.preventDefault(); setBusy('Consultando catálogo e testando resposta...'); setError('')
+    e.preventDefault();
+    if (model && !manualAllowed) return; setBusy('Consultando catálogo e testando resposta...'); setError('')
     try {
       const data = await api('/provider-catalog/connect', 'POST', payload())
       setKey(''); setModels(data.models); setResult(data)
@@ -114,24 +118,26 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
           <a className="mt-2 inline-block text-xs text-lilac underline" href={service.keys_url} target="_blank" rel="noopener noreferrer">Obter chave no site oficial</a>
         </>}
         <details className="mt-5 rounded-2xl border border-white/10 p-4">
-          <summary className="cursor-pointer text-xs text-muted">Ver catálogo e escolher modelo (opcional)</summary>
+          <summary className="cursor-pointer text-xs text-muted">Ver catálogo e escolher um modelo específico (grátis ou pago)</summary>
           <button type="button" className={button + ' mt-4'} disabled={!allowed || !!busy} onClick={discover}>Buscar catálogo oficial</button>
           {models && <>
-            <p className="mt-3 text-xs text-muted">{models.length} modelos de chat · {models.filter(m => m.eligible && !m.connected).length} elegíveis. Nome, ID e contexto vêm do catálogo; a origem aparece em cada item.</p>
+            <p className="mt-3 text-xs text-muted">{models.length} modelos de chat · {models.filter(m => m.eligible && !m.connected).length} para conexão automática gratuita. Todos os modelos de chat não cadastrados podem ser escolhidos manualmente. Acesso e cobrança dependem da sua conta.</p>
             <input aria-label="Buscar modelo" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar nome ou identificador..." className={control + ' mt-3 w-full'} />
             <label htmlFor="catalog-model" className="mt-3 block text-xs text-muted">Modelo para conexão</label>
-            <select id="catalog-model" value={model} onChange={e => setModel(e.target.value)} disabled={!!busy} className={control + ' mt-2 w-full'}>
+            <select id="catalog-model" value={model} onChange={e => { setModel(e.target.value); setConfirmCharges(false) }} disabled={!!busy} className={control + ' mt-2 w-full'}>
               <option value="">Automático · testar até 3 opções ainda não cadastradas</option>
-              {models.filter(m => m.eligible).map(m => <option key={m.id} value={m.id} disabled={m.connected}>{m.name} · {m.id}{m.connected ? " · Já cadastrado" : ""}</option>)}
+              {models.map(m => <option key={m.id} value={m.id} disabled={m.connected}>{m.name} · {m.id} · {m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? 'Gratuito elegível' : m.billing === 'local' ? 'Local' : 'Preço não confirmado'}{m.connected ? ' · Já cadastrado' : ''}</option>)}
             </select>
-            <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
+            {chosen && <p className="mt-3 text-xs text-lilac">Selecionado: {chosen.name} · {chosen.access}</p>}
+            {chosen && !['free', 'local'].includes(chosen.billing) && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-amber-200"><input type="checkbox" checked={confirmCharges} onChange={e => setConfirmCharges(e.target.checked)} className="mt-1 accent-violet-400"/> Entendo que este modelo pode gerar cobranças e que minha conta precisa ter acesso autorizado.</label>}
+            <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="ml-2 text-[10px] text-lilac">{m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? 'Gratuito elegível' : m.billing === 'local' ? 'Local' : 'Preço a confirmar'}</span><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
           </>}
         </details>
         {error && <p role="alert" className="mt-4 text-sm text-rose-300">{error}</p>}
         {busy && <p role="status" className="mt-4 text-xs text-lilac">{busy}</p>}
         {!hasNewModels && <p role="status" className="mt-4 text-xs text-muted">Nenhum modelo novo elegível. Os modelos já cadastrados podem ser gerenciados em Editar.</p>}
-        <button type="submit" className={primary + ' mt-5 w-full'} disabled={!allowed || !!busy || !hasNewModels}>{busy ? 'Conectando...' : 'Conectar automaticamente'}</button>
-        <p className="mt-3 text-[10px] leading-4 text-muted">A validação usa uma chamada de teste e consome a cota da conta. O plano de cobrança é gerenciado no serviço.</p>
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row"><button type="submit" className={primary + ' flex-1'} disabled={!allowed || !!busy || (model ? !manualAllowed : !hasNewModels)}>{busy ? 'Conectando...' : model ? 'Conectar modelo selecionado' : 'Conectar automaticamente'}</button>{model && <button type="button" className={button} disabled={!!busy} onClick={() => { setModel(''); setConfirmCharges(false) }}>Voltar ao automático</button>}</div>
+        <p className="mt-3 text-[10px] leading-4 text-muted">A validação faz uma chamada real e pode consumir créditos ou gerar cobrança. No automático, apenas modelos elegíveis são testados; na seleção manual, somente o modelo escolhido será testado.</p>
       </form>}
     </section>
   </div>
