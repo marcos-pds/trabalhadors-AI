@@ -1,0 +1,2 @@
+# Optional, experimental Redis wakeup hints only; not an execution queue.
+redis>=5,<7
