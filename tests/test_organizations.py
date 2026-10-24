@@ -195,3 +195,41 @@ def test_removing_member_blocks_completed_run_and_history(monkeypatch):
         search=member.get('/api/conversations/search',params={'q':'padrões','scope':'all'})
         assert search.status_code==200 and search.json()==[]
         assert member.post(f'/api/runs/{rid}/resume',headers=HEADERS).status_code==404
+
+
+
+def test_analyst_cannot_mutate_old_run_after_role_downgrade(monkeypatch):
+    monkeypatch.setattr(ENGINE,'schedule',lambda _:None)
+    with TestClient(app) as owner, TestClient(app) as member:
+        adm,ae=register(owner)
+        user,email=register(member)
+        org=org_create(owner,'Mudanca de papel')
+        pid=project_create(owner,'Projeto protegido',org)
+        assert owner.put(f'/api/organizations/{org}/members',headers=HEADERS,
+                         json={'email':email,'role':'operator'}).status_code==200
+        cid=member.post('/api/conversations',headers=HEADERS,
+                        json={'project_id':pid}).json()['id']
+        run=member.post('/api/runs',headers=HEADERS,
+                        json={'conversation_id':cid,'prompt':'Explique redes',
+                              'mode':'auto'})
+        assert run.status_code==200,run.text
+        rid=run.json()['id']
+        downgrade=owner.put(f'/api/organizations/{org}/members',
+                            headers=HEADERS,
+                            json={'email':email,'role':'analyst'})
+        assert downgrade.status_code==409
+        DB.execute("UPDATE runs SET status='paused_limit' WHERE id=?",(rid,))
+        downgrade=owner.put(f'/api/organizations/{org}/members',
+                            headers=HEADERS,
+                            json={'email':email,'role':'analyst'})
+        assert downgrade.status_code==200,downgrade.text
+        assert member.get('/api/runs/'+rid).status_code==200
+        assert member.post('/api/runs/'+rid+'/resume',
+                           headers=HEADERS).status_code==403
+        assert member.post('/api/runs/'+rid+'/cancel',
+                           headers=HEADERS).status_code==403
+        assert member.post('/api/runs/'+rid+'/feedback',headers=HEADERS,
+                           json={'message':'Mude o plano'}).status_code==403
+        assert member.patch('/api/conversations/'+cid+'/project',
+                            headers=HEADERS,
+                            json={'project_id':None}).status_code==403
