@@ -80,4 +80,13 @@ def require_owned(db, table, obj_id, user_id):
     obj = db.one(f'SELECT * FROM {table} WHERE id=? AND user_id=?', (obj_id, user_id))
     if not obj:
         raise HTTPException(404, 'Registro não encontrado.')
+    if table == 'projects':
+        from .organizations import require_project
+        return require_project(db,obj_id,user_id)
+    if table == 'conversations':
+        from .organizations import require_conversation_scope
+        return require_conversation_scope(db,obj,user_id)
+    if table == 'runs':
+        from .organizations import require_run_scope
+        return require_run_scope(db,obj,user_id)
     return obj
