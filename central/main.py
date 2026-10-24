@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .database import Database, uid, utcnow
 from .security import Security, password_hash, verify_password, require_owned
+from .worker_checkpoint import checkpoint_summary
 from .engine import (Engine, TEMPLATES, validate_flow,
                      suggested_default_specialty, recoverable_default_agents)
 from .providers import DEFAULT_ENDPOINTS, ProviderError
@@ -683,15 +684,20 @@ def list_runs(user=Depends(current_user)):
 def get_run(rid:str,user=Depends(current_user)):
     run=require_owned(DB,'runs',rid,user['id'])
     run['steps']=DB.all('SELECT * FROM steps WHERE run_id=?',(rid,))
+    run['checkpoints']=checkpoint_summary(DB,user['id'],rid)
     return run
 
 
 @app.post('/api/runs/{rid}/resume')
-async def resume_run(rid:str,user=Depends(current_user)):
-    require_owned(DB,'runs',rid,user['id'])
+async def resume_run(rid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    run=require_owned(DB,'runs',rid,user['id'])
+    if run['autonomous']:
+        local_only(request)
     try: ENGINE.resume_run(rid)
     except ValueError as e: raise HTTPException(409,str(e))
-    return {'ok':True}
+    return {'ok':True,'status':'queued',
+            'checkpoints':checkpoint_summary(DB,user['id'],rid)}
 
 
 @app.post('/api/runs/{rid}/cancel')
@@ -815,7 +821,8 @@ def run_activity(rid: str, user=Depends(current_user)):
     run = require_owned(DB, 'runs', rid, user['id'])
     events = DB.all('SELECT seq,event,payload,created_at FROM events WHERE run_id=? '
                     'ORDER BY seq DESC LIMIT 70', (rid,))
-    allowed = {'run_created','run_status','step_status','model_selected',
+    allowed = {'run_created','run_status','run_resumed','run_paused_limit',
+               'step_status','model_selected','worker_checkpoint_restored',
                'workspace_action_requested','workspace_action_result',
                'worker_message','worker_phase','worker_heartbeat',
                'workspace_approval_required','workspace_validation',
@@ -853,8 +860,12 @@ def run_activity(rid: str, user=Depends(current_user)):
         })
     last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
                         'ORDER BY seq DESC LIMIT 1', (rid,))
-    return {'run_id': rid, 'status': run['status'],
+    return {'run_id': rid, 'status': run['status'], 'error': run['error'],
             'updated_at': run['updated_at'],
+            'checkpoints': checkpoint_summary(DB,user['id'],rid),
+            'steps': [{'id':step['id'],'name':step['name'],'status':step['status'],
+                       'error':step['error']} for step in DB.all(
+                           'SELECT id,name,status,error FROM steps WHERE run_id=?', (rid,))],
             'last_activity_at': last_event['created_at'] if last_event else run['created_at'],
             'events': entries[-55:]}
 
@@ -872,7 +883,7 @@ async def events(rid:str, request:Request, after:int=0, user=Depends(current_use
                 payload={'seq':e['seq'],'event':e['event'],'data':json.loads(e['payload'])}
                 yield 'id: '+str(cursor)+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
             run=DB.one('SELECT status FROM runs WHERE id=?',(rid,))
-            if run and run['status'] in ('completed','failed','cancelled') and not items: break
+            if run and run['status'] in ('completed','failed','cancelled','paused_limit') and not items: break
             await asyncio.sleep(0.4)
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 
