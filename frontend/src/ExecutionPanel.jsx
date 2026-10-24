@@ -134,6 +134,13 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         </div>
       </div>
       <p role="status" className={'mt-2 text-xs ' + tone}>{isRunning ? '● ' : ''}{state}</p>
+      {activity?.workspace_binding && <div className="mt-2 rounded-xl border border-white/10 px-3 py-2 text-[10px] leading-5 text-muted">
+        <p className="font-semibold text-violet-200">Workspace vinculado a esta tarefa</p>
+        <p className="break-all font-mono">{activity.workspace_binding.folder}</p>
+        <p>Permissão inicial: {activity.workspace_binding.initial_mode}
+          {activity.workspace_binding.organization_id && ' · Organização: ' + activity.workspace_binding.organization_id.slice(0,8)}</p>
+        <p>O caminho da tarefa não pode ser alterado durante a execução.</p>
+      </div>}
       {activity?.error && <p role="alert" className="mt-2 break-words rounded-lg bg-amber-300/[.06] p-2 text-[11px] text-amber-200">{activity.error}</p>}
       <p className="mt-1 text-[10px] text-muted">{last ? 'Último evento: ' + Math.max(0, idle) + ' s atrás' : 'Nenhum evento recebido.'} · Sem atividade não significa necessariamente travamento.</p>
       {checkpoints.length > 0 && <div className="mt-3 space-y-1 rounded-xl border border-violet-300/15 p-3">
