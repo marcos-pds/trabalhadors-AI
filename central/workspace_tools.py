@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import signal
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +21,34 @@ from fastapi import HTTPException
 
 from .computer_access import allowed_folder, policy, scoped_path, RESTRICTED_NAMES
 from .database import uid, utcnow
+
+_process_lock = threading.RLock()
+_active_commands = {}
+
+
+def _kill_tree(process):
+    if process.poll() is not None:
+        return
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                           capture_output=True, timeout=5, check=False)
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError, ProcessLookupError):
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
+def stop_run_commands(run_id):
+    """Stop only a process launched by this run; never affect unrelated Windows apps."""
+    with _process_lock:
+        process = _active_commands.get(run_id)
+    if process is not None:
+        _kill_tree(process)
+
 
 MAX_WRITE_BYTES = 32000
 MAX_OUTPUT = 9000
@@ -202,7 +232,7 @@ def command_spec(folder, request):
     return {'cwd': cwd, 'root': root, 'argv': argv, 'label': label}
 
 
-def execute(folder, request):
+def execute(folder, request, run_id=None):
     """Blocking worker function; call using asyncio.to_thread from async routes/engine."""
     details = preview(folder, request)  # validate every execution, including after approvals
     action = request['action']
@@ -266,16 +296,37 @@ def execute(folder, request):
     env = {k: v for k, v in os.environ.items() if k.upper() in env_keys}
     env.update({'CI': '1', 'PIP_DISABLE_PIP_VERSION_CHECK': '1',
                 'PYTHONUNBUFFERED': '1', 'npm_config_update_notifier': 'false'})
+    proc = None
     try:
-        result = subprocess.run(spec['argv'], cwd=str(spec['root']), env=env,
-                                capture_output=True, text=True, errors='replace',
-                                timeout=COMMAND_TIMEOUT, shell=False)
-        output = ((result.stdout or '') + '\n' + (result.stderr or ''))[-MAX_OUTPUT:]
-        return {'command': spec['label'], 'exit_code': result.returncode,
-                'output': output, 'success': result.returncode == 0}
-    except subprocess.TimeoutExpired:
+        proc = subprocess.Popen(
+            spec['argv'], cwd=str(spec['root']), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            errors='replace', shell=False,
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
+            start_new_session=(os.name != 'nt'))
+        if run_id:
+            with _process_lock:
+                _active_commands[run_id] = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=COMMAND_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            stdout, stderr = proc.communicate()
+            return {'command': spec['label'], 'exit_code': None,
+                    'output': 'Tempo limite de 45 segundos excedido. Processo encerrado.',
+                    'success': False}
+        output = ((stdout or '') + '\n' + (stderr or ''))[-MAX_OUTPUT:]
+        return {'command': spec['label'], 'exit_code': proc.returncode,
+                'output': output, 'success': proc.returncode == 0}
+    except OSError as exc:
         return {'command': spec['label'], 'exit_code': None,
-                'output': 'Tempo limite de 45 segundos excedido.', 'success': False}
+                'output': 'Falha ao iniciar ferramenta: ' + str(exc)[:250],
+                'success': False}
+    finally:
+        if run_id and proc:
+            with _process_lock:
+                if _active_commands.get(run_id) is proc:
+                    _active_commands.pop(run_id, None)
 
 
 def issue_approval(db, user_id, run_id, step_id, folder, request, summary):
@@ -331,7 +382,7 @@ async def agent_action(db, user_id, run_id, step_id, request, emit):
     if policy(db, user_id) != config:
         return {'error': 'Permissão revogada ou alterada.', 'approved': False}
     try:
-        result = await asyncio.to_thread(execute, folder, request)
+        result = await asyncio.to_thread(execute, folder, request, run_id)
     except HTTPException as exc:
         result = {'error': str(exc.detail), 'success': False}
     emit(run_id, 'workspace_action_result', {
