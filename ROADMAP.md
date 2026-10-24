@@ -9,7 +9,7 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
 | 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
 | 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
-| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL separado com migrações transacionais, fila experimental e testes reais no CI | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, Redis distribuído, fencing de efeitos externos e tracing multihost NÃO implementados |
+| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL isolado; notificações Redis Pub/Sub opt-in no protótipo, testadas em serviços reais | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, consumidor Redis da aplicação, fencing de efeitos externos e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
 | 12 — homologação | CLI de verificações; ferramenta de carga do endpoint de saúde; testes de restauração e acesso | Carga real, pentest independente, recuperação fora da máquina, deploy/escalabilidade |
@@ -292,3 +292,35 @@ e rollback de dados existentes, execução autorizada de ferramentas com fencing
 atômico, transporte Redis resiliente, observabilidade e homologação de falhas.
 O protótipo não é um substituto plug-and-play para `central.job_queue.JobQueue`
 nem autoriza múltiplas máquinas a executarem tarefas reais.
+
+
+### Fase 9 — Sinalização Redis opcional para o protótipo PostgreSQL
+
+`central/redis_signals.py` acrescenta um transporte de **notificações
+best-effort**, não uma fila de execução. O canal fixo
+`central:experimental-queue:ready:v1` recebe apenas a palavra `ready`.
+Não transmite conteúdo de tarefas, dados de usuários, tokens nem permissões.
+
+O protótipo `PostgresJobQueue` recebe um `signals=RedisQueueSignals(url)`
+opcional e publica após a transação de enqueue. Se Redis estiver indisponível,
+o enqueue permanece concluído em PostgreSQL; é obrigatório continuar
+consultando periodicamente o banco para detectar eventos perdidos. Um subscriber
+só recebe mensagens enquanto estiver conectado. Nenhum worker de produção usa
+esse módulo; a Central segue em SQLite.
+
+Redis plaintext `redis://` só é aceito para localhost. Servidores remotos
+precisam de `rediss://` (TLS), sem parâmetros na URL que enfraqueçam a
+verificação. Defina as credenciais de Redis e PostgreSQL fora do código e dos
+logs. Instale apenas no laboratório:
+
+    python -m pip install -r requirements-postgres.txt -r requirements-redis.txt
+
+`tests/test_redis_signals.py` exercita PostgreSQL + Redis reais no CI com os
+envs `CENTRAL_PG_TEST_DSN` e `CENTRAL_REDIS_TEST_URL`. Os testes limpam a tabela
+`central_jobs.queue` no banco fornecido: use somente um banco descartável.
+
+**Pendente:** adaptador de persistência transacional das entidades de negócio,
+migração e rollback verificados, worker consumidor de notificações que mantenha
+polling, autenticação/TLS do Redis de produção, fencing atômico por ferramenta,
+resiliência sob falhas de rede e operação multihost. O protótipo não é
+deploy ou aprovação para produção.
