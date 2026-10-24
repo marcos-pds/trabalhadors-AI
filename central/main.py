@@ -825,6 +825,7 @@ def run_activity(rid: str, user=Depends(current_user)):
                'step_status','model_selected','worker_checkpoint_restored',
                'workspace_action_requested','workspace_action_result',
                'worker_message','worker_phase','worker_heartbeat',
+               'worker_budget_warning',
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
                'run_failed','run_completed','provider_error','failover'}
@@ -857,6 +858,7 @@ def run_activity(rid: str, user=Depends(current_user)):
             'error': data.get('error'),
             'detail': safe_log(data.get('output')) if data.get('success') is False else '',
             'count': data.get('count'),
+            'remaining_rounds': data.get('remaining_rounds'),
         })
     last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
                         'ORDER BY seq DESC LIMIT 1', (rid,))
