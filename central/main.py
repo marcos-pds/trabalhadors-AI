@@ -14,6 +14,7 @@ from .security import Security, password_hash, verify_password, require_owned
 from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .catalog import CATALOG, BY_KIND, discover_models, candidates
+from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -454,6 +455,19 @@ def add_project(data:ProjectIn,user=Depends(current_user)):
     DB.execute('INSERT INTO projects VALUES(?,?,?,?,?)',(pid,user['id'],data.name,data.description,utcnow()))
     return require_owned(DB,'projects',pid,user['id'])
 
+class ProjectMemoryIn(BaseModel):
+    notes: str = Field(default='', max_length=8000)
+
+
+@app.put('/api/projects/{pid}/memory')
+def save_project_memory(pid: str, data: ProjectMemoryIn, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB, 'projects', pid, user['id'])
+    DB.execute('UPDATE projects SET memory_notes=? WHERE id=? AND user_id=?',
+               (data.notes, pid, user['id']))
+    return require_owned(DB, 'projects', pid, user['id'])
+
+
 
 class ConversationIn(BaseModel):
     title:str = Field(default='Nova conversa',max_length=140)
@@ -471,6 +485,48 @@ def new_conversation(data:ConversationIn,user=Depends(current_user)):
     cid,now=uid(),utcnow()
     DB.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',(cid,user['id'],data.title,data.project_id,now,now))
     return require_owned(DB,'conversations',cid,user['id'])
+
+
+class ConversationProjectIn(BaseModel):
+    project_id: str | None = None
+
+
+@app.patch('/api/conversations/{cid}/project')
+def change_conversation_project(cid: str, data: ConversationProjectIn, request: Request,
+                                user=Depends(current_user)):
+    require_csrf(request)
+    require_owned(DB, 'conversations', cid, user['id'])
+    if data.project_id:
+        require_owned(DB, 'projects', data.project_id, user['id'])
+    active = DB.one("SELECT id FROM runs WHERE conversation_id=? AND user_id=? "
+                    "AND status IN ('queued','running','awaiting_approval') LIMIT 1",
+                    (cid, user['id']))
+    if active:
+        raise HTTPException(409, 'Aguarde a tarefa atual terminar antes de alterar o projeto.')
+    DB.execute('UPDATE conversations SET project_id=?,updated_at=? WHERE id=? AND user_id=?',
+               (data.project_id, utcnow(), cid, user['id']))
+    return require_owned(DB, 'conversations', cid, user['id'])
+
+
+@app.get('/api/conversations/search')
+def search_conversations(q: str = '', project_id: str | None = None,
+                         scope: str = 'project', user=Depends(current_user)):
+    if scope not in ('project', 'all'):
+        raise HTTPException(422, 'Escopo de busca inválido.')
+    if len(q.strip()) < 3 or len(q) > 140:
+        raise HTTPException(422, 'Use entre 3 e 140 caracteres para buscar.')
+    if project_id:
+        require_owned(DB, 'projects', project_id, user['id'])
+    return search_history(DB, user['id'], q, project_id, all_projects=(scope == 'all'))
+
+
+@app.get('/api/conversations/{cid}/context-policy')
+def conversation_context_policy(cid: str, user=Depends(current_user)):
+    convo = require_owned(DB, 'conversations', cid, user['id'])
+    return {'scope': 'project' if convo['project_id'] else 'standalone',
+            'recent_message_limit': PROJECT_HISTORY_COUNT if convo['project_id'] else SMALL_HISTORY_COUNT,
+            'same_project_recall': bool(convo['project_id']),
+            'cross_project_recall': False}
 
 
 @app.get('/api/conversations/{cid}/messages')
