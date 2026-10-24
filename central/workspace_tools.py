@@ -26,6 +26,9 @@ from .workspace_guard import enforce_run_scope, enforce_host_command_policy
 _process_lock = threading.RLock()
 _active_commands = {}
 _cancelled_command_runs = set()
+# Bound concurrent subprocesses per *server process*. Worker mode on a separate
+# process has a separate pool; this is not a machine-wide sandbox quota.
+_command_slots = threading.BoundedSemaphore(2)
 
 
 def reset_run_commands(run_id):
@@ -320,43 +323,84 @@ def execute(folder, request, run_id=None):
     env = {k: v for k, v in os.environ.items() if k.upper() in env_keys}
     env.update({'CI': '1', 'PIP_DISABLE_PIP_VERSION_CHECK': '1',
                 'PYTHONUNBUFFERED': '1', 'npm_config_update_notifier': 'false'})
+    if not _command_slots.acquire(blocking=False):
+        return {'command': spec['label'], 'exit_code': None,
+                'output':'Máximo de dois comandos locais simultâneos por processo.',
+                'success': False}
     proc = None
+    reader = None
+    output_tail = bytearray()
+    total_output_bytes = [0]
+
+    def drain():
+        # Draining in a thread rather than communicate() avoids retaining
+        # unlimited stdout/stderr in RAM when a tool produces huge logs.
+        while True:
+            try:
+                data = proc.stdout.read(4096)
+            except (OSError, ValueError):
+                break
+            if not data:
+                break
+            total_output_bytes[0] += len(data)
+            output_tail.extend(data)
+            if len(output_tail) > MAX_OUTPUT:
+                del output_tail[:-MAX_OUTPUT]
+
     try:
-        # Serialize spawning with cancellation: after stop is requested, a
-        # worker thread may not start a late new subprocess.
         with _process_lock:
             if run_id and run_id in _cancelled_command_runs:
                 return {'command': spec['label'], 'exit_code': None,
                         'output': 'Execução cancelada pelo usuário.', 'success': False}
+            if run_id and run_id in _active_commands:
+                return {'command': spec['label'], 'exit_code': None,
+                        'output': 'Outro comando desta tarefa ainda está em execução.',
+                        'success': False}
             proc = subprocess.Popen(
                 spec['argv'], cwd=str(spec['root']), env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                errors='replace', shell=False,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False,
+                shell=False,
                 creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
                 start_new_session=(os.name != 'nt'))
             if run_id:
                 _active_commands[run_id] = proc
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
         try:
-            stdout, stderr = proc.communicate(timeout=COMMAND_TIMEOUT)
+            proc.wait(timeout=COMMAND_TIMEOUT)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
-            stdout, stderr = proc.communicate()
+            proc.wait(timeout=5)
             return {'command': spec['label'], 'exit_code': None,
                     'output': 'Tempo limite de 45 segundos excedido. Processo encerrado.',
                     'success': False}
-        output = ((stdout or '') + '\n' + (stderr or ''))[-MAX_OUTPUT:]
+        if reader:
+            reader.join(timeout=2)
+        output = output_tail.decode('utf-8', errors='replace')
         return {'command': spec['label'], 'exit_code': proc.returncode,
-                'output': output, 'success': proc.returncode == 0}
-    except OSError as exc:
+                'output': output,
+                'output_truncated': total_output_bytes[0] > MAX_OUTPUT,
+                'success': proc.returncode == 0}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        if proc:
+            _kill_tree(proc)
         return {'command': spec['label'], 'exit_code': None,
-                'output': 'Falha ao iniciar ferramenta: ' + str(exc)[:250],
+                'output': 'Falha ao iniciar ou encerrar ferramenta: ' + str(exc)[:250],
                 'success': False}
     finally:
+        if proc:
+            if proc.stdout:
+                try:
+                    proc.stdout.close()
+                except OSError:
+                    pass
+            if reader:
+                reader.join(timeout=1)
         if run_id and proc:
             with _process_lock:
                 if _active_commands.get(run_id) is proc:
                     _active_commands.pop(run_id, None)
-
+        _command_slots.release()
 
 def issue_approval(db, user_id, run_id, step_id, folder, request, summary):
     # Store pending edits/commands inside the local DB; no secrets are returned to other users.
