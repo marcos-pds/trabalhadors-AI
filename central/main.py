@@ -25,6 +25,9 @@ from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
 from .auth_limits import ensure_allowed as allow_login, failed as fail_login, succeeded as login_ok
 from .quotas import QuotaExceeded
+from .organizations import (
+    ensure_personal, membership, require_org, require_project, visible_projects,
+    create_organization, set_member, remove_member, all_organizations)
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -130,6 +133,7 @@ def register(data: Credentials, request: Request, response: Response):
         raise HTTPException(409,'E-mail já cadastrado.')
     user_id = uid()
     DB.execute('INSERT INTO users VALUES(?,?,?,?)', (user_id,email,password_hash(data.password),utcnow()))
+    ensure_personal(DB, user_id)
     for name,specialty,instructions,avatar in TEMPLATES:
         DB.execute('''INSERT INTO agents(id,user_id,name,specialty,instructions,avatar,created_at)
           VALUES(?,?,?,?,?,?,?)''', (uid(),user_id,name,specialty,instructions,avatar,utcnow()))
@@ -582,18 +586,28 @@ def remove_agent(aid:str,user=Depends(current_user)):
 class ProjectIn(BaseModel):
     name:str = Field(min_length=1,max_length=90)
     description:str = Field(default='',max_length=2000)
+    organization_id: str | None = None
 
 
 @app.get('/api/projects')
 def projects(user=Depends(current_user)):
-    return DB.all('SELECT * FROM projects WHERE user_id=? ORDER BY created_at DESC',(user['id'],))
+    return visible_projects(DB,user['id'])
 
 
 @app.post('/api/projects')
 def add_project(data:ProjectIn,user=Depends(current_user)):
+    org_id = data.organization_id or ensure_personal(DB,user['id'])
+    require_org(DB,org_id,user['id'],write=True)
     pid=uid()
-    DB.execute('INSERT INTO projects(id,user_id,name,description,created_at) VALUES(?,?,?,?,?)',(pid,user['id'],data.name,data.description,utcnow()))
-    return require_owned(DB,'projects',pid,user['id'])
+    with DB.lock, DB.conn:
+        DB.conn.execute(
+            'INSERT INTO projects(id,user_id,name,description,created_at) VALUES(?,?,?,?,?)',
+            (pid,user['id'],data.name,data.description,utcnow()))
+        DB.conn.execute(
+            'INSERT INTO organization_projects(project_id,organization_id) VALUES(?,?)',
+            (pid,org_id))
+    ops_audit(DB,user['id'],'project_created','organization',org_id)
+    return require_project(DB,pid,user['id'])
 
 class ProjectMemoryIn(BaseModel):
     notes: str = Field(default='', max_length=8000)
@@ -602,10 +616,10 @@ class ProjectMemoryIn(BaseModel):
 @app.put('/api/projects/{pid}/memory')
 def save_project_memory(pid: str, data: ProjectMemoryIn, request: Request, user=Depends(current_user)):
     require_csrf(request)
-    require_owned(DB, 'projects', pid, user['id'])
-    DB.execute('UPDATE projects SET memory_notes=? WHERE id=? AND user_id=?',
-               (data.notes, pid, user['id']))
-    return require_owned(DB, 'projects', pid, user['id'])
+    require_project(DB,pid,user['id'],write=True)
+    DB.execute('UPDATE projects SET memory_notes=? WHERE id=?',
+               (data.notes,pid))
+    return require_project(DB,pid,user['id'])
 
 
 
@@ -617,7 +631,16 @@ class ConversationIn(BaseModel):
 @app.get('/api/conversations')
 def conversations(user=Depends(current_user)):
     # The sidebar is bounded; older conversations remain saved and searchable.
-    return DB.all('SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC LIMIT 300',(user['id'],))
+    return DB.all(
+        """SELECT c.* FROM conversations c
+           LEFT JOIN organization_projects op ON op.project_id=c.project_id
+           WHERE c.user_id=? AND (c.project_id IS NULL
+             OR (op.organization_id IS NULL AND EXISTS
+                 (SELECT 1 FROM projects p WHERE p.id=c.project_id AND p.user_id=?))
+             OR op.organization_id IN
+                (SELECT organization_id FROM organization_members WHERE user_id=?))
+           ORDER BY c.updated_at DESC LIMIT 300""",
+        (user['id'],user['id'],user['id']))
 
 
 @app.get('/api/conversations/search')
@@ -628,7 +651,7 @@ def search_conversations(q: str = '', project_id: str | None = None,
     if len(q.strip()) < 3 or len(q) > 140:
         raise HTTPException(422, 'Use entre 3 e 140 caracteres para buscar.')
     if project_id:
-        require_owned(DB, 'projects', project_id, user['id'])
+        require_project(DB,project_id,user['id'])
     return search_history(DB, user['id'], q, project_id, all_projects=(scope == 'all'))
 
 
@@ -639,7 +662,7 @@ def conversation_detail(cid: str, user=Depends(current_user)):
 
 @app.post('/api/conversations')
 def new_conversation(data:ConversationIn,user=Depends(current_user)):
-    if data.project_id: require_owned(DB,'projects',data.project_id,user['id'])
+    if data.project_id: require_project(DB,data.project_id,user['id'],write=True)
     cid,now=uid(),utcnow()
     DB.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',(cid,user['id'],data.title,data.project_id,now,now))
     return require_owned(DB,'conversations',cid,user['id'])
@@ -655,7 +678,7 @@ def change_conversation_project(cid: str, data: ConversationProjectIn, request: 
     require_csrf(request)
     require_owned(DB, 'conversations', cid, user['id'])
     if data.project_id:
-        require_owned(DB, 'projects', data.project_id, user['id'])
+        require_project(DB,data.project_id,user['id'],write=True)
     active = DB.one("SELECT id FROM runs WHERE conversation_id=? AND user_id=? "
                     "AND status IN ('queued','running','awaiting_approval') LIMIT 1",
                     (cid, user['id']))
@@ -696,6 +719,8 @@ class RunIn(BaseModel):
 @app.post('/api/runs')
 async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     convo=require_owned(DB,'conversations',data.conversation_id,user['id'])
+    if convo['project_id']:
+        require_project(DB,convo['project_id'],user['id'],write=True)
     if data.mode not in ('auto','manual','team'): raise HTTPException(422,'Modo inválido.')
     if needs_workspace_tools(data.prompt) and not data.autonomous:
         raise HTTPException(
