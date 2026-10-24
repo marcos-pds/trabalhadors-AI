@@ -109,7 +109,7 @@ class PostgresJobQueue:
     imply this is ready for distributed production loads.
     """
 
-    def __init__(self, conn, *, lease_seconds=90, max_attempts=5):
+    def __init__(self, conn, *, lease_seconds=90, max_attempts=5, signals=None):
         _check_connection(conn)
         if type(lease_seconds) is not int or not 20 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be 20..3600")
@@ -118,11 +118,20 @@ class PostgresJobQueue:
         self.conn = conn
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
+        # Redis is advisory only, and never authorizes or claims a run.
+        self.signals = signals
 
     def enqueue(self, run_id, user_id):
         """Explicit queue-only enqueue; does not check a SQLite business run."""
         run_id = _identity(run_id, "run_id")
         user_id = _identity(user_id, "user_id")
+        if self.signals is not None:
+            # The Redis notification is sent after the transaction below
+            # commits. Reject nested enqueue: a savepoint commit alone does
+            # not make data visible to other PostgreSQL connections.
+            from psycopg.pq import TransactionStatus
+            if self.conn.info.transaction_status != TransactionStatus.IDLE:
+                raise ValueError("Signaled enqueue requires no outer transaction")
         with self.conn.transaction():
             # User association must never be overwritten by re-enqueue.
             from psycopg.rows import dict_row
@@ -162,6 +171,12 @@ class PostgresJobQueue:
                 # The predicate also covers two concurrent first-time inserts
                 # that both initially observed the run_id as absent.
                 raise PermissionError("Cannot reassign a queued run to another user")
+        if self.signals is not None:
+            try:
+                self.signals.publish()
+            except Exception:
+                # Best-effort hints must never invalidate a durable enqueue.
+                pass
         return True
 
     def claim(self, owner, *, per_user_limit=2):
