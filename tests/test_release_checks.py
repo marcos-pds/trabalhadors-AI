@@ -39,3 +39,24 @@ def test_release_cli_fails_gate_when_external_checks_are_pending(tmp_path, capsy
     db = Database(tmp_path / 'central.sqlite3'); db.close()
     assert main(['--data-dir', str(tmp_path), 'release-check']) == 2
     assert 'production_ready' in capsys.readouterr().out
+
+
+
+def test_api_only_release_gate_requires_live_dedicated_worker(monkeypatch):
+    from central.worker_liveness import beat, forget
+    monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE','local')
+    monkeypatch.setenv('CENTRAL_JOB_MODE','api')
+    db=Database(':memory:')
+    try:
+        checks={x['name']:x for x in report(db)['checks']}
+        assert checks['dedicated_worker_liveness']['status']=='failed'
+        assert report(db)['production_ready'] is False
+        beat(db,'dedicated-process','worker')
+        checks={x['name']:x for x in report(db)['checks']}
+        assert checks['dedicated_worker_liveness']['status']=='passed'
+        assert checks['dedicated_worker_liveness']['active_workers']==1
+        forget(db,'dedicated-process')
+        assert next(x for x in report(db)['checks']
+                    if x['name']=='dedicated_worker_liveness')['status']=='failed'
+    finally:
+        db.close()
