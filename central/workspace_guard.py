@@ -24,6 +24,8 @@ def bind_run(db, user_id, run_id, organization_id=None):
     if grant['mode'] not in ('ask', 'full') or not grant['folder']:
         raise HTTPException(403, 'Autorize uma pasta antes de criar a tarefa autônoma.')
     folder = allowed_folder(grant['folder'])
+    from .sandbox_executor import backend
+    runner = backend()
     root = Path(folder)
     org_id = organization_id or current_organization(db, run_id)
     if org_id:
@@ -36,7 +38,8 @@ def bind_run(db, user_id, run_id, organization_id=None):
                           (run_id,))
         if existing:
             if (existing['user_id'] != user_id or existing['folder'] != folder
-                    or existing['organization_id'] != org_id):
+                    or existing['organization_id'] != org_id
+                    or existing['command_runner'] != runner):
                 raise HTTPException(409, 'O workspace original desta tarefa não pode ser alterado.')
             return existing
         other = db.all(
@@ -52,8 +55,8 @@ def bind_run(db, user_id, run_id, organization_id=None):
                         'Autorize uma pasta separada para cada organização.')
         db.execute(
             'INSERT INTO run_workspace_bindings(run_id,user_id,organization_id,'
-            'folder,initial_mode,created_at) VALUES(?,?,?,?,?,?)',
-            (run_id,user_id,org_id,folder,grant['mode'],utcnow()))
+            'folder,initial_mode,command_runner,created_at) VALUES(?,?,?,?,?,?,?)',
+            (run_id,user_id,org_id,folder,grant['mode'],runner,utcnow()))
     return db.one('SELECT * FROM run_workspace_bindings WHERE run_id=?', (run_id,))
 
 
@@ -74,6 +77,12 @@ def enforce_run_scope(db, user_id, run_id, *, write=False):
     folder = allowed_folder(current['folder'])
     binding = db.one('SELECT * FROM run_workspace_bindings WHERE run_id=?',(run_id,))
     if binding:
+        from .sandbox_executor import backend
+        if binding['command_runner'] != backend():
+            raise HTTPException(
+                409,'O worker está configurado com um executor diferente do '
+                    'modo autorizado na tarefa. Configure CENTRAL_COMMAND_RUNNER '
+                    'igual na API e no worker; execução bloqueada.')
         if (binding['user_id'] != user_id or binding['folder'] != folder
                 or binding['organization_id'] != org):
             raise HTTPException(409,'O workspace mudou ou a organização não corresponde. '
@@ -106,7 +115,7 @@ def enforce_host_command_policy(db,user_id,run_id):
 
 def binding_summary(db,user_id,run_id):
     row=db.one(
-        'SELECT folder,organization_id,initial_mode,created_at '
+        'SELECT folder,organization_id,initial_mode,command_runner,created_at '
         'FROM run_workspace_bindings WHERE run_id=? AND user_id=?',
         (run_id,user_id))
     return row
