@@ -13,6 +13,7 @@ from .database import Database, uid, utcnow
 from .security import Security, password_hash, verify_password, require_owned
 from .engine import Engine, TEMPLATES, validate_flow
 from .providers import DEFAULT_ENDPOINTS, ProviderError
+from .catalog import CATALOG, BY_KIND, discover_models, candidates
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -141,13 +142,122 @@ def list_providers(user=Depends(current_user)):
     return [public_provider(p) for p in DB.all('SELECT * FROM providers WHERE user_id=? ORDER BY priority ASC',(user['id'],))]
 
 
+class QuickProviderIn(BaseModel):
+    kind: str = Field(max_length=40)
+    api_key: str = Field(default='', max_length=4096)
+    model: str = Field(default='', max_length=120)
+    provider_id: str | None = None
+
+
+@app.get('/api/provider-catalog')
+def provider_catalog(user=Depends(current_user)):
+    return CATALOG
+
+
+def quick_key(data, user):
+    key = data.api_key.strip()
+    if data.provider_id:
+        previous = require_owned(DB, 'providers', data.provider_id, user['id'])
+        if previous['kind'] != data.kind:
+            raise HTTPException(422, 'O provedor selecionado não corresponde à chave salva.')
+        if not key:
+            key = SEC.decrypt(previous['api_key_enc'])
+    return key
+
+
+def reject_duplicate_model(user_id, kind, model, exclude_id=None):
+    duplicate = DB.one('SELECT id FROM providers WHERE user_id=? AND kind=? AND TRIM(model)=? AND id<>? LIMIT 1',
+                       (user_id, kind, model.strip(), exclude_id or ''))
+    if duplicate:
+        raise HTTPException(409, 'Este modelo já está cadastrado neste provedor. Use Editar para alterar ou reativar a conexão existente.')
+
+
+def catalog_with_connections(models, user_id, kind):
+    registered = {p['model'].strip() for p in DB.all('SELECT model FROM providers WHERE user_id=? AND kind=?', (user_id, kind))}
+    return [dict(m, connected=m['id'].strip() in registered) for m in models]
+
+
+@app.post('/api/provider-catalog/models')
+async def provider_models(data: QuickProviderIn, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    try:
+        models = await discover_models(data.kind, quick_key(data, user))
+        return {'models': catalog_with_connections(models, user['id'], data.kind)}
+    except ProviderError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.post('/api/provider-catalog/connect')
+async def connect_provider(data: QuickProviderIn, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    key = quick_key(data, user)
+    if data.model:
+        reject_duplicate_model(user['id'], data.kind, data.model)
+    try:
+        models = catalog_with_connections(await discover_models(data.kind, key), user['id'], data.kind)
+        options = candidates([m for m in models if not m['connected']], data.kind, data.model)
+        if not options and any(m['eligible'] and m['connected'] for m in models) and not data.model:
+            raise HTTPException(409, 'Todos os modelos elegíveis deste provedor já estão cadastrados. Use Editar para gerenciar suas conexões.')
+        if not options:
+            raise ProviderError('catalog', 'Nenhum modelo de chat elegível encontrado. Confira o plano e o catálogo; nenhum modelo pago será selecionado como alternativa.')
+        provider = {'kind': data.kind, 'base_url': DEFAULT_ENDPOINTS[data.kind]}
+        failures = []
+        for model in options[:3]:
+            started = time.monotonic()
+            stream = ENGINE.client.stream(provider, key, model['id'], 'Seja conciso.',
+                                          [{'role': 'user', 'content': 'Responda somente OK.'}])
+            try:
+                answer = ''
+                async for part in stream:
+                    answer += part
+                    if answer.strip():
+                        break
+                if not answer.strip():
+                    raise ProviderError('response', 'O modelo não retornou texto.', True)
+                latency = (time.monotonic() - started) * 1000
+                break
+            except ProviderError as exc:
+                if exc.category in ('authentication', 'credits'):
+                    raise
+                failures.append(exc.category)
+            finally:
+                await stream.aclose()
+        else:
+            raise ProviderError('validation', 'Os modelos encontrados não responderam ao teste (' + ', '.join(failures) + '). Nenhuma conexão foi alterada. Tente novamente.')
+        # Recheck inside the write transaction to cover simultaneous connections.
+        with DB.lock, DB.conn:
+            DB.conn.execute('BEGIN IMMEDIATE')
+            reject_duplicate_model(user['id'], data.kind, model['id'])
+            pid = uid()
+            DB.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,created_at) VALUES(?,?,?,?,?,?,?)',
+                       (pid, user['id'], BY_KIND[data.kind]['name'], data.kind, provider['base_url'], model['id'], utcnow()))
+            if data.kind == 'ollama':
+                DB.execute("UPDATE providers SET enabled=0 WHERE user_id=? AND kind='ollama' AND id<>?", (user['id'], pid))
+            # Only model-level zero prices are stored as zero. Account quotas are not token prices.
+            price = 0 if data.kind in ('ollama', 'openrouter', 'zai') else None
+            DB.execute('UPDATE providers SET api_key_enc=?,enabled=1,priority=?,last_error=NULL,input_price=?,output_price=? WHERE id=?',
+                       (SEC.encrypt(key), 10 if data.kind == 'ollama' else 5, price, price, pid))
+            ENGINE.health.record(pid, model['id'], success=True, latency_ms=latency)
+        return {'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
+                'model': model, 'models': catalog_with_connections(models, user['id'], data.kind), 'message': 'Conexão testada e salva.'}
+    except ProviderError as exc:
+        # Never echo a key even if an upstream service includes it in an error.
+        message = str(exc).replace(key, '[chave omitida]') if key else str(exc)
+        raise HTTPException(422, message)
+
+
 @app.post('/api/providers')
 def add_provider(data:ProviderIn,user=Depends(current_user)):
     url = check_provider(data)
+    data.model = data.model.strip()
+    if not data.model: raise HTTPException(422, 'Informe o modelo.')
     pid=uid()
-    DB.execute('''INSERT INTO providers(id,user_id,name,kind,base_url,model,api_key_enc,priority,enabled,input_price,output_price,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
-      (pid,user['id'],data.name,data.kind,url,data.model,SEC.encrypt(data.api_key),data.priority,int(data.enabled),data.input_price,data.output_price,utcnow()))
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        reject_duplicate_model(user['id'], data.kind, data.model)
+        DB.execute('''INSERT INTO providers(id,user_id,name,kind,base_url,model,api_key_enc,priority,enabled,input_price,output_price,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (pid,user['id'],data.name,data.kind,url,data.model,SEC.encrypt(data.api_key),data.priority,int(data.enabled),data.input_price,data.output_price,utcnow()))
     return public_provider(require_owned(DB,'providers',pid,user['id']))
 
 
@@ -155,9 +265,14 @@ def add_provider(data:ProviderIn,user=Depends(current_user)):
 def update_provider(pid:str,data:ProviderIn,user=Depends(current_user)):
     previous = require_owned(DB,'providers',pid,user['id'])
     url = check_provider(data)
+    data.model = data.model.strip()
+    if not data.model: raise HTTPException(422, 'Informe o modelo.')
     key = SEC.encrypt(data.api_key) if data.api_key else previous['api_key_enc']
-    DB.execute('''UPDATE providers SET name=?,kind=?,base_url=?,model=?,api_key_enc=?,priority=?,enabled=?,input_price=?,output_price=?,last_error=NULL WHERE id=?''',
-    (data.name,data.kind,url,data.model,key,data.priority,int(data.enabled),data.input_price,data.output_price,pid))
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        reject_duplicate_model(user['id'], data.kind, data.model, exclude_id=pid)
+        DB.execute('''UPDATE providers SET name=?,kind=?,base_url=?,model=?,api_key_enc=?,priority=?,enabled=?,input_price=?,output_price=?,last_error=NULL WHERE id=?''',
+        (data.name,data.kind,url,data.model,key,data.priority,int(data.enabled),data.input_price,data.output_price,pid))
     return public_provider(require_owned(DB,'providers',pid,user['id']))
 
 

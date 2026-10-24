@@ -10,6 +10,10 @@ from central.providers import DEFAULT_ENDPOINTS, ProviderClient
 
 
 @pytest.mark.parametrize('kind,model,url', [
+    ('ollama', 'qwen2.5-coder:3b', 'http://127.0.0.1:11434/v1/chat/completions'),
+    ('groq', 'openai/gpt-oss-20b', 'https://api.groq.com/openai/v1/chat/completions'),
+    ('openrouter', 'openrouter/free', 'https://openrouter.ai/api/v1/chat/completions'),
+    ('mistral', 'mistral-small-latest', 'https://api.mistral.ai/v1/chat/completions'),
     ('zai', 'glm-4.7-flash', 'https://api.z.ai/api/paas/v4/chat/completions'),
     ('modelscope', 'account/model', 'https://api-inference.modelscope.cn/v1/chat/completions'),
     ('siliconflow', 'account/model', 'https://api.siliconflow.com/v1/chat/completions'),

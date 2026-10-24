@@ -172,3 +172,116 @@ Os testes usam fakes apenas na suíte automatizada (zero chamadas a provedores e
 - Um deployment público deve **não** reutilizar diretamente as credenciais e banco da instalação de desenvolvimento.
 
 **Especificação original:** `ESPECIFICACAO.md`. Este pacote é o primeiro incremento concreto rumo ao produto completo descrito naquele documento.
+
+## Configuração gratuita e um provedor local
+
+O catálogo sugere somente **Ollama** como provedor local. Use o modelo
+`qwen2.5-coder:3b` para programação; o modelo precisa estar instalado:
+
+```powershell
+ollama pull qwen2.5-coder:3b
+ollama serve
+```
+
+Se o aplicativo Ollama já estiver rodando, não execute outro `ollama serve`.
+Conecte em `http://127.0.0.1:11434/v1`, sem chave API, e clique em Testar.
+Mantenha somente uma conexão local habilitada; conexões antigas podem ser
+editadas ou desabilitadas sem excluir seu histórico.
+
+Opções online com faixa gratuita: Groq, Gemini, OpenRouter (`openrouter/free`),
+Mistral (Studio em **Free mode**), Cloudflare Workers AI e modelos Flash
+explicitamente gratuitos da Z.ai. Cada serviço exige sua própria conta e chave;
+a existência do conector não significa que a conta já esteja conectada.
+ModelScope, SiliconFlow e créditos promocionais exigem conferir as condições
+individuais e não são garantia de uso gratuito. O filtro Grátis não inclui
+créditos promocionais. Não habilite modelos pagos no fallback para uso gratuito.
+
+Referências: [Groq](https://console.groq.com/docs/rate-limits),
+[Gemini](https://ai.google.dev/gemini-api/docs/pricing),
+[OpenRouter](https://openrouter.ai/collections/free-models),
+[Mistral Free mode](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key).
+
+## Instalação local desta máquina
+
+Para abrir o repositório correto no VS Code, abra `../Central-IA.code-workspace`.
+A pasta acima contém outro repositório vazio; execute comandos Git dentro de
+`central-trabalhadores-ia` ou use `git -C central-trabalhadores-ia status` na pasta acima.
+
+Para habilitar somente o Ollama em todas as contas já cadastradas:
+
+```powershell
+.\.venv\Scripts\python.exe configurar_local.py
+```
+
+O comando usa `qwen2.5-coder:3b`; passe `--model llama3.2` para escolher outro
+modelo instalado. Ele desabilita as demais conexões, preserva seus cadastros e
+credenciais e direciona os agentes ao Ollama, removendo modelos específicos
+antigos dos agentes. Execute com as tarefas paradas e reinicie a Central depois.
+O modelo precisa estar instalado no Ollama; o comando não baixa modelos.
+
+## Conexão automática e catálogo pesquisado (23/10/2026)
+
+Na tela **Provedores**, selecione um serviço, cole a chave e clique em
+**Conectar automaticamente**. Uma chave já salva pode ser reutilizada deixando o
+campo em branco. A Central busca os modelos, seleciona um candidato elegível,
+testa uma resposta e só então salva a conexão com a chave criptografada.
+Nome, URL e identificador são preenchidos automaticamente. O painel opcional
+permite buscar nomes/IDs e escolher um modelo. São testadas até três opções;
+falhas de autenticação ou créditos encerram a tentativa imediatamente.
+Nenhuma conexão online é ativada apenas por aparecer na lista.
+
+| Serviço | Oferta / requisito | Conexão com chave |
+| --- | --- | --- |
+| Groq | Free Plan com limites por modelo | Automática |
+| OpenRouter | Modelos com preços de entrada, saída e demais campos publicados iguais a zero | Automática |
+| Gemini / AI Studio | Projeto no plano gratuito; somente IDs revisados e presentes no catálogo | Automática |
+| Mistral | Organização em Free mode; a chave herda o plano | Automática |
+| SambaNova | Free Tier para contas sem método de pagamento | Automática |
+| Z.ai | Somente GLM-4.7-Flash e GLM-4.5-Flash | Automática |
+| Cloudflare Workers AI | Cota diária; exige Account ID e token; há modelos exclusivos do plano pago | Manual |
+| Hugging Face | Pequena cota mensal em créditos, sujeita a alteração | Manual |
+| Cohere | Chave de avaliação; não destinada a produção/comércio | Manual |
+| NVIDIA NIM | Acesso de desenvolvimento/avaliação sujeito às condições do catálogo | Manual |
+| Cerebras | Página atual oferece crédito promocional único, com cartão e prazo | Manual |
+| ModelScope | Verificar elegibilidade, região e regras de API-Inference | Manual |
+| SiliconFlow | Verificar região, preços por modelo e condições da conta | Manual |
+| Ollama | Modelos instalados neste computador; sem chave | Automática |
+
+As condições oficiais estão vinculadas em cada cartão, junto à data da revisão.
+O catálogo de serviços é uma lista revisada, não uma busca de toda a internet.
+A lista de modelos é consultada na API durante a conexão. Se o endpoint `/models`
+da Z.ai não existir, usamos os dois IDs da documentação oficial e sinalizamos
+essa origem; a disponibilidade só é confirmada no teste de resposta.
+
+Uma API de modelos geralmente não informa se a conta está no plano gratuito ou
+com faturamento habilitado. Não confunda uma resposta válida com comprovação de
+preço zero: para Groq, Gemini, Mistral e SambaNova, mantenha a conta no plano
+gratuito no painel do serviço. Modelos novos do Gemini precisam ser revisados
+antes de entrarem na seleção automática; nome contendo Flash não basta.
+Ollama é o único serviço local sugerido, e conectar um novo modelo local
+pausa outras conexões Ollama da mesma conta.
+
+GitHub Models foi excluído da seleção: o serviço foi encerrado em 30/07/2026,
+segundo [a documentação oficial](https://docs.github.com/en/github-models).
+Chutes também não entra como gratuito: sua [página de preços](https://www.chutes.ai/pricing)
+informa que não oferece faixa gratuita atualmente.
+
+A conexão automática usa `GET /api/provider-catalog`,
+`POST /api/provider-catalog/models` e `POST /api/provider-catalog/connect`, todos
+com autenticação. Os POSTs exigem proteção CSRF. A chave é enviada no corpo da
+requisição local e no cabeçalho de autenticação do provedor, nunca na URL.
+O servidor usa somente endpoints fixos do registro na conexão rápida.
+
+Validação sem rede: `.\.venv\Scripts\python.exe -m pytest tests/test_catalog.py -q`.
+
+### Validação de modelos repetidos
+
+O cadastro bloqueia duplicatas do mesmo identificador (sem espaços nas pontas)
+no mesmo provedor e conta, inclusive quando a conexão existente está pausada.
+A regra vale para conexão rápida, cadastro manual e edição. A edição da própria
+conexão continua permitida. O mesmo ID em provedores ou contas diferentes pode
+ser cadastrado. Duplicatas retornam HTTP 409 e não sobrescrevem chaves ou dados.
+No modo automático, modelos já cadastrados são ignorados antes dos testes;
+o catálogo mostra **Já cadastrado** e desabilita essas opções. A gravação faz
+nova verificação dentro da transação para impedir duplicatas simultâneas.
+Cadastros antigos não são removidos automaticamente.
