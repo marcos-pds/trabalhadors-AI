@@ -22,6 +22,13 @@ MIGRATIONS = (
     (4, 'personal_git_connections', (GIT_SCHEMA,)),
     (5, 'project_knowledge_documents', tuple(part.strip() for part in KNOWLEDGE_SCHEMA.split(';') if part.strip())),
     (6, 'approved_git_drafts', (GIT_PLAN_SCHEMA,)),
+    (7, 'worker_liveness', (
+        "CREATE TABLE IF NOT EXISTS worker_liveness("
+        "worker_id TEXT PRIMARY KEY,mode TEXT NOT NULL CHECK(mode IN ('worker','embedded')),"
+        "started_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,"
+        "active_jobs INTEGER NOT NULL DEFAULT 0 CHECK(active_jobs>=0))",
+        "CREATE INDEX IF NOT EXISTS idx_worker_liveness_seen ON worker_liveness(last_seen_at)",
+    )),
 )
 
 
