@@ -713,3 +713,76 @@ Verificação:
     npm run build
     python -m pytest tests/test_workspace_isolation.py -q
     python -m pytest -q
+
+## Fase 4 — executor Docker opcional para comandos dos agentes
+
+O modo padrao continua host para preservar a operacao local ja existente.
+Um administrador pode habilitar o modo Docker em um terminal PowerShell:
+
+    # Docker Desktop iniciado e configurado com Linux containers
+    docker build -f sandbox/Dockerfile -t central-ai-executor:py311-node22 sandbox
+    $env:CENTRAL_COMMAND_RUNNER = 'docker'
+    python -m uvicorn central.main:app --host 127.0.0.1 --port 8765
+
+Quando API e worker sao processos separados, configure a mesma variavel
+tambem no terminal do worker. A API nao determina a configuracao real de
+um worker separado. Reinicie ambos apos atualizar as configuracoes.
+Para voltar ao modo local: Remove-Item Env:CENTRAL_COMMAND_RUNNER
+
+**Protecoes implementadas no Docker**
+
+- Os comandos sao predefinidos: npm build, npm test, pytest, compileall,
+  git status. Nao ha shell arbitrario nem flags Docker controladas pelo agente.
+- --network none, --read-only, --cap-drop ALL, no-new-privileges,
+  --pids-limit 128, --memory 512m, --cpus 1, UID/GID sem privilegios,
+  tmpfs /tmp de 64 MB e container efemero com --rm.
+- Bind mount gravavel apenas do subprojeto validado pelo usuario
+  (e nao a home nem a pasta inteira de outros projetos).
+- Tempo maximo de 45 s, saida de ate 9 KB, dois comandos simultaneos
+  por worker e limpeza best effort do container no cancelamento.
+- Organizacoes continuam exigindo aprovacao humana por comando.
+  A autorizacao de scripts no host deixa de ser necessaria no Docker.
+- Instalacao de dependencias e criacao de ambientes sao bloqueadas
+  no modo Docker por exigir politica de rede e cache propria.
+- A previa npm dev ainda nao esta isolada: o endpoint bloqueia
+  a inicializacao no host quando o modo Docker estiver ativo.
+- Falta de Docker, erro de imagem ou daemon parado nao provocam
+  fallback automatico para execucao no Windows.
+
+**Limites e avisos**
+
+O executor Docker isola os subprocessos de build/teste, nao todas as
+ferramentas de leitura e escrita da Central nem a API. Docker daemon,
+imagem escolhida e kernel continuam recursos confiaveis do operador.
+O mount de codigo e gravavel e um script pode ler todos os arquivos
+nesse mount; evite colocar credenciais, arquivos .env ou tokens nele.
+Projetos que possuem node_modules compilado para Windows podem falhar
+ao rodar testes numa imagem Linux. Prepare dependencias previamente
+em ambiente confiavel e compativel. O GitHub Actions simula o CLI Docker
+nos testes: nao comprova o funcionamento com Docker Desktop real.
+Esse passo nao equivale a uma sandbox SaaS multitenant auditada.
+
+Diagnostico:
+
+    npm run build
+    python -m pytest tests/test_sandbox_executor.py -q
+    python -m pytest -q
+
+### Etapas futuras pendentes
+
+- Fase 5: provisao segura de dependencias e previa isolada, rede e proxy.
+- Fase 6: memoria semantica por projeto/organizacao, embeddings e RAG.
+- Fase 7: refatorar servicos (RunOrchestrator, AgentRegistry,
+  ProviderManager, WorkspaceExecutor, ApprovalEngine) e templates.
+- Fase 8: integrar GitHub/GitLab, CLI, revisao de codigo e deploy seguro.
+- Fase 9: PostgreSQL, migracoes versionadas, Redis/fila distribuida,
+  idempotencia e observabilidade distribuida.
+- Fase 10: identidade enterprise, gestao de segredos, backup criptografado,
+  SSO/convites, auditoria, TLS e revisao de politicas por tenant.
+- Fase 11: experiencia do produto, preview/editor, exportacoes,
+  comparacao de provedores por custo/latencia e monitoramento visual.
+- Fase 12: homologacao de producao, carga, pentest, disaster recovery
+  e estrategia de deploy/escalabilidade.
+
+Nenhuma das fases futuras deve ser apresentada como concluida antes
+de implementacao, testes e validacao em ambiente real.
