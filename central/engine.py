@@ -95,6 +95,7 @@ class RunOrchestrator:
 
     async def _run_claim(self, claimed):
         rid, owner = claimed['run_id'], claimed['owner']
+        lease_token = claimed['lease_token']
         if claimed['recovered']:
             # Another process lost its lease. Recheck each tool's normal
             # permissions/hashes; replay only incomplete steps.
@@ -120,7 +121,7 @@ class RunOrchestrator:
                     return
                 now = asyncio.get_running_loop().time()
                 if now - previous >= max(3, self.queue.lease_seconds // 3):
-                    if not self.queue.heartbeat(rid, owner):
+                    if not self.queue.heartbeat(rid, owner, lease_token):
                         stop_run_commands(rid)
                         parent.cancel()
                         return
@@ -135,7 +136,8 @@ class RunOrchestrator:
             mapping = {'completed':'completed','paused_limit':'paused',
                        'failed':'failed','cancelled':'cancelled'}
             state = mapping.get(row['status'] if row else None, 'queued')
-            self.queue.finish(rid, owner, state, row.get('error') if row else None)
+            self.queue.finish(rid, owner, state, row.get('error') if row else None,
+                              lease_token=lease_token)
 
     async def poll_jobs(self):
         from .worker_liveness import beat, forget
