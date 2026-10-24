@@ -824,9 +824,9 @@ def run_activity(rid: str, user=Depends(current_user)):
     import re
     def safe_log(message):
         snippet = str(message or '')[-900:]
-        snippet = re.sub(r'(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+',
-                         r'\\1=[oculto]', snippet)
-        snippet = re.sub(r'\\bsk-[A-Za-z0-9_-]{12,}\\b', '[chave ocultada]', snippet)
+        snippet = re.sub(r'(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+',
+                         r'\1=[oculto]', snippet)
+        snippet = re.sub(r'\bsk-[A-Za-z0-9_-]{12,}\b', '[chave ocultada]', snippet)
         return snippet
     entries = []
     for e in reversed(events):
