@@ -26,6 +26,62 @@ TEMPLATES = [
  ('Coordenador IA','coordination','Una resultados, priorize entregas e explique decisões e pendências.','✦'),
 ]
 
+
+STANDARD_SPECIALTIES = {name: (specialty, instructions)
+                        for name, specialty, instructions, _avatar in TEMPLATES}
+
+
+def suggested_default_specialty(agent):
+    """Recover the role of an unchanged factory agent, never an arbitrary custom agent.
+
+    Only the exact built-in name plus the original system instructions qualifies.
+    User-customized instructions and renamed workers keep their configured role.
+    """
+    template = STANDARD_SPECIALTIES.get(agent.get('name'))
+    if template and (agent.get('instructions') or '').strip() == template[1].strip():
+        return template[0]
+    return None
+
+
+def effective_specialty(agent):
+    return suggested_default_specialty(agent) or agent['specialty']
+
+
+def recoverable_default_agents(agents):
+    """Offer an explicit migration to fix incorrectly saved factory specialties."""
+    return [dict(agent, suggested_specialty=suggested_default_specialty(agent))
+            for agent in agents if suggested_default_specialty(agent)
+            and agent['specialty'] != suggested_default_specialty(agent)]
+
+
+def team_for_task(agents, prompt):
+    """Select planning, an implementation specialist, and review in order."""
+    available = [a for a in agents if a['enabled']]
+    if not available:
+        return []
+    lowered = prompt.casefold()
+    from .task_contract import _plain
+    normalized = _plain(prompt)
+    ui = any(x in normalized for x in
+             ('landing page', 'landing-page', 'frontend', 'front-end', 'interface',
+              'react', 'pagina', 'website', 'design visual', 'layout'))
+    api = any(x in normalized for x in
+              ('backend', 'back-end', 'api', 'autenticacao', 'servidor', 'banco de dados'))
+    order = (('frontend', 'code', 'backend') if ui else
+             ('backend', 'code', 'frontend') if api else
+             ('code', 'frontend', 'backend'))
+    def select(specialties, exclude):
+        return next((a for specialty in specialties for a in available
+                     if effective_specialty(a) == specialty and a['id'] not in exclude), None)
+    result = []
+    for candidates in (('architecture', 'coordination'), order,
+                       ('review',)):
+        pick = select(candidates, {a['id'] for a in result})
+        if pick is not None:
+            result.append(pick)
+    return result
+
+
 KEYWORDS = {
  'architecture': ['arquitet','arquitetura','sistema','estrutura','dependência','design técnico'],
  'frontend': ['frontend','front-end','react','interface','componente','css','html','tela','página','dashboard'],
@@ -49,7 +105,7 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
     if mode == 'manual': return candidates[:1]
     lower = prompt.lower()
     specialties = [name for name, words in KEYWORDS.items() if any(w in lower for w in words)]
-    filtered = [a for a in candidates if a['specialty'] in specialties]
+    filtered = [a for a in candidates if effective_specialty(a) in specialties]
     if mode == 'team':
         # 'Equipe' must never be silently reduced to the single keyword match.
         selected = filtered[:2]
@@ -147,21 +203,19 @@ class Engine:
         else:
             chosen = discover_agents(agents, prompt, mode, agent_ids)
             if autonomous and mode == 'team' and not agent_ids:
-                # A deterministic, sequential team, regardless of keywords in the prompt.
-                def first(specialty):
-                    return next((a for a in agents if a['specialty'] == specialty), None)
-                sequence = [first('architecture'), first('code'), first('review')]
-                chosen = [a for a in sequence if a and a['enabled']]
+                # Use the correct implementation role for the actual task, and
+                # recover intact factory agents whose stored specialties drifted.
+                chosen = team_for_task(agents, prompt)
             if not chosen: raise ValueError('Cadastre ou habilite pelo menos um trabalhador.')
             plan = create_plan(chosen, sequential=autonomous)
-            if not autonomous and len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
-                reviewer = next((a for a in agents if a['specialty']=='review'), None)
+            if not autonomous and len(chosen) > 1 and not any(effective_specialty(a)=='review' for a in chosen):
+                reviewer = next((a for a in agents if effective_specialty(a)=='review'), None)
                 if reviewer:
                     plan.append({'id':uid(),'agent_id':reviewer['id'],'name':reviewer['name'],
                                  'kind':'agent','deps':[p['id'] for p in plan],'instructions':'Revise as entregas anteriores; reporte problemas concretos e ressalvas.'})
         if implementation:
             selected_specialties = {
-                a['specialty'] for a in agents
+                effective_specialty(a) for a in agents
                 if a['id'] in {p['agent_id'] for p in plan if p['kind'] == 'agent'}
             }
             if not selected_specialties.intersection({'code', 'frontend', 'backend'}):
@@ -262,6 +316,7 @@ class Engine:
         user = run['user_id']
         agent = self.db.one('SELECT * FROM agents WHERE id=? AND user_id=?', (step['agent_id'],user))
         if not agent: raise RuntimeError('Trabalhador não encontrado.')
+        specialty = effective_specialty(agent)
         prev = self.db.all('SELECT name,output FROM steps WHERE run_id=? AND status=? AND output IS NOT NULL', (run['id'],'completed'))
         context = '\n\n'.join(f"{p['name']}:\n{p['output'][:2500]}" for p in prev)[:5500]
         memory = build_memory(self.db, user, run['conversation_id'], run['prompt'])
@@ -329,10 +384,10 @@ class Engine:
                                 self.security.decrypt(provider['api_key_enc']), model,
                                 system, messages, self.emit,
                                 validate_at_finish=(is_implementation_request(run['prompt']) and
-                                                    agent['specialty'] not in (
+                                                    specialty not in (
                                                         'architecture', 'design', 'research', 'coordination')),
                                 require_code_changes=(is_implementation_request(run['prompt']) and
-                                                      agent['specialty'] in ('code', 'frontend', 'backend')),
+                                                      specialty in ('code', 'frontend', 'backend')),
                                 require_observation=is_workspace_inspection_request(run['prompt']),
                                 require_document_read=('document' in run['prompt'].lower() or
                                                        'arquivo' in run['prompt'].lower()))
