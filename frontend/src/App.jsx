@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ProviderCatalog from './ProviderCatalog'
 import ConversationMemoryPanel from './ConversationMemoryPanel'
+import ComputerAccessPanel from './ComputerAccessPanel'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', providers: 'Provedores', settings: 'Configurações' }
@@ -161,7 +162,7 @@ function RichText({ text }) {
   }))}</div>
 }
 
-function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, onMenu, onCommand }) {
+function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, onMenu, onCommand }) {
   const fileRef = useRef(null)
   const transcriptRef = useRef(null)
   const [activeCommand, setActiveCommand] = useState(0)
@@ -223,7 +224,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
         </div>}
         <div className={"chat-composer rounded-[23px] shadow-xl shadow-black/15 focus-within:ring-4 focus-within:ring-lilac/5 " + (prompt.trim() ? "is-typing" : "")}>
           <textarea value={prompt} onChange={e => { setPrompt(e.target.value); setActiveCommand(0) }} onKeyDown={handleKeyDown} rows={2} placeholder="Escreva uma mensagem ou digite / para ver comandos..." className="block max-h-40 min-h-[67px] w-full resize-y bg-transparent px-5 pt-4 text-sm text-copy outline-none placeholder:text-[#aaa7b1]" />
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet onClick={() => fileRef.current?.click()}>＋ Anexar</Button><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : onSend()} disabled={!prompt.trim() || running}>{running ? 'Executando…' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : onSend()} disabled={!prompt.trim() || running}>{running ? 'Executando…' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
         </div>
       </div>
       <p className="mx-auto mt-2 max-w-[690px] text-center text-[10px] text-muted">Tarefas usam suas próprias chaves de provedor e podem gerar cobranças.</p>
@@ -305,17 +306,18 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 }
 
 export default function App() {
-  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const sourceRef=useRef(null);const toastTimer=useRef(null)
+  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
   useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme)},[theme])
   useEffect(()=>{let cancelled=false;api('/me').then(async me=>{if(cancelled)return;setUser(me);await loadAll()}).catch(()=>{}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[loadAll])
   useEffect(()=>{if(user&&(page==='dashboard'||page==='monitoring'))refreshStats()},[page,user,refreshStats])
+  useEffect(()=>{if(!user)return;let active=true;api('/computer-access').then(value=>{if(active)setComputerAccess(value)}).catch(()=>{if(active)setComputerAccess({mode:'blocked',folder:''})});return()=>{active=false}},[user?.id])
   useEffect(()=>{if(!user||page!=='chat')return;let active=true;if(!currentConvo){setMessages([]);return}api(`/conversations/${currentConvo}/messages`).then(items=>{if(active)setMessages(items.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})))}).catch(error=>notify(error.message));return()=>{active=false}},[currentConvo,page,user,notify])
   useEffect(()=>()=>{sourceRef.current?.close();clearTimeout(toastTimer.current)},[])
   async function login(authMode,credentials){const me=await api(`/${authMode}`,'POST',credentials);setUser(me);setPage('chat');await loadAll()}
-  async function logout(){sourceRef.current?.close();await api('/logout','POST');setMenuOpen(false);setUser(null);setCurrentConvo(null);setData(emptyData);setMessages([])}
+  async function logout(){sourceRef.current?.close();await api('/logout','POST');setMenuOpen(false);setUser(null);setCurrentConvo(null);setData(emptyData);setMessages([]);setComputerAccess({mode:'blocked',folder:''})}
   const navigate=next=>{sourceRef.current?.close();setPage(next);setMenuOpen(false)}
   function newChat(){sourceRef.current?.close();setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
   async function openConversation(id){
@@ -370,7 +372,7 @@ export default function App() {
         <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sistema online</span><button title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
-        {page === 'chat' && <ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()}/>}
+        {page === 'chat' && <ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)}/>}
         {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})}/>}
@@ -380,6 +382,9 @@ export default function App() {
         {page === 'settings' && <Settings theme={theme} onTheme={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} me={user} onLogout={() => logout().catch(e => notify(e.message))}/>}
       </section>
     </main>
+    {computerOpen && <ComputerAccessPanel api={api} onClose={() => setComputerOpen(false)}
+      onSaved={setComputerAccess}
+      onAttach={file => setFiles(old => [...old, file])}/>}
     {memoryOpen && <ConversationMemoryPanel
       key={(memoryTargetProject || currentConvo || selectedProject || 'avulsa')}
       api={api} projects={data.projects}
