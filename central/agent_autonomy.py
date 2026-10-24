@@ -5,7 +5,7 @@ Model output is structured JSON text. No model is granted shell access.
 import json
 from fastapi import HTTPException
 from .computer_access import policy
-from .worker_checkpoint import WorkerPaused, load_checkpoint, save_checkpoint
+from .worker_checkpoint import WorkerPaused, load_checkpoint, save_checkpoint, legacy_step_progress
 from .workspace_tools import (
     agent_action, validation_commands, MAX_ACTIONS, MAX_ROUNDS, MAX_VALIDATION_RETRIES,
 )
@@ -103,6 +103,20 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     last_action = saved['last_action'] if saved else ''
     last_result = saved['last_result'] if saved else ''
     last_validation = saved['last_validation'] if saved else ''
+    if not saved:
+        step = db.one('SELECT attempts FROM steps WHERE id=? AND run_id=?',
+                      (step_id, run_id))
+        if step and step['attempts'] > 1:
+            previous = legacy_step_progress(db, run_id, step_id)
+            if previous['actions']:
+                changed_files.update(previous['changed_files'])
+                last_validation = previous['last_validation']
+                transcript.append({
+                    'role': 'user',
+                    'content': 'Progresso recuperado de execução antiga (apenas metadados, '
+                               'não reexecute estas ações sem verificar os arquivos):\n' +
+                               '\n'.join(previous['actions']) +
+                               '\nVerifique o workspace e retome somente o trabalho faltante.'})
 
     def checkpoint(state='working'):
         save_checkpoint(
