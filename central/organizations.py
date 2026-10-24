@@ -104,6 +104,18 @@ def require_run_scope(db, run, user_id):
     return run
 
 
+def require_run_write(db,run_id,user_id):
+    run=db.one('SELECT * FROM runs WHERE id=? AND user_id=?',
+               (run_id,user_id))
+    if not run:
+        raise HTTPException(404,'Registro não encontrado.')
+    mapping=db.one('SELECT organization_id FROM organization_runs WHERE run_id=?',
+                   (run_id,))
+    if mapping:
+        require_org(db,mapping['organization_id'],user_id,write=True)
+    return run
+
+
 def all_organizations(db,user_id):
     return db.all(
         """SELECT o.id,o.name,o.is_personal,m.role,o.daily_run_limit,
