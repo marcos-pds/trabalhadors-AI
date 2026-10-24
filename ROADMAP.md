@@ -9,7 +9,7 @@ Nenhuma fase com as pendências abaixo está concluída para produção.
 | 6 — memória semântica | Embeddings Ollama com autorização por usuário/projeto; cache por hash; documentos privados/compartilhados; expiração e limpeza; fontes; fallback lexical; interface de ativação | Homologar modelo e corpus reais; medir qualidade/latência em coleções maiores |
 | 7 — serviços | Seleção/templates em agent_registry; DAG em workflows; seleção/comparação em provider_manager; autorização em approval_engine; RunOrchestrator e WorkspaceExecutor injetáveis | Revisão de contratos de plugins (suíte assíncrona aprovada em Linux/Windows) |
 | 8 — desenvolvimento | Git status/diff/log; diff/textconv/fsmonitor externos desativados; revisões/diffs paginados GitHub/GitLab; plano imutável e aprovação única para PR/MR em rascunho; tokens pessoais criptografados; UI; CLI operacional | Homologar gravação com contas reais; deploy com plano/aprovação e reconciliação de resultados remotos incertos |
-| 9 — infraestrutura | Migrações SQLite ordenadas com checksum; índices; compatibilidade com bancos legados; leases com token exclusivo por tentativa e confirmação protegida contra tokens expirados | PostgreSQL, Redis distribuído, fencing de efeitos externos e tracing multihost NÃO implementados |
+| 9 — infraestrutura | Migrações SQLite com checksum; leases por tentativa; protótipo PostgreSQL separado com migrações transacionais, fila experimental e testes reais no CI | Aplicação ainda opera em SQLite; migração de dados, PostgreSQL integrado, Redis distribuído, fencing de efeitos externos e tracing multihost NÃO implementados |
 | 10 — segurança | Chave externa; configuração servidor exige HTTPS, Docker e chave; cadastro fechado nesse modo; convite de uso único por conta; backup criptografado e restore sem sobrescrita | SSO/OIDC, verificação de e-mail, rotação em secret manager, TLS implantado e auditoria externa |
 | 11 — produto | Memória semântica, revisões Git, relatórios JSON/Markdown e comparação de preços configurados/latência observada | Editor com diff/aprovação; revisão visual, acessibilidade e fluxo ponta a ponta |
 | 12 — homologação | CLI de verificações; ferramenta de carga do endpoint de saúde; testes de restauração e acesso | Carga real, pentest independente, recuperação fora da máquina, deploy/escalabilidade |
@@ -260,3 +260,35 @@ precisa receber e validar um fencing token transacional antes de se habilitar
 execução distribuída. PostgreSQL/Redis seguem desabilitados e não homologados.
 
 Verificação recomendada: `python -m pytest tests/test_job_queue.py tests/test_release_checks.py -q`.
+
+
+### Fase 9 — Protótipo PostgreSQL independente
+
+`central/postgres_queue.py` implementa uma fila **experimental** isolada no
+schema `central_jobs` do PostgreSQL. **Nenhuma rota da API, worker em produção ou
+dados SQLite usam esse módulo**; a aplicação continua exclusivamente SQLite.
+O `requirements-postgres.txt` é opcional e não altera a instalação normal.
+
+O protótipo possui migrações transacionais verificadas por checksum, `claim`
+serializado por bloqueio transacional global, limite de tarefas simultâneas por
+usuário, tentativas máximas e lease renovável associado a token de uso exclusivo
+por tentativa. `cancel`, `finish` e `heartbeat` invalidam/rejeitam tokens
+obsoletos. O armazenamento usa o relógio do PostgreSQL, não o relógio do worker.
+
+O job `postgres-prototype` do CI sobe PostgreSQL 16 com credenciais de teste
+descartáveis e executa `tests/test_postgres_queue.py` com instâncias concorrentes.
+Para testar manualmente, forneça `CENTRAL_PG_TEST_DSN` apontando **somente
+para um banco descartável** e execute:
+
+    python -m pip install -r requirements-postgres.txt
+    python -m pytest tests/test_postgres_queue.py -v
+
+O teste limpa a tabela `central_jobs.queue` no banco indicado; **não use
+credenciais de produção**. O DSN jamais deve ser registrado no código ou no Git.
+
+**Gates restantes antes da integração:** modelar e migrar as demais entidades
+com PostgreSQL, transações de estados de negócio e fila no mesmo banco, resgate
+e rollback de dados existentes, execução autorizada de ferramentas com fencing
+atômico, transporte Redis resiliente, observabilidade e homologação de falhas.
+O protótipo não é um substituto plug-and-play para `central.job_queue.JobQueue`
+nem autoriza múltiplas máquinas a executarem tarefas reais.
