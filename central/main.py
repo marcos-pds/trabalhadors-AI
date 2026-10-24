@@ -36,9 +36,15 @@ ENGINE = Engine(DB, SEC)
 @asynccontextmanager
 async def lifespan(app):
     ENGINE.shutting_down = False
-    ENGINE.resume_pending()
+    if ENGINE.job_mode == 'embedded':
+        ENGINE.resume_pending()
+        ENGINE.start_dispatcher()
     yield
     ENGINE.shutting_down = True
+    if ENGINE.dispatch_task:
+        ENGINE.dispatch_task.cancel()
+        await asyncio.gather(ENGINE.dispatch_task, return_exceptions=True)
+        ENGINE.dispatch_task = None
     stop_all_previews()
     pending = list(ENGINE.running.values())
     for task in pending:
@@ -1037,7 +1043,8 @@ def readiness(response: Response):
         if not row or row['ready']!=1:
             raise RuntimeError('Database unavailable')
         return {'status':'ready','database':'ready',
-                'job_executor':'in_process','distributed_queue':False,
+                'job_executor':ENGINE.job_mode,'durable_job_queue':True,
+                'distributed_queue':False,
                 'providers':'not_checked'}
     except Exception:
         response.status_code=503
