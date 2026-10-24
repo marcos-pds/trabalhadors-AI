@@ -220,7 +220,16 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 checkpoint('completed')
                 return finished or 'Planejamento registrado para o próximo trabalhador.'
             results = []
-            for check in validation_commands(grant['folder']):
+            # Include earlier worker modifications, not only this resumed segment.
+            from .task_contract import delivery_evidence
+            changes = delivery_evidence(db, run_id)['changed_files']
+            try:
+                checks = validation_commands(grant['folder'], changed_files=changes)
+            except RuntimeError as exc:
+                checks = []
+                results.append({'command': 'descobrir_validacao',
+                                'result': {'error': str(exc), 'success': False}})
+            for check in checks:
                 try:
                     result = await agent_action(db, user_id, run_id, step_id, check, emit)
                 except HTTPException as exc:
