@@ -439,7 +439,7 @@ def decide(db, user_id, run_id, approval_id, approved):
     requested = json.loads(row['request_json'])
     if (current['mode'] not in ('full','ask') or current['folder'] != row['folder']
             or (current['mode'] == 'full' and
-                not needs_explicit_approval(db,user_id,run_id,requested)))):
+                not needs_explicit_approval(db,user_id,run_id,requested))):
         raise HTTPException(409, 'Permissão alterada ou revogada.')
     enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
