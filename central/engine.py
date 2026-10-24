@@ -286,6 +286,25 @@ class Engine:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
         task_policy = validate_run_policy(classify_task(prompt, autonomous), autonomous)
+        conversation = self.db.one(
+            'SELECT user_id,project_id FROM conversations WHERE id=? AND user_id=?',
+            (conversation_id,user_id))
+        if not conversation:
+            raise ValueError('Conversa não encontrada para esta conta.')
+        from .organizations import require_project, require_org
+        mapping = (self.db.one(
+            'SELECT organization_id FROM organization_projects WHERE project_id=?',
+            (conversation['project_id'],)) if conversation['project_id'] else None)
+        if conversation['project_id']:
+            require_project(self.db,conversation['project_id'],user_id,write=True)
+        organization_id = (mapping['organization_id'] if mapping else None)
+        if not organization_id and not conversation['project_id']:
+            personal = self.db.one(
+                'SELECT id FROM organizations WHERE created_by=? AND is_personal=1',
+                (user_id,))
+            organization_id = personal['id'] if personal else None
+        if organization_id:
+            require_org(self.db,organization_id,user_id,write=True)
         implementation = task_policy['task_type'] == 'code'
         agents = self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1', (user_id,))
         if flow:
@@ -330,7 +349,7 @@ class Engine:
                     if existing:
                         self.db.conn.execute('COMMIT')
                         return existing['id']
-                require_capacity(self.db, user_id)
+                require_capacity(self.db, user_id, organization_id)
                 self.db.conn.execute(
                     '''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
                      budget_limit,idempotency_key,created_at,updated_at,autonomous)
@@ -338,6 +357,10 @@ class Engine:
                     (run_id,user_id,conversation_id,prompt,'queued',mode,
                      json.dumps(agent_ids or []),json.dumps(plan),budget,
                      idempotency_key,now,now,int(autonomous)))
+                if organization_id:
+                    self.db.conn.execute(
+                        'INSERT INTO organization_runs(run_id,organization_id) VALUES(?,?)',
+                        (run_id,organization_id))
                 for p in plan:
                     self.db.conn.execute(
                         '''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,
