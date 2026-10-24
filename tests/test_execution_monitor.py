@@ -96,3 +96,27 @@ def test_cancel_registry_prevents_late_command_start(monkeypatch, tmp_path):
         assert not called
     finally:
         reset_run_commands(rid)
+
+
+
+def test_stop_prevents_late_file_writes_and_directory_creation(tmp_path):
+    from central.workspace_tools import execute
+    from fastapi import HTTPException
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    (root / 'component.jsx').write_bytes(b'export default null\n')
+    run_id = 'blocked-writes-test'
+    stop_run_commands(run_id)
+    try:
+        with pytest.raises(HTTPException) as error:
+            execute(str(root), {'action': 'write', 'path': 'component.jsx',
+                                'content': 'export default 1\n',
+                                'expected_sha256': None}, run_id=run_id)
+        assert error.value.status_code in (409, 403)
+        # A new file must also be blocked, even if the empty path has no old hash.
+        with pytest.raises(HTTPException, match='cancelada'):
+            execute(str(root), {'action': 'mkdir', 'path': 'components'}, run_id=run_id)
+        assert not (root / 'components').exists()
+        assert (root / 'component.jsx').read_bytes() == b'export default null\n'
+    finally:
+        reset_run_commands(run_id)
