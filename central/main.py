@@ -484,7 +484,10 @@ def computer_access_decision(approval_id: str, data: ComputerAccessDecisionIn,
                              request: Request, user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
-    return computer_decide_action(DB, user['id'], approval_id, data.approve)
+    outcome = computer_decide_action(DB, user['id'], approval_id, data.approve)
+    ops_audit(DB,user['id'],'computer_action_decided','approval',approval_id,
+              outcome='approved' if data.approve else 'denied')
+    return outcome
 
 
 class AgentIn(BaseModel):
@@ -754,12 +757,16 @@ class ApprovalIn(BaseModel):
 
 
 @app.post('/api/runs/{rid}/steps/{sid}/approval')
-async def approve_step(rid:str,sid:str,data:ApprovalIn,user=Depends(current_user)):
+async def approve_step(rid:str,sid:str,data:ApprovalIn,request:Request,
+                       user=Depends(current_user)):
+    require_csrf(request)
     require_owned(DB,'runs',rid,user['id'])
     step=DB.one('SELECT * FROM steps WHERE id=? AND run_id=?',(sid,rid))
     if not step or step['kind']!='approval' or step['status']!='awaiting_approval':
         raise HTTPException(409,'Não há aprovação pendente.')
     ENGINE.approve(rid,sid,data.approved)
+    ops_audit(DB,user['id'],'step_approval_decided','run',rid,
+              outcome='approved' if data.approved else 'denied')
     return {'ok':True}
 
 
@@ -772,7 +779,10 @@ async def approve_workspace_action(rid: str, approval_id: str,
     run = require_owned(DB, 'runs', rid, user['id'])
     if not run['autonomous'] or run['status'] not in ('running', 'awaiting_approval'):
         raise HTTPException(409, 'A execução não está aguardando autorização de ferramentas.')
-    return decide_workspace_action(DB, user['id'], rid, approval_id, data.approved)
+    outcome = decide_workspace_action(DB, user['id'], rid, approval_id, data.approved)
+    ops_audit(DB,user['id'],'workspace_action_decided','run',rid,
+              outcome='approved' if data.approved else 'denied')
+    return outcome
 
 
 @app.get('/api/runs/{rid}/workspace/approvals')
