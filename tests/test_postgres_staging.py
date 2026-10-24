@@ -193,3 +193,18 @@ def test_cli_inspect_does_not_require_pg_credentials(source, capsys, monkeypatch
     assert "metadata_only_no_secrets" in text
     with pytest.raises(SystemExit):
         staging.main(["stage", str(path)])
+
+
+def test_utf8_id_order_does_not_depend_on_database_collation(pg, source):
+    db, path = source
+    for project_id in ("Z-upper", "a-lower", "Á-accent", "A-upper"):
+        db.execute(
+            "INSERT INTO projects(id,user_id,name,description,created_at)"
+            " VALUES(?,?,?,?,?)",
+            (project_id, "u1", project_id, "Unicode test metadata", utcnow()),
+        )
+    staged = staging.stage_metadata(pg, path)
+    assert staged["counts"]["projects"] == 5
+    assert staging.verify_staged(pg, staged["batch_id"], source_path=path)[
+        "source_unchanged"
+    ]
