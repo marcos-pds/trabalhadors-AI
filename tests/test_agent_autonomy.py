@@ -270,7 +270,8 @@ def test_programming_agent_cannot_finish_from_generic_prose_without_edits(worksp
     set_policy(db, 'user', 'full', str(root))
     model = FakeModel([json.dumps({'action': 'finish', 'message': 'Está pronto.'})
                        for _ in range(12)])
-    with pytest.raises(RuntimeError, match='Nenhum arquivo'):
+    from central.worker_checkpoint import WorkerPaused
+    with pytest.raises(WorkerPaused, match='pausado por limite'):
         asyncio.run(autonomous_worker(
             model, db, 'user', 'run', 'step', {'kind': 'openai'},
             'key', 'mock', '', [{'role':'user','content':'Desenvolva o site.'}],
