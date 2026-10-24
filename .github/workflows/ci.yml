@@ -130,4 +130,4 @@ jobs:
         env:
           CENTRAL_PG_TEST_DSN: postgresql://central_test:central_test_password@127.0.0.1:5432/central_test
           CENTRAL_REDIS_TEST_URL: redis://127.0.0.1:6379/0
-        run: python -m pytest tests/test_postgres_queue.py tests/test_redis_signals.py -v --tb=short
+        run: python -m pytest tests/test_postgres_queue.py tests/test_redis_signals.py tests/test_postgres_staging.py -v --tb=short
