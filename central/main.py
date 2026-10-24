@@ -656,6 +656,30 @@ def update_organization_limits(oid:str,data:OrgLimitsIn,request:Request,
     return require_org(DB,oid,user['id'])
 
 
+class HostCommandsIn(BaseModel):
+    enabled: bool
+    confirmation: str = Field(default='',max_length=90)
+
+
+@app.put('/api/organizations/{oid}/host-commands')
+def change_host_commands(oid:str,data:HostCommandsIn,request:Request,
+                         user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    member=require_org(DB,oid,user['id'],admin=True)
+    if member['is_personal']:
+        raise HTTPException(409,'O espaço pessoal já utiliza as permissões do computador.')
+    if data.enabled and data.confirmation != 'AUTORIZO EXECUCAO LOCAL':
+        raise HTTPException(
+            422,'Para habilitar, digite exatamente AUTORIZO EXECUCAO LOCAL. '
+                'Comandos npm/pip podem executar código fora da pasta autorizada.')
+    DB.execute('UPDATE organizations SET host_commands_enabled=? WHERE id=?',
+               (int(data.enabled),oid))
+    ops_audit(DB,user['id'],'org_host_commands_changed','organization',oid,
+              outcome='enabled' if data.enabled else 'disabled')
+    return {'organization_id':oid,'enabled':data.enabled}
+
+
 @app.get('/api/organizations/{oid}/usage')
 def organization_usage(oid:str,user=Depends(current_user)):
     org=require_org(DB,oid,user['id'])
