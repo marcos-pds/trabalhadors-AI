@@ -41,7 +41,7 @@ def test_custom_worker_specialties_are_not_guessed_from_names():
     assert effective_specialty(renamed) == 'architecture'
 
 
-def test_engine_builds_real_team_even_when_stored_specialties_are_all_wrong():
+def test_engine_builds_real_team_even_when_stored_specialties_are_all_wrong(tmp_path):
     db = Database(':memory:')
     try:
         db.execute('INSERT INTO users VALUES(?,?,?,?)',
@@ -54,6 +54,12 @@ def test_engine_builds_real_team_even_when_stored_specialties_are_all_wrong():
                 'VALUES(?,?,?,?,?,?,?)',
                 (agent['id'], 'user', agent['name'], agent['specialty'],
                  agent['instructions'], agent['avatar'], utcnow()))
+        # Autonomous execution now requires an explicit, folder-scoped grant,
+        # including in direct Engine usage (not only at the HTTP layer).
+        from central.computer_access import set_policy
+        folder = tmp_path / 'authorized'
+        folder.mkdir()
+        set_policy(db, 'user', 'full', str(folder))
         engine = Engine(db, None)
         engine.schedule = lambda rid: None
         async def go():
