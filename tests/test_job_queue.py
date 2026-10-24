@@ -87,6 +87,7 @@ def test_user_fair_limit_and_cancel_pending(tmp_path):
         assert one['run_id'] == 'a'
         two=q.claim('second-worker', per_user_limit=1)
         assert two['run_id'] == 'c'
+        db.execute("UPDATE runs SET status='cancelled' WHERE id='b'")
         q.cancel('b')
         assert q.details('b')['state']=='cancelled'
         assert q.claim('third-worker', per_user_limit=1) is None
