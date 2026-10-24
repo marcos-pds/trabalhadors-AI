@@ -69,6 +69,18 @@ export default function OperationalOverview({ api }) {
         <p className="mt-2 text-[10px] text-muted">Limites definidos no servidor. Não equivalem ao saldo ou à cobrança real dos provedores.</p>
       </section>
       <section className="rounded-2xl border border-white/10 bg-panel p-4">
+        <h3 className="text-xs font-semibold">Executor de comandos</h3>
+        <p className="mt-2 text-xs">{info.command_executor?.backend === 'docker'
+          ? 'Docker isolado (opt-in)' : 'Windows / Linux local (host)'}</p>
+        {info.command_executor?.backend === 'docker' && <p className="mt-1 text-[11px] text-muted">
+          Docker {info.command_executor.docker_installed ? 'disponível no PATH' : 'não encontrado no PATH'}
+          {' · '}Rede: desativada · CPU: {info.command_executor.cpu_limit} · Memória: {info.command_executor.memory_limit_mb} MB
+          {' · '}Máx. processos: {info.command_executor.pids_limit}
+          {' · '}Prévia npm dev e instalações de dependências desabilitadas neste modo.
+        </p>}
+        <p className="mt-2 text-[11px] text-muted">{info.command_executor?.note || 'Executor não identificado.'}</p>
+      </section>
+      <section className="rounded-2xl border border-white/10 bg-panel p-4">
         <h3 className="text-xs font-semibold">Fila persistente local</h3>
         <p className="mt-1 text-[11px] text-muted">Backend: SQLite · execuções com lease renovável. Para processos separados, inicie o worker dedicado.</p>
         <div className="mt-3 flex flex-wrap gap-3 text-xs">
