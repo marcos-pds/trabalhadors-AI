@@ -37,6 +37,7 @@ COMMAND_LABELS = {
     'python_compile': 'python -m compileall -q .',
     'pip_requirements': 'python -m pip install -r requirements.txt',
     'pip_package': 'python -m pip install [pacote]',
+    'venv_create': 'python -m venv .venv',
     'git_status': 'git status --short',
 }
 
@@ -169,6 +170,7 @@ def command_spec(folder, request):
         'python_test': [python_bin, '-m', 'pytest', '-q'],
         'python_compile': [python_bin, '-m', 'compileall', '-q', '.'],
         'pip_requirements': [python_bin, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+        'venv_create': [sys.executable, '-m', 'venv', '.venv'],
         'git_status': [git, 'status', '--short'],
     }
     package = request.get('package', '')
@@ -182,6 +184,8 @@ def command_spec(folder, request):
         argv = [python_bin, '-m', 'pip', 'install', package]
     else:
         argv = commands[code]
+    if code == 'venv_create' and (root / '.venv').exists():
+        raise HTTPException(409, 'O ambiente virtual .venv já existe nesta pasta.')
     if code in ('npm_build', 'npm_test', 'npm_ci', 'npm_install') and not (root / 'package.json').is_file():
         raise HTTPException(422, 'package.json não encontrado neste diretório.')
     if code == 'pip_requirements' and not (root / 'requirements.txt').is_file():
