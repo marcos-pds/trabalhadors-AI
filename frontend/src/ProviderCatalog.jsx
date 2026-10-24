@@ -133,7 +133,12 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
             <div className="mt-3 max-h-52 overflow-y-auto">{visible.map(m => <div key={m.id} className="border-t border-white/10 py-3 text-xs"><strong>{m.name}</strong><span className="ml-2 text-[10px] text-lilac">{m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? 'Gratuito elegível' : m.billing === 'local' ? 'Local' : 'Preço a confirmar'}</span><span className="mt-1 block break-all font-mono text-muted">{m.id}</span><small className="mt-1 block text-muted">{m.connected ? "Já cadastrado" : m.access}{m.context_length ? ` · Contexto: ${m.context_length.toLocaleString('pt-BR')} tokens` : ''}</small><small className="mt-1 block text-muted">{m.source}</small></div>)}</div>
           </>}
         </details>
-        {error && <p role="alert" className="mt-4 text-sm text-rose-300">{error}</p>}
+        {error && <div role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/5 p-3">
+          <p className="text-sm text-rose-300">{error}</p>
+          {service.kind === 'sambanova' && /crédit|saldo|cobrança/i.test(error) &&
+            <a href="https://cloud.sambanova.ai/plans/billing" target="_blank" rel="noopener noreferrer"
+              className="mt-2 inline-block text-xs font-semibold text-lilac underline">Conferir saldo e cobrança na SambaNova ↗</a>}
+        </div>}
         {busy && <p role="status" className="mt-4 text-xs text-lilac">{busy}</p>}
         {!hasNewModels && <p role="status" className="mt-4 text-xs text-muted">Nenhum modelo novo elegível. Os modelos já cadastrados podem ser gerenciados em Editar.</p>}
         <div className="mt-5 flex flex-col gap-2 sm:flex-row"><button type="submit" className={primary + ' flex-1'} disabled={!allowed || !!busy || (model ? !manualAllowed : !hasNewModels)}>{busy ? 'Conectando...' : model ? 'Conectar modelo selecionado' : 'Conectar automaticamente'}</button>{model && <button type="button" className={button} disabled={!!busy} onClick={() => { setModel(''); setConfirmCharges(false) }}>Voltar ao automático</button>}</div>
