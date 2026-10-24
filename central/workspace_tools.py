@@ -90,6 +90,11 @@ def preview(folder, request):
     if action == 'list':
         directory = target(folder, relative, directory=True)
         return {'action': action, 'path': relative, 'description': 'Listar ' + str(directory.name)}
+    if action == 'mkdir':
+        path = target(folder, relative, creating=True)
+        if path.exists():
+            raise HTTPException(409, 'Esta pasta já existe.')
+        return {'action': action, 'path': relative, 'description': 'Criar pasta ' + relative}
     if action == 'read':
         path = target(folder, relative)
         if path.suffix.lower() not in {'.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json',
@@ -136,7 +141,7 @@ def preview(folder, request):
     if action == 'command':
         spec = command_spec(folder, request)
         return {'action': action, 'path': spec['cwd'], 'description': 'Executar: ' + spec['label']}
-    raise HTTPException(422, 'Ação desconhecida. Use list, read, write, replace ou command.')
+    raise HTTPException(422, 'Ação desconhecida. Use list, read, mkdir, write, replace ou command.')
 
 
 def command_spec(folder, request):
@@ -202,6 +207,10 @@ def execute(folder, request):
                 continue
             items.append({'name': child.name, 'type': 'dir' if child.is_dir() else 'file'})
         return {'items': items, 'path': relative}
+    if action == 'mkdir':
+        directory = target(folder, relative, creating=True)
+        directory.mkdir()
+        return {'path': relative, 'created': True}
     if action == 'read':
         file = target(folder, relative)
         if file.stat().st_size > MAX_WRITE_BYTES:
