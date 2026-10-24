@@ -41,13 +41,33 @@ def is_implementation_request(prompt):
     return bool(ACTION.search(text) and TARGET.search(text))
 
 
+READ_REQUEST = re.compile(
+    r'\b(?:verifique|verique|verificar|leia|ler|liste|listar|busque|buscar|'
+    r'analise|analisar|resuma|resumir|resumo|ressumo|inspecione|inspecionar|explore)\b'
+)
+LOCAL_MATERIAL = re.compile(
+    r'\b(?:documentos?|arquivos?|pastas?|workspace|repositorio|'
+    r'diretorios?|codigo[\s-]*fonte|estrutura[\s-]*de[\s-]*projetos)\b'
+)
+
+
+def is_workspace_inspection_request(prompt):
+    text = _plain(prompt)
+    return (not is_implementation_request(prompt) and
+            bool(READ_REQUEST.search(text) and LOCAL_MATERIAL.search(text)))
+
+
+def needs_workspace_tools(prompt):
+    return is_implementation_request(prompt) or is_workspace_inspection_request(prompt)
+
+
 def delivery_evidence(db, run_id):
     """Use only server-recorded events, never assertions from AI-generated prose."""
     rows = db.all(
         "SELECT seq,event,payload FROM events WHERE run_id=? "
         "AND event IN ('workspace_action_result','workspace_validation') ORDER BY seq",
         (run_id,))
-    changes, validations = [], []
+    changes, reads, validations = [], [], []
     for row in rows:
         try:
             payload = json.loads(row['payload'])
@@ -55,14 +75,18 @@ def delivery_evidence(db, run_id):
             continue
         if row['event'] == 'workspace_action_result':
             summary = payload.get('summary') or {}
-            if (payload.get('success') is True and
-                    summary.get('action') in ('write', 'replace')):
-                changes.append({'seq': row['seq'], 'path': summary.get('path', '')})
+            if payload.get('success') is True:
+                if summary.get('action') in ('write', 'replace'):
+                    changes.append({'seq': row['seq'], 'path': summary.get('path', '')})
+                if summary.get('action') in ('read', 'list'):
+                    reads.append({'seq': row['seq'], 'action': summary.get('action'),
+                                  'path': summary.get('path', '')})
         elif row['event'] == 'workspace_validation':
             validations.append({'seq': row['seq'], 'passed': payload.get('passed') is True,
                                 'checks': payload.get('results', [])})
     return {
         'changed_files': list(dict.fromkeys(c['path'] for c in changes)),
+        'inspected': reads,
         'changed_count': len(changes),
         'tests_passed': bool(validations and validations[-1]['passed']),
         'checks': validations[-1]['checks'] if validations else [],
@@ -82,4 +106,18 @@ def assert_implementation_delivered(db, run):
         raise RuntimeError(
             'Entrega não validada: faltam testes/build aprovados DEPOIS da última '
             'alteração de código. Veja o histórico de ferramentas.')
+    return evidence
+
+
+def assert_inspection_performed(db, run):
+    evidence = delivery_evidence(db, run['id'])
+    if not evidence['inspected']:
+        raise RuntimeError(
+            'Consulta não comprovada: nenhum documento ou diretório foi '
+            'consultado com as ferramentas locais. Não afirme que analisou arquivos.')
+    if ('document' in _plain(run['prompt']) or 'arquivo' in _plain(run['prompt'])) and not any(
+            item['action'] == 'read' for item in evidence['inspected']):
+        raise RuntimeError(
+            'Leitura não comprovada: diretórios listados não demonstram '
+            'que o conteúdo dos documentos foi realmente lido.')
     return evidence
