@@ -111,8 +111,10 @@ def test_stop_prevents_late_file_writes_and_directory_creation(tmp_path):
         with pytest.raises(HTTPException) as error:
             execute(str(root), {'action': 'write', 'path': 'component.jsx',
                                 'content': 'export default 1\n',
-                                'expected_sha256': None}, run_id=run_id)
-        assert error.value.status_code in (409, 403)
+                                'expected_sha256': __import__('hashlib').sha256(
+                                    b'export default null\n').hexdigest()}, run_id=run_id)
+        assert error.value.status_code == 409
+        assert 'cancelada' in str(error.value.detail)
         # A new file must also be blocked, even if the empty path has no old hash.
         with pytest.raises(HTTPException, match='cancelada'):
             execute(str(root), {'action': 'mkdir', 'path': 'components'}, run_id=run_id)
