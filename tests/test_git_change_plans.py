@@ -335,3 +335,51 @@ def test_reconciliation_read_errors_do_not_destroy_uncertain_result(setup):
         plans.reconcile(db,security,'alice',plan['id'],httpx.MockTransport(respond))
     assert error.value.status_code==502
     assert plans.status(db,'alice',plan['id'])['state']=='uncertain'
+
+
+
+def test_reconciliation_routes_require_owner_and_csrf(monkeypatch):
+    """Exercise HTTP authorization, not only the direct service functions."""
+    import uuid
+    from fastapi.testclient import TestClient
+    from central.main import app, DB, SEC
+    from central.git_gateway import Gateway as OriginalGateway
+
+    headers = {'X-Central-Request': '1'}
+    with TestClient(app) as owner, TestClient(app) as stranger:
+        users = []
+        for client in (owner, stranger):
+            email = uuid.uuid4().hex + '@example.org'
+            registered = client.post('/api/register',headers=headers,
+                                     json={'email': email, 'password':'test-password-123'})
+            assert registered.status_code == 200, registered.text
+            users.append(registered.json()['id'])
+        connection = connect(DB,SEC,users[0],'github','owner/repo','private-token')
+        _, transport = remote()
+        plan = plans.create(DB,SEC,users[0],connection['id'],'feature','main',
+                            'Recover this draft',transport=transport)
+        DB.execute("UPDATE git_change_plans SET state='uncertain' WHERE id=?",
+                   (plan['id'],))
+        marker = '<!-- central-plan:' + plan['id'] + ' -->'
+        def respond(request):
+            assert request.method == 'GET'
+            return httpx.Response(200,json=[
+                {'number':42,'body':marker,'draft':True,
+                 'head':{'ref':'feature','sha':'a'*40},
+                 'base':{'ref':'main','sha':'b'*40}}])
+        api_transport = httpx.MockTransport(respond)
+        monkeypatch.setattr(plans, 'Gateway',
+                            lambda row,security,transport=None:
+                                OriginalGateway(row,security,api_transport))
+        uri = '/api/git/draft-plans/' + plan['id'] + '/reconcile'
+        history_uri = ('/api/git/connections/' + connection['id'] + '/draft-plans')
+        assert stranger.get(history_uri).status_code == 404
+        assert stranger.post(uri,headers=headers,json={}).status_code == 404
+        assert owner.post(uri,json={}).status_code == 403
+        result=owner.post(uri,headers=headers,json={})
+        assert result.status_code == 200,result.text
+        assert result.json()['result']['number'] == 42
+        listing=owner.get(history_uri)
+        assert listing.status_code == 200
+        assert listing.json()[0]['state'] == 'completed'
+        assert 'confirmation' not in listing.text
