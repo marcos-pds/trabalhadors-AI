@@ -29,6 +29,9 @@ MIGRATIONS = (
         "active_jobs INTEGER NOT NULL DEFAULT 0 CHECK(active_jobs>=0))",
         "CREATE INDEX IF NOT EXISTS idx_worker_liveness_seen ON worker_liveness(last_seen_at)",
     )),
+    (8, 'job_queue_lease_token', (
+        'ALTER TABLE job_queue ADD COLUMN lease_token TEXT',
+    )),
 )
 
 
