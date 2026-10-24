@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS organizations (
  is_personal INTEGER NOT NULL DEFAULT 0,
  daily_run_limit INTEGER NOT NULL DEFAULT 100,
  active_run_limit INTEGER NOT NULL DEFAULT 4,
+ host_commands_enabled INTEGER NOT NULL DEFAULT 0 CHECK(host_commands_enabled IN (0,1)),
  estimated_budget_usd REAL,
  created_at TEXT NOT NULL,
  CHECK(daily_run_limit BETWEEN 1 AND 100000),
@@ -234,6 +235,10 @@ class Database:
             run_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(runs)')}
             if 'autonomous' not in run_cols:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
+            org_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(organizations)')}
+            if 'host_commands_enabled' not in org_cols:
+                self.conn.execute(
+                    'ALTER TABLE organizations ADD COLUMN host_commands_enabled INTEGER NOT NULL DEFAULT 0')
             # Safe, idempotent upgrade: assign existing private projects to
             # each owner's personal workspace. No existing columns are changed.
             self.conn.execute('BEGIN IMMEDIATE')
