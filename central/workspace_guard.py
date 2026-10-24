@@ -86,6 +86,19 @@ def enforce_run_scope(db, user_id, run_id, *, write=False):
     return folder
 
 
+def enforce_host_command_policy(db,user_id,run_id):
+    org_id = current_organization(db,run_id)
+    if not org_id:
+        return
+    from .organizations import require_org
+    member = require_org(db,org_id,user_id,write=True)
+    if not member['is_personal'] and not member['host_commands_enabled']:
+        raise HTTPException(
+            403,'Comandos locais desta organização estão bloqueados. '
+                'O administrador precisa autorizar explicitamente a execução '
+                'de scripts no computador. Isso não é uma sandbox.')
+
+
 def binding_summary(db,user_id,run_id):
     row=db.one(
         'SELECT folder,organization_id,initial_mode,created_at '
