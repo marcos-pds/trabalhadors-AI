@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .database import Database, uid, utcnow
 from .security import Security, password_hash, verify_password, require_owned
-from .engine import Engine, TEMPLATES, validate_flow
+from .engine import (Engine, TEMPLATES, validate_flow,
+                     suggested_default_specialty, recoverable_default_agents)
 from .providers import DEFAULT_ENDPOINTS, ProviderError
 from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
@@ -464,7 +465,28 @@ class AgentIn(BaseModel):
 
 @app.get('/api/agents')
 def list_agents(user=Depends(current_user)):
-    return DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    agents = DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
+    return [dict(agent, suggested_specialty=suggested_default_specialty(agent))
+            for agent in agents]
+
+
+@app.post('/api/agents/restore-default-specialties')
+def restore_default_specialties(request: Request, user=Depends(current_user)):
+    """User-approved repair; preserve per-agent models, keys, settings and instructions."""
+    require_csrf(request)
+    agents = DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at', (user['id'],))
+    candidates = recoverable_default_agents(agents)
+    # Re-check each original role in SQL. No custom/renamed/re-prompted agent is touched.
+    repaired = []
+    for agent in candidates:
+        count = DB.execute(
+            'UPDATE agents SET specialty=? WHERE id=? AND user_id=? AND specialty=?',
+            (agent['suggested_specialty'], agent['id'], user['id'], agent['specialty']))
+        if count:
+            repaired.append({'id': agent['id'], 'name': agent['name'],
+                             'old_specialty': agent['specialty'],
+                             'new_specialty': agent['suggested_specialty']})
+    return {'repaired_count': len(repaired), 'repaired': repaired}
 
 
 @app.post('/api/agents')
