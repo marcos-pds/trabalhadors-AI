@@ -17,13 +17,16 @@ function eventLabel(item) {
   if (kind === 'workspace_feedback_applied') return 'Ajuste recebido pelo trabalhador'
   if (kind === 'run_failed') return 'Tarefa falhou: ' + (item.error || 'verifique o chat')
   if (kind === 'run_completed') return 'Execução concluída'
+  if (kind === 'run_paused_limit') return 'Limite de ciclos atingido: checkpoint salvo'
+  if (kind === 'run_resumed') return 'Tarefa continuada a partir do checkpoint'
+  if (kind === 'worker_checkpoint_restored') return 'Contexto anterior do trabalhador restaurado'
   if (kind === 'run_status') return 'Estado: ' + (item.status || 'alterado')
   if (kind === 'step_status') return 'Etapa: ' + (item.status || 'executando')
   if (kind === 'provider_error') return 'Provedor retornou erro'
   return kind.replaceAll('_', ' ')
 }
 
-export default function ExecutionPanel({ api, runId, active, onStop, onClose, onFeedback }) {
+export default function ExecutionPanel({ api, runId, active, onStop, onClose, onFeedback, onResume }) {
   const [tab, setTab] = useState('activity')
   const [activity, setActivity] = useState(null)
   const [now, setNow] = useState(Date.now())
@@ -85,7 +88,10 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
     : isRunning ? 'Trabalhadores em atividade' :
       activity?.status === 'completed' ? 'Concluído' :
       activity?.status === 'cancelled' ? 'Parado' :
-      activity?.status === 'failed' ? 'Falhou' : 'Sem tarefa ativa'
+      activity?.status === 'paused_limit' ? 'Pausado por limite · progresso salvo' :
+      activity?.status === 'failed' ? 'Falhou por erro' : 'Sem tarefa ativa'
+  const canContinue = !isRunning && ['paused_limit', 'failed', 'cancelled'].includes(activity?.status)
+  const checkpoints = activity?.checkpoints || []
   const log = useMemo(() => (activity?.events || []).filter(event =>
     !['worker_heartbeat'].includes(event.event)).slice().reverse(), [activity])
 
@@ -122,11 +128,24 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         <strong className="text-sm">Central de execução</strong>
         <div className="flex items-center gap-2">
           {isRunning && <button type="button" onClick={onStop} className={btn + ' border-rose-300/30 text-rose-200'}>■ Parar tarefa</button>}
+          {canContinue && <button type="button" onClick={onResume} className={btn + ' border-violet-400/40 text-violet-200'}>↻ Continuar execução</button>}
           <button type="button" aria-label="Fechar painel" onClick={onClose} className={btn}>✕</button>
         </div>
       </div>
       <p role="status" className={'mt-2 text-xs ' + tone}>{isRunning ? '● ' : ''}{state}</p>
+      {activity?.error && <p role="alert" className="mt-2 break-words rounded-lg bg-amber-300/[.06] p-2 text-[11px] text-amber-200">{activity.error}</p>}
       <p className="mt-1 text-[10px] text-muted">{last ? 'Último evento: ' + Math.max(0, idle) + ' s atrás' : 'Nenhum evento recebido.'} · Sem atividade não significa necessariamente travamento.</p>
+      {checkpoints.length > 0 && <div className="mt-3 space-y-1 rounded-xl border border-violet-300/15 p-3">
+        <strong className="block text-[11px] text-violet-200">Checkpoint do trabalhador</strong>
+        {checkpoints.map(cp => <div key={cp.step_id} className="text-[11px] leading-5 text-muted">
+          <p>{cp.state==='paused_limit' ? 'Pausado e salvo' : cp.state==='completed' ? 'Etapa concluída' : 'Em execução'} · {cp.rounds_total} ciclos · {cp.actions_total} ações · {cp.resumes} retomada(s)</p>
+          <p>Última ação: <span className="break-all text-copy">{cp.last_action || 'Ainda não registrada'}</span></p>
+          {cp.last_result && <p className="break-words">Resultado: {cp.last_result.slice(0,220)}</p>}
+          {cp.changed_files?.length > 0 && <p className="break-words">Arquivos alterados: {cp.changed_files.join(', ')}</p>}
+          {cp.last_validation && <details><summary className="cursor-pointer text-violet-200">Última validação</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-[10px]">{cp.last_validation}</pre></details>}
+        </div>)}
+      </div>}
+      {activity?.steps?.length > 0 && !isRunning && <p className="mt-2 text-[10px] text-muted">Etapas: {activity.steps.map(x => x.name + ' (' + (x.status==='paused_limit'?'pausado':x.status) + ')').join(' → ')}</p>}
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={() => setTab('activity')} className={btn + (tab==='activity' ? ' border-violet-400 text-violet-200' : '')}>Atividade e logs</button>
         <button type="button" onClick={() => setTab('preview')} className={btn + (tab==='preview' ? ' border-violet-400 text-violet-200' : '')}>Prévia ao vivo</button>
