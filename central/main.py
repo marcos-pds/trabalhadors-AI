@@ -741,6 +741,75 @@ def pending_workspace_approvals(rid: str, request: Request, user=Depends(current
     return result
 
 
+class RunFeedbackIn(BaseModel):
+    message: str = Field(min_length=3, max_length=1800)
+
+
+@app.post('/api/runs/{rid}/feedback')
+def add_run_feedback(rid: str, data: RunFeedbackIn, request: Request,
+                     user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    run = require_owned(DB, 'runs', rid, user['id'])
+    if not run['autonomous'] or run['status'] not in ('queued', 'running', 'awaiting_approval'):
+        raise HTTPException(409, 'Não há uma execução autônoma ativa para receber ajustes.')
+    cleaned = data.message.strip()
+    if len(cleaned) < 3:
+        raise HTTPException(422, 'Descreva o ajuste desejado.')
+    pending = DB.one('SELECT COUNT(*) n FROM run_feedback WHERE run_id=? AND user_id=? AND consumed_at IS NULL',
+                     (rid, user['id']))['n']
+    if pending >= 12:
+        raise HTTPException(429, 'Muitos ajustes pendentes. Aguarde os trabalhadores processarem.')
+    feedback_id = uid()
+    DB.execute('INSERT INTO run_feedback(id,run_id,user_id,content,created_at) VALUES(?,?,?,?,?)',
+               (feedback_id, rid, user['id'], cleaned, utcnow()))
+    ENGINE.emit(rid, 'workspace_feedback_received',
+                {'id': feedback_id, 'message': cleaned, 'status': 'queued'})
+    return {'id': feedback_id, 'status': 'queued',
+            'message': 'Ajuste recebido. Será entregue ao agente na próxima etapa de raciocínio.'}
+
+
+@app.get('/api/runs/{rid}/activity')
+def run_activity(rid: str, user=Depends(current_user)):
+    run = require_owned(DB, 'runs', rid, user['id'])
+    events = DB.all('SELECT seq,event,payload,created_at FROM events WHERE run_id=? '
+                    'ORDER BY seq DESC LIMIT 70', (rid,))
+    allowed = {'run_created','run_status','step_status','model_selected',
+               'workspace_action_requested','workspace_action_result',
+               'worker_message','worker_phase','worker_heartbeat',
+               'workspace_approval_required','workspace_validation',
+               'workspace_feedback_received','workspace_feedback_applied',
+               'run_failed','run_completed','provider_error','failover'}
+    entries = []
+    for e in reversed(events):
+        if e['event'] not in allowed:
+            continue
+        data = json.loads(e['payload'])
+        # The activity feed is deliberately metadata-only; diffs and contents
+        # stay behind the existing authenticated approval UI.
+        summary = data.get('summary') or {}
+        entries.append({
+            'seq': e['seq'], 'event': e['event'], 'created_at': e['created_at'],
+            'step_id': data.get('step_id') or data.get('id'),
+            'stage': data.get('stage'),
+            'action': data.get('action') or summary.get('action'),
+            'path': data.get('path') or summary.get('path'),
+            'description': summary.get('description'),
+            'command': data.get('command'),
+            'success': data.get('success', data.get('ok')),
+            'model': data.get('model'),
+            'status': data.get('status'),
+            'error': data.get('error'),
+            'count': data.get('count'),
+        })
+    last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
+                        'ORDER BY seq DESC LIMIT 1', (rid,))
+    return {'run_id': rid, 'status': run['status'],
+            'updated_at': run['updated_at'],
+            'last_activity_at': last_event['created_at'] if last_event else run['created_at'],
+            'events': entries[-55:]}
+
+
 @app.get('/api/runs/{rid}/events')
 async def events(rid:str, request:Request, after:int=0, user=Depends(current_user)):
     require_owned(DB,'runs',rid,user['id'])
