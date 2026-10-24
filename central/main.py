@@ -19,6 +19,7 @@ from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
 from .task_contract import needs_workspace_tools
+from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT/'data'))
@@ -34,6 +35,7 @@ async def lifespan(app):
     ENGINE.resume_pending()
     yield
     ENGINE.shutting_down = True
+    stop_all_previews()
     pending = list(ENGINE.running.values())
     for task in pending:
         task.cancel()
@@ -767,6 +769,41 @@ def add_run_feedback(rid: str, data: RunFeedbackIn, request: Request,
                 {'id': feedback_id, 'message': cleaned, 'status': 'queued'})
     return {'id': feedback_id, 'status': 'queued',
             'message': 'Ajuste recebido. Será entregue ao agente na próxima etapa de raciocínio.'}
+
+
+class PreviewStartIn(BaseModel):
+    cwd: str = Field(default='', max_length=280)
+
+
+@app.get('/api/preview/projects')
+def preview_projects(request: Request, user=Depends(current_user)):
+    local_only(request)
+    permission = computer_policy(DB, user['id'])
+    if permission['mode'] == 'blocked':
+        return {'projects': [], 'status': 'blocked'}
+    return {'projects': preview_candidates(permission['folder']),
+            'status': 'available'}
+
+
+@app.get('/api/preview/status')
+def preview_status(request: Request, user=Depends(current_user)):
+    local_only(request)
+    return preview_info(user['id'])
+
+
+@app.post('/api/preview/start')
+def preview_start(data: PreviewStartIn, request: Request,
+                  user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    return start_preview(DB, user['id'], data.cwd)
+
+
+@app.post('/api/preview/stop')
+def preview_stop(request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    return stop_preview(user['id'])
 
 
 @app.get('/api/runs/{rid}/activity')
