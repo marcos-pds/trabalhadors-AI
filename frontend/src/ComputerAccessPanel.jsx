@@ -120,6 +120,14 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
             No Explorador de Arquivos ou VS Code, copie o caminho de uma pasta específica e cole aqui.
             O navegador não concede acesso a todo o disco automaticamente.
           </small>
+          <button type="button" className={button + ' mt-3'} disabled={!!busy}
+            onClick={async () => {
+              setBusy('folder'); setError('')
+              try {
+                const suggestion = await api('/computer-access/default-folder')
+                setFolder(suggestion.folder)
+              } catch (e) { setError(e.message) } finally { setBusy('') }
+            }}>Usar pasta da Central IA</button>
         </label>}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
