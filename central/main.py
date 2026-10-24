@@ -243,8 +243,17 @@ async def connect_provider(data: QuickProviderIn, request: Request, user=Depends
         return {'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
                 'model': model, 'models': catalog_with_connections(models, user['id'], data.kind), 'message': 'Conexão testada e salva.'}
     except ProviderError as exc:
-        # Never echo a key even if an upstream service includes it in an error.
-        message = str(exc).replace(key, '[chave omitida]') if key else str(exc)
+        # A listed model is not evidence of billing entitlement. Stop on credit errors
+        # rather than probing other models with the same account.
+        if data.kind == 'sambanova' and exc.category == 'credits':
+            status = f' (HTTP {exc.http_status})' if exc.http_status else ''
+            message = ('A SambaNova recusou o teste por falta de créditos/saldo ou '
+                       'cobrança não habilitada' + status + '. '
+                       'O catálogo não garante cota gratuita para sua conta. '
+                       'Confira o plano e os créditos no painel da SambaNova.')
+        else:
+            # Never echo a key even if an upstream service includes it in an error.
+            message = str(exc).replace(key, '[chave omitida]') if key else str(exc)
         raise HTTPException(422, message)
 
 
