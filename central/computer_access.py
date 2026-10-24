@@ -73,6 +73,7 @@ def set_policy(db, user_id, mode, folder):
                (user_id, mode, validated, utcnow()))
     # Cancel old approvals whenever the mode, path or permissions change.
     db.execute("DELETE FROM computer_access_approvals WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM workspace_action_approvals WHERE user_id=? AND status='pending'", (user_id,))
     return policy(db, user_id)
 
 
