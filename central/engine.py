@@ -138,12 +138,24 @@ class RunOrchestrator:
             self.queue.finish(rid, owner, state, row.get('error') if row else None)
 
     async def poll_jobs(self):
+        from .worker_liveness import beat, forget
+        previous = None
         try:
             while not self.shutting_down:
                 self.dispatch_ready()
+                now = asyncio.get_running_loop().time()
+                if previous is None or now - previous >= 5:
+                    active = sum(not task.done() for task in self.running.values())
+                    await asyncio.to_thread(
+                        beat, self.db, self.worker_owner, self.job_mode, active)
+                    previous = now
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
+        finally:
+            # Worker crashes leave a stale heartbeat until the freshness window
+            # expires; graceful shutdown removes it immediately.
+            await asyncio.to_thread(forget, self.db, self.worker_owner)
 
     def start_dispatcher(self):
         if self.job_mode != 'api' and (self.dispatch_task is None or self.dispatch_task.done()):
