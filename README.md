@@ -342,13 +342,12 @@ simbólicos/junções e caminhos fora da pasta são bloqueados. O usuário pode
 anexar um arquivo visualizado ao chat, mas nada é enviado a provedores
 externos até essa ação e o envio de uma mensagem.
 
-**Não é uma ferramenta de controle remoto nem uma capacidade automática dos
-agentes:** o motor de IA ainda não tem ferramentas nativas para executar
-comandos, modificar/apagar arquivos, clicar na tela ou controlar janelas.
-Os modos representam a política de autorização e já são impostos nas
-operações de visualização disponíveis. Para dar autonomia de edição aos
-agentes, será necessário integrar ferramentas específicas que verifiquem a
-política no servidor antes de cada operação.
+**Não é controle remoto irrestrito:** a exploração manual continua limitada
+a pastas e arquivos de texto. Agentes somente poderão criar pastas, editar
+código e executar a lista restrita de tarefas de desenvolvimento se o
+usuário ativar também a opção Autonomia no chat. Mouse, janelas, exclusões
+e comandos de shell arbitrários continuam fora do escopo. As operações
+dos agentes também são verificadas no servidor.
 
 O backend restringe essas rotas a acesso local, login e proteção contra
 requisições indevidas. O painel guarda somente a pasta autorizada, o modo
