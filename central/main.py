@@ -859,7 +859,15 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
 
 @app.get('/api/runs')
 def list_runs(user=Depends(current_user)):
-    rows=DB.all('SELECT id,conversation_id,prompt,status,mode,error,total_cost,budget_limit,created_at,updated_at FROM runs WHERE user_id=? ORDER BY created_at DESC LIMIT 100',(user['id'],))
+    rows=DB.all(
+        """SELECT r.id,r.conversation_id,r.prompt,r.status,r.mode,r.error,
+                  r.total_cost,r.budget_limit,r.created_at,r.updated_at
+           FROM runs r LEFT JOIN organization_runs x ON x.run_id=r.id
+           WHERE r.user_id=? AND (x.organization_id IS NULL OR
+                  x.organization_id IN
+                    (SELECT organization_id FROM organization_members WHERE user_id=?))
+           ORDER BY r.created_at DESC LIMIT 100""",
+        (user['id'],user['id']))
     for row in rows:
         row['delivery_verified']=False
         if row['status']=='completed':
