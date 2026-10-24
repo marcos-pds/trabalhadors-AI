@@ -473,15 +473,16 @@ class Engine:
 
     def cancel(self, run_id):
         from .workspace_tools import stop_run_commands
-        stop_run_commands(run_id)
-        # Pending approvals can never authorize an operation after cancellation.
+        row = self.db.one('SELECT status FROM runs WHERE id=?', (run_id,))
+        if not row or row['status'] in ('completed', 'failed', 'cancelled'):
+            return
+        # Update the durable state before returning HTTP 200. New feedback and
+        # approvals are rejected immediately, even while the task is unwinding.
+        self.db.execute("UPDATE runs SET status='cancelled',updated_at=? WHERE id=?",
+                        (utcnow(),run_id))
         self.db.execute("UPDATE workspace_action_approvals SET status='denied' WHERE run_id=? AND status='pending'", (run_id,))
+        self.emit(run_id, 'run_status', {'status': 'cancelled'})
+        stop_run_commands(run_id)
         t = self.running.get(run_id)
         if t and not t.done():
             t.cancel()
-            self.emit(run_id, 'worker_phase',
-                      {'stage': 'Parada solicitada; encerrando execução e comandos locais.'})
-        else:
-            self.db.execute("UPDATE runs SET status='cancelled',updated_at=? WHERE id=?",
-                            (utcnow(),run_id))
-            self.emit(run_id,'run_status',{'status':'cancelled'})
