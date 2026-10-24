@@ -582,3 +582,26 @@ Diagnóstico:
     npm run build
     python -m pytest tests/test_job_queue.py -q
     python -m pytest -q
+
+## Proteções operacionais iniciais por conta
+
+- O login bloqueia temporariamente uma identidade após seis senhas inválidas
+  em uma janela de quinze minutos (`central/auth_limits.py`). As tentativas
+  ficam no SQLite como hash do e-mail normalizado (nunca senha/texto puro).
+  A API retorna HTTP 429 com `Retry-After`. Esse mecanismo é uma defesa
+  inicial por conta, não um WAF/rate limit distribuído por IP.
+- Cada conta tem limite configurável por servidor de tarefas novas nas
+  últimas 24 horas e de runs ativos (`central/quotas.py`). Os limites
+  são verificados numa transação SQLite com o run e seu DAG, evitando
+  ultrapassagens por corrida entre processos locais.
+- Ajuste antes de iniciar a API com `CENTRAL_MAX_RUNS_PER_DAY` (padrão
+  100) e `CENTRAL_MAX_ACTIVE_RUNS` (padrão 4). Ultrapassar retorna HTTP
+  429. As cotas não substituem o orçamento estimado por run e não limitam
+  com precisão a fatura real de tokens dos provedores.
+- O painel Monitoramento mostra o consumo e limite dessas cotas
+  por usuário autenticado. Permissões empresariais e limites por empresa
+  ainda dependem de introduzir organizações e roles.
+
+Testes:
+
+    python -m pytest tests/test_auth_limits.py tests/test_quotas.py -q
