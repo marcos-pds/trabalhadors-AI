@@ -27,7 +27,7 @@ from .auth_limits import ensure_allowed as allow_login, failed as fail_login, su
 from .quotas import QuotaExceeded
 from .organizations import (
     ensure_personal, membership, require_org, require_project, visible_projects,
-    create_organization, set_member, remove_member, all_organizations)
+    create_organization, set_member, remove_member, all_organizations, require_run_write)
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -776,7 +776,9 @@ class ConversationProjectIn(BaseModel):
 def change_conversation_project(cid: str, data: ConversationProjectIn, request: Request,
                                 user=Depends(current_user)):
     require_csrf(request)
-    require_owned(DB, 'conversations', cid, user['id'])
+    current=require_owned(DB, 'conversations', cid, user['id'])
+    if current['project_id']:
+        require_project(DB,current['project_id'],user['id'],write=True)
     if data.project_id:
         require_project(DB,data.project_id,user['id'],write=True)
     active = DB.one("SELECT id FROM runs WHERE conversation_id=? AND user_id=? "
@@ -892,7 +894,7 @@ def get_run(rid:str,user=Depends(current_user)):
 @app.post('/api/runs/{rid}/resume')
 async def resume_run(rid:str,request:Request,user=Depends(current_user)):
     require_csrf(request)
-    run=require_owned(DB,'runs',rid,user['id'])
+    run=require_run_write(DB,rid,user['id'])
     if run['autonomous']:
         local_only(request)
     try: ENGINE.resume_run(rid)
@@ -905,7 +907,7 @@ async def resume_run(rid:str,request:Request,user=Depends(current_user)):
 @app.post('/api/runs/{rid}/cancel')
 async def stop_run(rid:str,request:Request,user=Depends(current_user)):
     require_csrf(request)
-    require_owned(DB,'runs',rid,user['id'])
+    require_run_write(DB,rid,user['id'])
     ENGINE.cancel(rid)
     ops_audit(DB,user['id'],'run_cancel_requested','run',rid)
     return {'ok':True}
@@ -919,7 +921,7 @@ class ApprovalIn(BaseModel):
 async def approve_step(rid:str,sid:str,data:ApprovalIn,request:Request,
                        user=Depends(current_user)):
     require_csrf(request)
-    require_owned(DB,'runs',rid,user['id'])
+    require_run_write(DB,rid,user['id'])
     step=DB.one('SELECT * FROM steps WHERE id=? AND run_id=?',(sid,rid))
     if not step or step['kind']!='approval' or step['status']!='awaiting_approval':
         raise HTTPException(409,'Não há aprovação pendente.')
@@ -935,7 +937,7 @@ async def approve_workspace_action(rid: str, approval_id: str,
                                    user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
-    run = require_owned(DB, 'runs', rid, user['id'])
+    run = require_run_write(DB,rid,user['id'])
     if not run['autonomous'] or run['status'] not in ('running', 'awaiting_approval'):
         raise HTTPException(409, 'A execução não está aguardando autorização de ferramentas.')
     outcome = decide_workspace_action(DB, user['id'], rid, approval_id, data.approved)
@@ -973,7 +975,7 @@ def add_run_feedback(rid: str, data: RunFeedbackIn, request: Request,
                      user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
-    run = require_owned(DB, 'runs', rid, user['id'])
+    run = require_run_write(DB,rid,user['id'])
     if not run['autonomous'] or run['status'] not in ('queued', 'running', 'awaiting_approval', 'paused_limit', 'failed'):
         raise HTTPException(409, 'Esta execução não aceita novos ajustes.')
     cleaned = data.message.strip()
