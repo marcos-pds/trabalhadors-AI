@@ -60,3 +60,22 @@ def test_api_only_release_gate_requires_live_dedicated_worker(monkeypatch):
                     if x['name']=='dedicated_worker_liveness')['status']=='failed'
     finally:
         db.close()
+
+
+def test_api_only_does_not_accept_embedded_worker(monkeypatch):
+    from central.worker_liveness import beat
+    monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE', 'local')
+    monkeypatch.setenv('CENTRAL_JOB_MODE', 'api')
+    db = Database(':memory:')
+    try:
+        beat(db, 'embedded-process', 'embedded')
+        checks = {item['name']: item for item in report(db)['checks']}
+        assert checks['dedicated_worker_liveness']['active_workers'] == 1
+        assert checks['dedicated_worker_liveness']['active_dedicated_workers'] == 0
+        assert checks['dedicated_worker_liveness']['status'] == 'failed'
+        beat(db, 'dedicated-process', 'worker')
+        checks = {item['name']: item for item in report(db)['checks']}
+        assert checks['dedicated_worker_liveness']['active_dedicated_workers'] == 1
+        assert checks['dedicated_worker_liveness']['status'] == 'passed'
+    finally:
+        db.close()
