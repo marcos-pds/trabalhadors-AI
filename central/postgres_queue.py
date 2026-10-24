@@ -134,7 +134,7 @@ class PostgresJobQueue:
                 existing = cur.fetchone()
             if existing and existing["user_id"] != user_id:
                 raise PermissionError("Cannot reassign a queued run to another user")
-            self.conn.execute(
+            changed = self.conn.execute(
                 """INSERT INTO central_jobs.queue(run_id,user_id)
                    VALUES(%s,%s)
                    ON CONFLICT(run_id) DO UPDATE SET
@@ -154,9 +154,14 @@ class PostgresJobQueue:
                                     THEN queue.lease_owner ELSE NULL END,
                    lease_until=CASE WHEN queue.state='claimed'
                                     THEN queue.lease_until ELSE NULL END,
-                   updated_at=clock_timestamp()""",
+                   updated_at=clock_timestamp()
+                   WHERE queue.user_id=EXCLUDED.user_id""",
                 (run_id, user_id),
             )
+            if changed.rowcount != 1:
+                # The predicate also covers two concurrent first-time inserts
+                # that both initially observed the run_id as absent.
+                raise PermissionError("Cannot reassign a queued run to another user")
         return True
 
     def claim(self, owner, *, per_user_limit=2):
