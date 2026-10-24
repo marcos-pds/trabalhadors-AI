@@ -138,6 +138,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         <p className="font-semibold text-violet-200">Workspace vinculado a esta tarefa</p>
         <p className="break-all font-mono">{activity.workspace_binding.folder}</p>
         <p>Permissão inicial: {activity.workspace_binding.initial_mode}
+          {' · '}Executor: {activity.workspace_binding.command_runner === 'docker' ? 'Docker isolado' : 'Host local'}
           {activity.workspace_binding.organization_id && ' · Organização: ' + activity.workspace_binding.organization_id.slice(0,8)}</p>
         <p>O caminho da tarefa não pode ser alterado durante a execução.</p>
       </div>}
