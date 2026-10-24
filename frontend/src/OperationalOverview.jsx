@@ -91,7 +91,14 @@ export default function OperationalOverview({ api }) {
             <span key={state} className="rounded-lg border border-white/10 px-3 py-2">{state}: {total}</span>)}
           {!Object.keys(info.job_queue?.states || {}).length && <span className="text-muted">Nenhuma tarefa enfileirada.</span>}
         </div>
-        <p className="mt-2 text-[10px] text-muted">Maior número de reservas por job: {info.job_queue?.max_attempts ?? 0}</p>
+        <p className="mt-2 text-xs">Workers ativos: <strong>{info.job_queue?.workers?.active_workers ?? '—'}</strong>
+          {' · '}Jobs em workers: <strong>{info.job_queue?.workers?.active_jobs_reported ?? '—'}</strong>
+          {' · '}Workers sem sinal recente: <strong>{info.job_queue?.workers?.stale_workers ?? '—'}</strong>
+        </p>
+        <p className="mt-2 text-[10px] text-muted">Maior número de reservas por job: {info.job_queue?.max_attempts ?? 0}.
+          {' '}Heartbeats válidos por {info.job_queue?.workers?.liveness_window_seconds ?? 20} segundos.
+          {' '}Comandos usam leases e no máximo {info.job_queue?.recovery_limit ?? 5} tentativas antes de exigir retomada manual.
+          {' '}Não é uma fila distribuída entre servidores.</p>
       </section>
       {info.alerts?.length > 0 && <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[.04] p-4">
         <h3 className="mb-3 text-xs font-semibold text-amber-200">Atenção operacional</h3>
