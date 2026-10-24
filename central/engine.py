@@ -8,6 +8,7 @@ from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .memory import build_memory
+from .agent_autonomy import autonomous_worker
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -51,9 +52,13 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
     return filtered[:3] if filtered else [next((a for a in candidates if a['specialty']=='coordination'), candidates[0])]
 
 
-def create_plan(agents):
+def create_plan(agents, sequential=False):
     if not agents: return []
-    jobs = [{'id': uid(), 'agent_id': a['id'], 'name': a['name'], 'kind': 'agent', 'deps': [], 'instructions': ''} for a in agents]
+    jobs = []
+    for a in agents:
+        deps = [jobs[-1]['id']] if sequential and jobs else []
+        jobs.append({'id': uid(), 'agent_id': a['id'], 'name': a['name'],
+                     'kind': 'agent', 'deps': deps, 'instructions': ''})
     return jobs
 
 
@@ -105,13 +110,13 @@ class Engine:
         task.add_done_callback(lambda _: self.running.pop(run_id, None) if self.running.get(run_id) is task else None)
 
     def resume_pending(self):
-        # This is safe for text-only generation; no external write tools are enabled.
+        # Queued steps can resume, but actions require a new explicit policy check.
         for row in self.db.all("SELECT id FROM runs WHERE status IN ('queued','running','awaiting_approval')"):
             self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (row['id'],))
             self.schedule(row['id'])
 
     def create_run(self, user_id, conversation_id, prompt, mode, agent_ids=None,
-                   flow=None, budget=None, idempotency_key=None):
+                   flow=None, budget=None, idempotency_key=None, autonomous=False):
         if idempotency_key:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
@@ -122,9 +127,16 @@ class Engine:
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
         else:
             chosen = discover_agents(agents, prompt, mode, agent_ids)
+            if autonomous and mode != 'manual' and not agent_ids:
+                # A sequential architect -> coder -> reviewer workflow communicates through
+                # persisted prior step outputs and avoids concurrent file writes.
+                def first(specialty):
+                    return next((a for a in agents if a['specialty'] == specialty), None)
+                sequence = [first('architecture'), first('code'), first('review')]
+                chosen = [a for a in sequence if a and a['enabled']]
             if not chosen: raise ValueError('Cadastre ou habilite pelo menos um trabalhador.')
-            plan = create_plan(chosen)
-            if len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
+            plan = create_plan(chosen, sequential=autonomous)
+            if not autonomous and len(chosen) > 1 and not any(a['specialty']=='review' for a in chosen):
                 reviewer = next((a for a in agents if a['specialty']=='review'), None)
                 if reviewer:
                     plan.append({'id':uid(),'agent_id':reviewer['id'],'name':reviewer['name'],
@@ -132,8 +144,8 @@ class Engine:
         run_id, now = uid(), utcnow()
         try:
             self.db.execute('''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
-             budget_limit,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
-             (run_id,user_id,conversation_id,prompt,'queued',mode,json.dumps(agent_ids or []),json.dumps(plan),budget,idempotency_key,now,now))
+             budget_limit,idempotency_key,created_at,updated_at,autonomous) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+             (run_id,user_id,conversation_id,prompt,'queued',mode,json.dumps(agent_ids or []),json.dumps(plan),budget,idempotency_key,now,now,int(autonomous)))
         except Exception:
             if idempotency_key:
                 existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
@@ -266,10 +278,18 @@ class Engine:
                     parts = []
                     started = time.monotonic()
                     try:
-                        async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
-                            parts.append(token)
-                            self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
-                        output = ''.join(parts)
+                        if run.get('autonomous'):
+                            output = await autonomous_worker(
+                                self.client, self.db, user, run['id'], sid, provider,
+                                self.security.decrypt(provider['api_key_enc']), model,
+                                system, messages, self.emit)
+                            self.emit(run['id'], 'token', {
+                                'step_id': sid, 'agent': agent['name'], 'text': output})
+                        else:
+                            async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
+                                parts.append(token)
+                                self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
+                            output = ''.join(parts)
                         if not output.strip(): raise ProviderError('response','Resposta vazia.',True)
                         health_event = self.health.record(provider['id'], model, success=True,
                             latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
