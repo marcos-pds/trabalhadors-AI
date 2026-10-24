@@ -85,6 +85,25 @@ CREATE TABLE IF NOT EXISTS events (
  event TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id,seq);
+CREATE TABLE IF NOT EXISTS worker_checkpoints (
+ step_id TEXT PRIMARY KEY REFERENCES steps(id) ON DELETE CASCADE,
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ folder TEXT NOT NULL,
+ transcript_json TEXT NOT NULL,
+ changed_files_json TEXT NOT NULL DEFAULT '[]',
+ observed_actions_json TEXT NOT NULL DEFAULT '[]',
+ validation_failures INTEGER NOT NULL DEFAULT 0,
+ rounds_total INTEGER NOT NULL DEFAULT 0,
+ actions_total INTEGER NOT NULL DEFAULT 0,
+ resumes INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL DEFAULT 'working',
+ last_action TEXT NOT NULL DEFAULT '',
+ last_result TEXT NOT NULL DEFAULT '',
+ last_validation TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_worker_checkpoints_run ON worker_checkpoints(run_id,user_id);
 CREATE TABLE IF NOT EXISTS run_feedback (
  id TEXT PRIMARY KEY,
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
