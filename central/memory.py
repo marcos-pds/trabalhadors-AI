@@ -29,7 +29,7 @@ STOP = frozenset((
 def terms(text):
     normalized = unicodedata.normalize('NFKD', text or '')
     normalized = ''.join(c for c in normalized if not unicodedata.combining(c)).lower()
-    return {t for t in re.findall(r'[a-z0-9_]{4,}', normalized) if t not in STOP}
+    return {t for t in re.findall(r'[a-z0-9_]{3,}', normalized) if t not in STOP}
 
 
 def recent_messages(db, user_id, conversation_id, limit, max_chars, current_prompt):
