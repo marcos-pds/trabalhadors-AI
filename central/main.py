@@ -20,6 +20,8 @@ from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
 from .task_contract import needs_workspace_tools, delivery_evidence
+from .observability import request_context, correlation_id, log_event, duration_ms
+from .run_policy import classify_task
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,6 +47,30 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
+
+
+@app.middleware('http')
+async def trace_requests(request: Request, call_next):
+    # IDs are for correlation only; do not treat client-supplied values as auth.
+    rid = correlation_id(request.headers.get('x-request-id'))
+    token = request_context.set(rid)
+    started = time.monotonic()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers['X-Request-ID'] = rid
+        return response
+    finally:
+        route = request.scope.get('route')
+        route_name = getattr(route, 'path', None)
+        # URL path can contain identifiers or sensitive query parameters. Do not log it.
+        safe_route = route_name or 'unmatched'
+        log_event('http_request', method=request.method, route=safe_route,
+                  http_status=status, duration_ms=duration_ms(started))
+        request_context.reset(token)
+
+
 FRONTEND_BUILD = ROOT/'static'/'build'
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 
