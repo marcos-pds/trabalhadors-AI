@@ -9,6 +9,7 @@ from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
+from .task_contract import is_implementation_request, assert_implementation_delivered
 
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
@@ -47,8 +48,18 @@ def discover_agents(agents, prompt, mode='auto', agent_ids=None):
     lower = prompt.lower()
     specialties = [name for name, words in KEYWORDS.items() if any(w in lower for w in words)]
     filtered = [a for a in candidates if a['specialty'] in specialties]
-    if mode == 'team' and not filtered:
-        filtered = [a for a in candidates if a['specialty'] in ('architecture','code','review')]
+    if mode == 'team':
+        # 'Equipe' must never be silently reduced to the single keyword match.
+        selected = filtered[:2]
+        for specialty in ('architecture', 'code', 'review'):
+            agent = next((a for a in candidates if a['specialty'] == specialty), None)
+            if agent and agent not in selected:
+                selected.append(agent)
+            if len(selected) >= 3:
+                break
+        if len(selected) < 2:
+            selected.extend(a for a in candidates if a not in selected)
+        return selected[:3]
     return filtered[:3] if filtered else [next((a for a in candidates if a['specialty']=='coordination'), candidates[0])]
 
 
@@ -120,6 +131,11 @@ class Engine:
         if idempotency_key:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
+        implementation = is_implementation_request(prompt)
+        if implementation and not autonomous:
+            raise ValueError(
+                'Você pediu implementação real, mas Autonomia está desativada. '
+                'Autorize a pasta correta em Computador e ative Autonomia antes de enviar.')
         agents = self.db.all('SELECT * FROM agents WHERE user_id=? AND enabled=1', (user_id,))
         if flow:
             nodes = validate_flow(flow, agents)
@@ -127,9 +143,8 @@ class Engine:
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
         else:
             chosen = discover_agents(agents, prompt, mode, agent_ids)
-            if autonomous and mode != 'manual' and not agent_ids:
-                # A sequential architect -> coder -> reviewer workflow communicates through
-                # persisted prior step outputs and avoids concurrent file writes.
+            if autonomous and mode == 'team' and not agent_ids:
+                # A deterministic, sequential team, regardless of keywords in the prompt.
                 def first(specialty):
                     return next((a for a in agents if a['specialty'] == specialty), None)
                 sequence = [first('architecture'), first('code'), first('review')]
@@ -141,6 +156,18 @@ class Engine:
                 if reviewer:
                     plan.append({'id':uid(),'agent_id':reviewer['id'],'name':reviewer['name'],
                                  'kind':'agent','deps':[p['id'] for p in plan],'instructions':'Revise as entregas anteriores; reporte problemas concretos e ressalvas.'})
+        if implementation:
+            selected_specialties = {
+                a['specialty'] for a in agents
+                if a['id'] in {p['agent_id'] for p in plan if p['kind'] == 'agent'}
+            }
+            if not selected_specialties.intersection({'code', 'frontend', 'backend'}):
+                raise ValueError(
+                    'Uma implementação precisa de Programador, Frontend ou Backend IA. '
+                    'Selecione Equipe ou inclua um trabalhador de programação.')
+            if mode == 'team' and 'review' not in selected_specialties:
+                raise ValueError(
+                    'Modo Equipe exige um Revisor IA habilitado para verificar a entrega.')
         run_id, now = uid(), utcnow()
         try:
             self.db.execute('''INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,
@@ -155,7 +182,9 @@ class Engine:
             self.db.execute('''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,instructions,status,created_at,updated_at)
              VALUES(?,?,?,?,?,?,?,?,?,?)''',
              (p['id'],run_id,p['agent_id'],p['kind'],p['name'],json.dumps(p['deps']),p['instructions'],'queued',now,now))
-        self.emit(run_id,'run_created',{'mode':mode,'plan':plan})
+        self.emit(run_id,'run_created',{'mode':mode,'plan':plan,
+                                       'requires_implementation': implementation,
+                                       'autonomous': bool(autonomous)})
         self.schedule(run_id)
         return run_id
 
@@ -177,13 +206,20 @@ class Engine:
                     if isinstance(outcome, BaseException):
                         raise outcome
             steps = self.db.all('SELECT * FROM steps WHERE run_id=?', (run_id,))
+            evidence = None
+            if is_implementation_request(run['prompt']):
+                evidence = assert_implementation_delivered(self.db, run)
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
             output = '\n\n'.join(f"## {s['name']}\n\n{s['output']}" for s in complete)
             if not output: output = 'Fluxo concluído.'
+            if evidence:
+                output += ('\n\n## Evidências verificadas\nArquivos modificados: ' +
+                           ', '.join(evidence['changed_files']) +
+                           '\nTestes/build aprovados após as alterações.')
             self.db.execute("UPDATE runs SET status='completed',output=?,updated_at=? WHERE id=?", (output,utcnow(),run_id))
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
-            self.emit(run_id,'run_completed',{'output':output})
+            self.emit(run_id,'run_completed',{'output':output, 'evidence': evidence})
         except asyncio.CancelledError:
             new_status = 'queued' if self.shutting_down else 'cancelled'
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
@@ -284,7 +320,9 @@ class Engine:
                                 self.security.decrypt(provider['api_key_enc']), model,
                                 system, messages, self.emit,
                                 validate_at_finish=agent['specialty'] not in (
-                                    'architecture', 'design', 'research', 'coordination'))
+                                    'architecture', 'design', 'research', 'coordination'),
+                                require_code_changes=(is_implementation_request(run['prompt']) and
+                                                      agent['specialty'] in ('code', 'frontend', 'backend')))
                             self.emit(run['id'], 'token', {
                                 'step_id': sid, 'agent': agent['name'], 'text': output})
                         else:
