@@ -110,7 +110,16 @@ def overview(db, user_id):
                 'message':'Tarefa ativa sem eventos registrados há mais de 10 minutos. '
                           'Verifique logs e aprovações antes de interromper.',
                 'count':1})
+    jobs = db.all(
+        """SELECT q.state, COUNT(*) AS total,
+                  MAX(q.attempts) AS max_attempts
+           FROM job_queue q JOIN runs r ON r.id=q.run_id
+           WHERE r.user_id=? GROUP BY q.state""", (user_id,))
     return {
+        'job_queue': {'durable':True, 'backend':'sqlite',
+                      'states':{row['state']:row['total'] for row in jobs},
+                      'max_attempts':max((row['max_attempts'] or 0 for row in jobs),
+                                         default=0)},
         'period_hours':24,
         'run_statuses':statuses,
         'last_24h':{
