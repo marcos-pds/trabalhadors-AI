@@ -185,3 +185,29 @@ def test_explicit_continuation_is_capped(workspace):
     engine = Engine(db, None)
     with pytest.raises(ValueError, match='Limite'):
         engine.resume_run('run')
+
+
+
+def test_nested_vite_application_uses_actual_build_instead_of_empty_python_compile(tmp_path):
+    from central.workspace_tools import validation_commands
+    root = tmp_path / 'granted'
+    nested = root / 'nova-studio' / 'apps' / 'web'
+    (nested / 'src').mkdir(parents=True)
+    (nested / 'package.json').write_text(
+        json.dumps({'name': 'nova-web', 'scripts': {'dev': 'vite', 'build': 'vite build'}}),
+        encoding='utf-8')
+    (nested / 'src' / 'App.tsx').write_text('export default null', encoding='utf-8')
+    checks = validation_commands(str(root), changed_files=[
+        'nova-studio/apps/web/src/App.tsx'])
+    assert checks == [{'action': 'command', 'command': 'npm_build',
+                       'cwd': 'nova-studio/apps/web'}]
+
+
+def test_no_project_with_real_build_or_python_files_cannot_fake_validation(tmp_path):
+    from central.workspace_tools import validation_commands
+    root = tmp_path / 'empty-js'
+    root.mkdir()
+    (root / 'package.json').write_text(
+        json.dumps({'scripts': {'dev': 'vite'}}), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='Nenhum build'):
+        validation_commands(str(root))
