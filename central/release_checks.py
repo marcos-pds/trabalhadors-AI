@@ -24,9 +24,10 @@ def report(db=None, probe_docker=False, backup_file=None):
         job_mode = os.environ.get('CENTRAL_JOB_MODE', 'embedded')
         checks.append({
             'name':'dedicated_worker_liveness',
-            'status': ('passed' if workers['active_workers'] > 0 else 'failed')
+            'status': ('passed' if workers['active_dedicated_workers'] > 0 else 'failed')
                       if job_mode == 'api' else 'not_checked',
             'active_workers':workers['active_workers'],
+            'active_dedicated_workers':workers['active_dedicated_workers'],
             'job_mode':job_mode,
             'scope':workers['scope'],
         })
@@ -54,8 +55,6 @@ def report(db=None, probe_docker=False, backup_file=None):
                            'detail': 'Backup inválido, chave incorreta ou integridade comprometida.'})
     else:
         checks.append({'name': 'encrypted_backup_recovery_point', 'status': 'not_checked'})
-    checks.append({'name': 'production_gate_summary', 'status': 'not_checked',
-                   'detail': 'Release remains blocked until external gates are evidenced.'})
     checks.extend({'name': name, 'status': 'requires_external_validation'} for name in (
         'docker_real_workloads', 'ollama_embedding_model', 'postgresql_migration',
         'distributed_queue', 'sso_identity_provider', 'tls_public_endpoint',
