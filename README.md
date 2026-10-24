@@ -657,3 +657,59 @@ Teste recomendado:
     npm run build
     python -m pytest tests/test_organizations.py -q
     python -m pytest -q
+
+## Fase 3 — proteção de workspace por tarefa e execução local assistida
+
+**Vínculo durável de workspace:** toda nova tarefa autônoma cria
+`run_workspace_bindings` no SQLite dentro da mesma transação da DAG,
+registrando o proprietário, organização, pasta local autorizada e modo
+de permissão no início. Os trabalhadores revalidam esse vínculo
+antes das ferramentas e depois de cada aprovação. Trocar/revogar a
+pasta durante o trabalho interrompe as ferramentas pendentes. Retomar
+uma tarefa autônoma antiga (sem vínculo) exige autorização explícita
+da pasta atual; tarefas novas não podem ser transferidas a outra pasta.
+
+**Isolamento lógico entre organizações:** uma pasta associada a uma
+organização não pode ser vinculada a outra quando seus caminhos são
+iguais, antepassados ou descendentes — inclusive entre runs históricas.
+Escolha uma pasta local separada para cada empresa/organização. Não
+altere vínculos do banco manualmente para reutilizar uma pasta.
+
+**Aprovação humana para comandos sensíveis:** instalações npm/pip,
+criação de .venv e npm ci requerem aprovação individual mesmo no
+modo Computador → Acesso total. Em organizações de equipe, TODOS
+os comandos de build, teste e instalação requerem aprovação por ação.
+Aprovações são pontuais, expiram e são invalidadas por mudança
+de pasta, alteração de papel ou cancelamento da tarefa.
+
+**Scripts de equipes desligados por padrão:** abrir a organização em
+Projetos → Organizações e permissões mostra uma nova configuração
+de execução local. Somente o administrador, usando conexão local
+autenticada, pode habilitar a opção digitando
+`AUTORIZO EXECUCAO LOCAL`. Desabilite imediatamente caso passe a
+utilizar fontes de código desconhecidas. Isso permite aos membros
+autorizados executar comandos de teste/build aprovados individualmente.
+Se a execução estiver bloqueada, os agentes poderão trabalhar nos
+arquivos autorizados, mas não declarar entrega verificada por build.
+
+**Limites de processos:** comandos locais têm até 45 segundos de
+execução, apenas 2 processos simultâneos por processo de worker,
+uma execução de comando por run e log de saída limitado a 9 KB.
+Saídas muito grandes são drenadas sem ficar inteiras na RAM da Central.
+
+**ATENÇÃO: não é uma sandbox de sistema operacional.** O isolamento
+de pastas implementado protege as chamadas das ferramentas da
+Central, mas scripts executados via npm/pip/pytest podem ler ou
+modificar outros diretórios acessíveis à conta do Windows/Linux.
+Não há ainda limite rígido de CPU/RAM nem identidade de SO por
+tenant. Não permita executar código de projetos não confiáveis.
+Para hospedagem multiusuário, ainda precisamos de container/VM
+isolado por tenant ou run, usuário do SO sem privilégios, sistema
+de arquivos montado sob política, rede restrita, limites de
+CPU/RAM e gerenciamento separado de chaves e credenciais.
+
+Verificação:
+
+    npm run build
+    python -m pytest tests/test_workspace_isolation.py -q
+    python -m pytest -q
