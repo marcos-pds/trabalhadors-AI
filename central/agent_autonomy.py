@@ -142,6 +142,18 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     for round_number in range(max_rounds):
         rounds_total += 1
         checkpoint()
+        remaining = max_rounds - round_number
+        if remaining <= 2:
+            emit(run_id, 'worker_budget_warning', {
+                'step_id': step_id, 'remaining_rounds': remaining,
+                'message': 'Limite de ciclos próximo. Salve a última ação e '
+                           'finalize uma parte verificável quando possível.'})
+            transcript.append({
+                'role': 'user',
+                'content': 'Restam ' + str(remaining) + ' ciclos nesta execução. '
+                           'Priorize concluir uma entrega verificável. '
+                           'Se precisar continuar depois, o checkpoint será salvo; '
+                           'não reinicie o projeto e não invente testes.'})
         feedback = consume_run_feedback(db, user_id, run_id)
         if feedback:
             emit(run_id, 'workspace_feedback_applied', {
