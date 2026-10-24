@@ -78,7 +78,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
         if policy(db, user_id) != grant:
             raise RuntimeError('A permissão da pasta foi alterada ou revogada. Trabalho interrompido.')
         chunks = []
-        async for part in client.stream(provider, key, model, system, transcript):
+        async for part in client.stream(dict(provider, _max_tokens=3000), key, model, system, transcript):
             chunks.append(part)
         raw = ''.join(chunks)
         try:
