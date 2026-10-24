@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS run_workspace_bindings (
  organization_id TEXT REFERENCES organizations(id),
  folder TEXT NOT NULL,
  initial_mode TEXT NOT NULL CHECK(initial_mode IN ('ask','full')),
+ command_runner TEXT NOT NULL DEFAULT 'host' CHECK(command_runner IN ('host','docker')),
  created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_binding_org
@@ -235,6 +236,12 @@ class Database:
             run_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(runs)')}
             if 'autonomous' not in run_cols:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
+            workspace_cols = {row['name'] for row in self.conn.execute(
+                'PRAGMA table_info(run_workspace_bindings)')}
+            if 'command_runner' not in workspace_cols:
+                self.conn.execute(
+                    "ALTER TABLE run_workspace_bindings ADD COLUMN command_runner "
+                    "TEXT NOT NULL DEFAULT 'host'")
             org_cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(organizations)')}
             if 'host_commands_enabled' not in org_cols:
                 self.conn.execute(
