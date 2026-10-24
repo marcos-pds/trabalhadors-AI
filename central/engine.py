@@ -9,6 +9,7 @@ from .providers import ProviderClient, ProviderError
 from .health import ProviderHealth
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
+from .worker_checkpoint import WorkerPaused, MAX_RESUMES, checkpoint_summary
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
                             assert_inspection_performed)
@@ -283,6 +284,25 @@ class Engine:
             self.db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                  (uid(),run['conversation_id'],run['user_id'],'assistant','Central IA',output,utcnow()))
             self.emit(run_id,'run_completed',{'output':output, 'evidence': evidence})
+        except WorkerPaused as paused:
+            error = str(paused)[:320]
+            paused_steps = self.db.all(
+                "SELECT step_id FROM worker_checkpoints "
+                "WHERE run_id=? AND state='paused_limit'", (run_id,))
+            for item in paused_steps:
+                self.db.execute(
+                    "UPDATE steps SET status='paused_limit',error=?,updated_at=? "
+                    "WHERE id=? AND run_id=? AND status='running'",
+                    (error, utcnow(), item['step_id'], run_id))
+                self.emit(run_id, 'step_status',
+                          {'id': item['step_id'], 'status': 'paused_limit', 'error': error})
+            self.db.execute(
+                "UPDATE runs SET status='paused_limit',error=?,updated_at=? WHERE id=?",
+                (error, utcnow(), run_id))
+            self.emit(run_id, 'run_paused_limit',
+                      {'error': error, 'message': 'Progresso salvo; clique em Continuar execução.',
+                       'checkpoints': checkpoint_summary(self.db, run['user_id'], run_id)})
+            self.emit(run_id, 'run_status', {'status': 'paused_limit'})
         except asyncio.CancelledError:
             new_status = 'queued' if self.shutting_down else 'cancelled'
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
@@ -291,9 +311,16 @@ class Engine:
             raise
         except Exception as ex:
             error = str(ex)[:320]
-            self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? WHERE run_id=? AND status='running'", (error,utcnow(),run_id))
+            failed_steps = self.db.all(
+                "SELECT id FROM steps WHERE run_id=? AND status='running'", (run_id,))
+            self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? "
+                            "WHERE run_id=? AND status='running'", (error,utcnow(),run_id))
+            for item in failed_steps:
+                self.emit(run_id, 'step_status',
+                          {'id': item['id'], 'status': 'failed', 'error': error})
             self.db.execute("UPDATE runs SET status='failed',error=?,updated_at=? WHERE id=?", (error,utcnow(),run_id))
             self.emit(run_id,'run_failed',{'error':error})
+            self.emit(run_id,'run_status',{'status':'failed'})
 
     async def execute_step(self, run, step):
         sid = step['id']
@@ -466,14 +493,42 @@ class Engine:
 
     def resume_run(self, run_id):
         from .workspace_tools import reset_run_commands
-        run = self.db.one('SELECT status FROM runs WHERE id=?', (run_id,))
-        if not run or run['status'] not in ('failed', 'cancelled'):
-            raise ValueError('Somente execuções interrompidas podem ser retomadas.')
+        from .computer_access import policy
+        run = self.db.one('SELECT * FROM runs WHERE id=?', (run_id,))
+        if not run or run['status'] not in ('failed', 'cancelled', 'paused_limit'):
+            raise ValueError('Somente tarefas pausadas, falhas ou canceladas podem ser retomadas.')
+        if self.running.get(run_id) and not self.running[run_id].done():
+            raise ValueError('A tarefa anterior ainda está encerrando. Tente novamente após a parada.')
+        checkpoints = self.db.all(
+            'SELECT step_id,folder,resumes FROM worker_checkpoints WHERE run_id=? AND user_id=?',
+            (run_id, run['user_id']))
+        if run['autonomous']:
+            grant = policy(self.db, run['user_id'])
+            if grant['mode'] == 'blocked' or not grant['folder']:
+                raise ValueError('Autorize a pasta original no botão Computador para continuar.')
+            if any(item['folder'] != grant['folder'] for item in checkpoints):
+                raise ValueError('A pasta autorizada mudou. Restaure a pasta original para continuar.')
+        if any(item['resumes'] >= MAX_RESUMES for item in checkpoints):
+            raise ValueError('Limite de continuações alcançado. Inicie nova tarefa com escopo menor.')
+        for item in checkpoints:
+            if self.db.one("SELECT status FROM steps WHERE id=? AND run_id=?",
+                           (item['step_id'], run_id))['status'] != 'completed':
+                self.db.execute(
+                    "UPDATE worker_checkpoints SET resumes=resumes+1,updated_at=? WHERE step_id=?",
+                    (utcnow(), item['step_id']))
         reset_run_commands(run_id)
-        # Preserve completed checkpoints and rerun only incomplete nodes.
-        self.db.execute("UPDATE steps SET status='queued',error=NULL WHERE run_id=? AND status IN ('failed','running','queued','rejected','awaiting_approval')", (run_id,))
-        self.db.execute("UPDATE runs SET status='queued',error=NULL,updated_at=? WHERE id=?", (utcnow(),run_id))
-        self.emit(run_id,'run_resumed',{'message':'Etapas concluídas foram preservadas.'})
+        self.db.execute("UPDATE workspace_action_approvals SET status='denied' "
+                        "WHERE run_id=? AND status='pending'", (run_id,))
+        # Completed workers and their outputs stay intact; the active step resumes.
+        self.db.execute(
+            "UPDATE steps SET status='queued',error=NULL,updated_at=? WHERE run_id=? "
+            "AND status IN ('failed','paused_limit','running','queued','rejected','awaiting_approval')",
+            (utcnow(), run_id))
+        self.db.execute("UPDATE runs SET status='queued',error=NULL,updated_at=? WHERE id=?",
+                        (utcnow(),run_id))
+        self.emit(run_id,'run_resumed',
+                  {'message':'Checkpoint restaurado; etapas concluídas preservadas.',
+                   'checkpoints': checkpoint_summary(self.db, run['user_id'], run_id)})
         self.schedule(run_id)
 
     def approve(self, run_id, step_id, approved):
