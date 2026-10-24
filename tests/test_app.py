@@ -174,3 +174,93 @@ def test_resume_after_provider_configuration_preserves_steps():
         run = wait_for(c,rid)
         assert run['status']=='completed',run['error']
         assert all(s['status']=='completed' for s in run['steps'])
+
+
+
+def test_project_memory_api_and_safe_cross_conversation_search():
+    from central.main import DB
+    with TestClient(app) as c, TestClient(app) as other:
+        account = register(c)
+        register(other)
+        pa = c.post('/api/projects', json={'name': 'Portal Alpha', 'description': 'API e login'}, headers=HEADERS)
+        pb = c.post('/api/projects', json={'name': 'Portal Beta'}, headers=HEADERS)
+        assert pa.status_code == 200, pa.text
+        assert pb.status_code == 200, pb.text
+        a, b = pa.json()['id'], pb.json()['id']
+        saved = c.put(f'/api/projects/{a}/memory', json={'notes': 'Decidido usar FastAPI e autenticação JWT.'}, headers=HEADERS)
+        assert saved.status_code == 200 and 'JWT' in saved.json()['memory_notes']
+        assert other.put(f'/api/projects/{a}/memory', json={'notes': 'invasão'}, headers=HEADERS).status_code == 404
+        assert c.put(f'/api/projects/{a}/memory', json={'notes': 'x' * 8001}, headers=HEADERS).status_code == 422
+        c1 = c.post('/api/conversations', json={'project_id': a, 'title': 'Login'}, headers=HEADERS).json()['id']
+        c2 = c.post('/api/conversations', json={'project_id': b, 'title': 'Login Beta'}, headers=HEADERS).json()['id']
+        c3 = new_convo(c)
+        other_chat = new_convo(other)
+        for cid, uid in [(c1, account['id']), (c2, account['id']), (c3, account['id'])]:
+            DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                       (uuid.uuid4().hex, cid, uid, 'user', None,
+                        'Discussimos autenticação com API REST e tokens.', 'now'))
+        other_user_id = other.get('/api/me').json()['id']
+        DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                   (uuid.uuid4().hex, other_chat, other_user_id, 'user',
+                    None, 'A API secreta é exclusiva do segundo usuário', 'now'))
+        scoped = c.get('/api/conversations/search', params={'q': 'API', 'project_id': a}).json()
+        assert {x['conversation_id'] for x in scoped} == {c1}
+        broad = c.get('/api/conversations/search', params={'q': 'API', 'scope': 'all'}).json()
+        assert {x['conversation_id'] for x in broad} == {c1, c2, c3}
+        assert all(x['conversation_id'] != other_chat for x in broad)
+        assert c.get('/api/conversations/search', params={'q': 'API', 'project_id': 'missing'}).status_code == 404
+        assert other.get(f'/api/conversations/{c1}/context-policy').status_code == 404
+        assert c.get(f'/api/conversations/{c3}/context-policy').json()['recent_message_limit'] == 6
+        assert c.patch(f'/api/conversations/{c3}/project', json={'project_id': a}, headers=HEADERS).status_code == 200
+        policy = c.get(f'/api/conversations/{c3}/context-policy').json()
+        assert policy['recent_message_limit'] == 32
+        assert policy['same_project_recall'] is True
+        assert policy['cross_project_recall'] is False
+        assert other.patch(f'/api/conversations/{c3}/project', json={'project_id': b}, headers=HEADERS).status_code == 404
+        assert c.patch(f'/api/conversations/{c3}/project', json={'project_id': 'missing'}, headers=HEADERS).status_code == 404
+
+
+def test_agents_receive_related_same_project_memories_but_not_other_projects():
+    from central.main import DB
+    with TestClient(app) as c:
+        user = register(c)
+        add_provider(c, 'healthy', 1)
+        project = c.post('/api/projects', json={'name': 'Portal'}, headers=HEADERS).json()['id']
+        other_project = c.post('/api/projects', json={'name': 'Fora'}, headers=HEADERS).json()['id']
+        assert c.put(f'/api/projects/{project}/memory', json={'notes': 'Framework decidido: FastAPI'}, headers=HEADERS).status_code == 200
+        earlier = c.post('/api/conversations', json={'project_id': project}, headers=HEADERS).json()['id']
+        outsider = c.post('/api/conversations', json={'project_id': other_project}, headers=HEADERS).json()['id']
+        current = c.post('/api/conversations', json={'project_id': project}, headers=HEADERS).json()['id']
+        DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                   (uuid.uuid4().hex, earlier, user['id'], 'user', None,
+                    'No fluxo de login autenticação, escolhemos refresh token.', 'now'))
+        DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                   (uuid.uuid4().hex, outsider, user['id'], 'user', None,
+                    'No fluxo de login autenticação, SENHA-DO-OUTRO-PROJETO', 'now'))
+
+        class CapturingFake(FakeClient):
+            inputs = []
+
+            async def stream(self, provider, key, model, system, messages):
+                self.inputs.append(messages[0]['content'])
+                async for chunk in super().stream(provider, key, model, system, messages):
+                    yield chunk
+
+        capture = CapturingFake()
+        ENGINE.client = capture
+        first_agent = c.get('/api/agents').json()[0]['id']
+        created = c.post('/api/runs', json={
+            'conversation_id': current,
+            'prompt': 'Revise o fluxo de autenticação e login.',
+            'mode': 'manual', 'agent_ids': [first_agent]}, headers=HEADERS)
+        assert created.status_code == 200, created.text
+        run = wait_for(c, created.json()['id'])
+        assert run['status'] == 'completed', run.get('error')
+        assert len(capture.inputs) == 1
+        sent = capture.inputs[0]
+        assert 'Framework decidido: FastAPI' in sent
+        assert 'refresh token' in sent
+        assert 'SENHA-DO-OUTRO-PROJETO' not in sent
+        assert 'Solicitação atual do usuário' in sent
+        events = DB.all('SELECT event,payload FROM events WHERE run_id=?', (created.json()['id'],))
+        assert any(e['event'] == 'memory_recalled' for e in events)
