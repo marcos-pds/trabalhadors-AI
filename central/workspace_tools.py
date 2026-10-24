@@ -22,9 +22,11 @@ from fastapi import HTTPException
 from .computer_access import allowed_folder, policy, scoped_path, RESTRICTED_NAMES
 from .database import uid, utcnow
 from .workspace_guard import enforce_run_scope, enforce_host_command_policy
+from .sandbox_executor import backend as command_backend, sandbox_argv, force_remove
 
 _process_lock = threading.RLock()
 _active_commands = {}
+_active_containers = {}
 _cancelled_command_runs = set()
 # Bound concurrent subprocesses per *server process*. Worker mode on a separate
 # process has a separate pool; this is not a machine-wide sandbox quota.
@@ -57,8 +59,11 @@ def stop_run_commands(run_id):
     with _process_lock:
         _cancelled_command_runs.add(run_id)
         process = _active_commands.get(run_id)
+        container = _active_containers.get(run_id)
     if process is not None:
         _kill_tree(process)
+    if container:
+        force_remove(container)
 
 
 MAX_WRITE_BYTES = 32000
@@ -218,14 +223,21 @@ def command_spec(folder, request):
         raise HTTPException(422, 'Comando não permitido. Use uma das tarefas de desenvolvimento disponíveis.')
     cwd = request.get('cwd', '')
     root = target(folder, cwd, directory=True)
-    npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
-    git = shutil.which('git.exe' if os.name == 'nt' else 'git')
+    docker_mode = command_backend() == 'docker'
+    if docker_mode and code in ('npm_ci','npm_install','pip_requirements',
+                                'pip_package','venv_create'):
+        raise HTTPException(
+            409,'Instalação de pacotes não suportada no executor isolado sem rede.')
+    npm = ('npm' if docker_mode else
+           shutil.which('npm.cmd' if os.name == 'nt' else 'npm'))
+    git = 'git' if docker_mode else shutil.which('git.exe' if os.name == 'nt' else 'git')
     local_python = root / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     # Never let a package installation mutate the Central's own interpreter or
     # another environment outside the granted workspace.
-    if code in ('pip_requirements', 'pip_package') and not local_python.is_file():
+    if code in ('pip_requirements', 'pip_package') and not docker_mode and not local_python.is_file():
         raise HTTPException(422, 'Crie uma .venv dentro desta pasta antes de instalar pacotes Python.')
-    python_bin = str(local_python) if local_python.is_file() else sys.executable
+    python_bin = ('python3' if docker_mode else
+                  str(local_python) if local_python.is_file() else sys.executable)
     if code.startswith('npm_') and not npm:
         raise HTTPException(422, 'npm não encontrado no PATH do Windows.')
     if code == 'git_status' and not git:
@@ -345,6 +357,7 @@ def execute(folder, request, run_id=None):
                 'success': False}
     proc = None
     reader = None
+    container_name = None
     output_tail = bytearray()
     total_output_bytes = [0]
 
@@ -372,20 +385,27 @@ def execute(folder, request, run_id=None):
                 return {'command': spec['label'], 'exit_code': None,
                         'output': 'Outro comando desta tarefa ainda está em execução.',
                         'success': False}
+            argv = spec['argv']
+            if command_backend() == 'docker':
+                argv, container_name = sandbox_argv(spec, request)
             proc = subprocess.Popen(
-                spec['argv'], cwd=str(spec['root']), env=env,
+                argv, cwd=str(spec['root']), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False,
                 shell=False,
                 creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
                 start_new_session=(os.name != 'nt'))
             if run_id:
                 _active_commands[run_id] = proc
+                if container_name:
+                    _active_containers[run_id] = container_name
         reader = threading.Thread(target=drain, daemon=True)
         reader.start()
         try:
             proc.wait(timeout=COMMAND_TIMEOUT)
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
+            if container_name:
+                force_remove(container_name)
             proc.wait(timeout=5)
             return {'command': spec['label'], 'exit_code': None,
                     'output': 'Tempo limite de 45 segundos excedido. Processo encerrado.',
@@ -400,6 +420,8 @@ def execute(folder, request, run_id=None):
     except (OSError, subprocess.TimeoutExpired) as exc:
         if proc:
             _kill_tree(proc)
+        if container_name:
+            force_remove(container_name)
         return {'command': spec['label'], 'exit_code': None,
                 'output': 'Falha ao iniciar ou encerrar ferramenta: ' + str(exc)[:250],
                 'success': False}
@@ -416,6 +438,8 @@ def execute(folder, request, run_id=None):
             with _process_lock:
                 if _active_commands.get(run_id) is proc:
                     _active_commands.pop(run_id, None)
+                if _active_containers.get(run_id) == container_name:
+                    _active_containers.pop(run_id, None)
         _command_slots.release()
 
 def issue_approval(db, user_id, run_id, step_id, folder, request, summary):
