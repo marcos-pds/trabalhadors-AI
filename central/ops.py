@@ -87,6 +87,29 @@ def overview(db, user_id):
                        'provider_id':p['id'], 'provider_name':p['name'],
                        'message':'Provedor com falhas consecutivas ou recuperação pendente.',
                        'count':int(p['consecutive_failures'] or 0)})
+    # A long quiet period is a warning, not a definitive claim that a job hung.
+    quiet_limit = datetime.now(timezone.utc) - timedelta(minutes=10)
+    active = db.all(
+        """SELECT r.id,r.status,
+                  COALESCE((SELECT e.created_at FROM events e
+                            WHERE e.run_id=r.id ORDER BY e.seq DESC LIMIT 1),
+                           r.updated_at) AS last_event_at
+           FROM runs r WHERE r.user_id=?
+           AND r.status IN ('queued','running','awaiting_approval')
+           ORDER BY r.updated_at ASC LIMIT 30""", (user_id,))
+    for item in active:
+        try:
+            last = datetime.fromisoformat(item['last_event_at'])
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if last < quiet_limit:
+            alerts.append({
+                'code':'run_quiet','severity':'warning','run_id':item['id'],
+                'message':'Tarefa ativa sem eventos registrados há mais de 10 minutos. '
+                          'Verifique logs e aprovações antes de interromper.',
+                'count':1})
     return {
         'period_hours':24,
         'run_statuses':statuses,
