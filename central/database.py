@@ -102,6 +102,12 @@ class Database:
         self.lock = threading.RLock()
         with self.lock:
             self.conn.executescript(SCHEMA)
+            # Idempotent migration for databases created before project memory existed.
+            cols = {row['name'] for row in self.conn.execute('PRAGMA table_info(projects)')}
+            if 'memory_notes' not in cols:
+                self.conn.execute("ALTER TABLE projects ADD COLUMN memory_notes TEXT NOT NULL DEFAULT ''")
+            self.conn.execute('CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(user_id,project_id,updated_at)')
+            self.conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id,conversation_id)')
 
     def execute(self, query, args=()):
         with self.lock:
