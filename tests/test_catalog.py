@@ -55,8 +55,8 @@ def test_openrouter_never_infers_zero_price_from_free_suffix():
     ])
     assert [m['id'] for m in candidates(models, 'openrouter')] == ['safe:free']
     assert [m['id'] for m in candidates(models, 'openrouter', 'paid')] == ['paid']
-    assert models[1]['billing'] == 'paid'
-    assert models[2]['billing'] == 'free'
+    assert next(m for m in models if m['id'] == 'paid')['billing'] == 'paid'
+    assert next(m for m in models if m['id'] == 'safe:free')['billing'] == 'free'
 
 
 def test_gemini_filters_generation_methods_and_uses_explicit_free_ids():
