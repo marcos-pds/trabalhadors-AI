@@ -40,7 +40,8 @@ def test_encrypted_backup_restore_integrity_and_no_overwrite(tmp_path, monkeypat
 def test_migration_ledger_is_idempotent_and_rejects_tampering():
     db = Database(':memory:')
     migrate(db)
-    assert len(db.all('SELECT * FROM schema_migrations')) == 9
+    from central.migrations import MIGRATIONS
+    assert len(db.all('SELECT * FROM schema_migrations')) == len(MIGRATIONS)
     db.execute("UPDATE schema_migrations SET checksum='altered'")
     with pytest.raises(RuntimeError, match='checksum'):
         migrate(db)
