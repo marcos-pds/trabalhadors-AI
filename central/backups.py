@@ -36,6 +36,8 @@ def create(db, data_dir, destination):
                 db.conn.backup(connection)
             if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('Snapshot integrity check failed')
+            if connection.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                raise ValueError('Snapshot foreign key check failed')
         finally:
             connection.close()
         if snapshot.stat().st_size > MAX_ARCHIVE:
@@ -90,11 +92,13 @@ def verify(source):
                         output.write(chunk)
                         if output.tell() > MAX_ARCHIVE:
                             raise ValueError('Backup database exceeds size limit')
-            db = sqlite3.connect('file:' + stage.as_posix() + '?mode=ro', uri=True)
+            db = sqlite3.connect(stage.resolve().as_uri() + '?mode=ro', uri=True)
             try:
                 integrity = db.execute('PRAGMA integrity_check').fetchone()
                 if not integrity or integrity[0] != 'ok':
                     raise ValueError('Backup SQLite integrity check failed')
+                if db.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                    raise ValueError('Backup SQLite foreign key check failed')
             finally:
                 db.close()
             return {'verified': True, 'encrypted': True,
@@ -112,8 +116,9 @@ def restore(source, destination):
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         if set(archive.namelist()) != {'manifest.json', 'central.sqlite3', 'secret.key'}:
             raise ValueError('Unexpected backup members')
-        if any(entry.file_size > MAX_ARCHIVE for entry in archive.infolist()):
-            raise ValueError('Archive member exceeds size limit')
+        if len(archive.infolist()) != 3 or any(
+                entry.file_size > MAX_ARCHIVE for entry in archive.infolist()):
+            raise ValueError('Archive member count or size is invalid')
         if json.loads(archive.read('manifest.json')) != {'format': 1, 'engine': 'sqlite'}:
             raise ValueError('Unsupported backup format')
         key = archive.read('secret.key')
@@ -129,6 +134,8 @@ def restore(source, destination):
             try:
                 if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise ValueError('Restored database integrity check failed')
+                if connection.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                    raise ValueError('Restored database foreign key check failed')
             finally:
                 connection.close()
             # Reserve the destination so POSIX rename cannot replace an empty folder.

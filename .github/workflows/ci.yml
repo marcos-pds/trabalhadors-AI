@@ -68,8 +68,8 @@ jobs:
               context: 'pytest/${{ matrix.os }}',
               description: (process.env.TEST_FAILURES || 'pytest failed').slice(0, 140)
             })
-      - name: Test connection stream parser
-        run: node --test frontend/src/catalogConnectionStream.test.mjs
+      - name: Test frontend streams and resource import controls
+        run: npm test
 
 
   docker-isolation:

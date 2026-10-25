@@ -81,10 +81,10 @@ export default function GitDraftPanel({ api, connection, onClose }) {
     </div>
     <p className="mt-2 text-xs text-muted">{connection.service} · {connection.repository}. As branches precisam existir. Preparar consulta os commits atuais; a publicação acontece após você revisar e aprovar o plano. O token precisa permitir criar revisões.</p>
     <form onSubmit={prepare} className="mt-3 grid gap-3 sm:grid-cols-2">
-      <label className="text-xs">Branch de origem<input required className={input} maxLength={200} value={head} onChange={e => update(setHead, e.target.value)} /></label>
-      <label className="text-xs">Branch de destino<input required className={input} maxLength={200} value={base} onChange={e => update(setBase, e.target.value)} /></label>
-      <label className="text-xs sm:col-span-2">Título<input required className={input} maxLength={200} value={title} onChange={e => update(setTitle, e.target.value)} /></label>
-      <label className="text-xs sm:col-span-2">Descrição<textarea className={input} rows={4} maxLength={10000} value={body} onChange={e => update(setBody, e.target.value)} /></label>
+      <label className="text-xs">Branch de origem<input required disabled={busy} className={input} maxLength={200} value={head} onChange={e => update(setHead, e.target.value)} /></label>
+      <label className="text-xs">Branch de destino<input required disabled={busy} className={input} maxLength={200} value={base} onChange={e => update(setBase, e.target.value)} /></label>
+      <label className="text-xs sm:col-span-2">Título<input required disabled={busy} className={input} maxLength={200} value={title} onChange={e => update(setTitle, e.target.value)} /></label>
+      <label className="text-xs sm:col-span-2">Descrição<textarea disabled={busy} className={input} rows={4} maxLength={10000} value={body} onChange={e => update(setBody, e.target.value)} /></label>
       <button className={button} disabled={busy}>Preparar plano para revisão</button>
     </form>
     {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}

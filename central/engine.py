@@ -386,6 +386,8 @@ class RunOrchestrator:
         user = run['user_id']
         agent = self.registry.get(user, step['agent_id'])
         if not agent: raise RuntimeError('Trabalhador não encontrado.')
+        from .addon_catalog import SkillContextClient
+        skill_client = SkillContextClient(self.client, self.db, self.security, user, run['id'], agent['id'])
         specialty = effective_specialty(agent)
         prev = self.db.all('SELECT name,output FROM steps WHERE run_id=? AND status=? AND output IS NOT NULL', (run['id'],'completed'))
         context = '\n\n'.join(f"{p['name']}:\n{p['output'][:2500]}" for p in prev)[:5500]
@@ -459,7 +461,7 @@ class RunOrchestrator:
                     try:
                         if run.get('autonomous'):
                             output = await autonomous_worker(
-                                self.client, self.db, user, run['id'], sid, provider,
+                                skill_client, self.db, user, run['id'], sid, provider,
                                 self.security.decrypt(provider['api_key_enc']), model,
                                 system, messages, self.emit,
                                 validate_at_finish=(is_implementation_request(run['prompt']) and
@@ -476,7 +478,7 @@ class RunOrchestrator:
                             self.emit(run['id'], 'token', {
                                 'step_id': sid, 'agent': agent['name'], 'text': output})
                         else:
-                            async for token in self.client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
+                            async for token in skill_client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
                                 parts.append(token)
                                 self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
                             output = ''.join(parts)
@@ -488,7 +490,7 @@ class RunOrchestrator:
                         price = 0.0
                         if provider['input_price'] is not None and provider['output_price'] is not None:
                             # This is an estimate: streaming tokens usage varies by API. Not billed cost.
-                            price = (len(messages[0]['content'])/4/1_000_000*provider['input_price']
+                            price = ((len(messages[0]['content']) + skill_client.context_chars)/4/1_000_000*provider['input_price']
                                 + len(output)/4/1_000_000*provider['output_price'])
                         self.db.execute("UPDATE steps SET status='completed',output=?,error=NULL,updated_at=? WHERE id=?",(output,utcnow(),sid))
                         self.db.execute('UPDATE runs SET total_cost=total_cost+?,updated_at=? WHERE id=?', (price,utcnow(),run['id']))

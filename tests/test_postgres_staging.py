@@ -72,6 +72,14 @@ def test_sqlite_dry_run_requires_no_postgres_and_never_leaks_secrets(source):
     assert db.one("SELECT prompt FROM runs WHERE id='r1'")["prompt"] == "TOP_SECRET_PROMPT"
 
 
+def test_sqlite_row_limit_is_enforced_without_postgres(source):
+    _, path = source
+    assert sum(staging.inspect_source(path, max_rows=5)['counts'].values()) == 5
+    for limit in (1, 2, 3, 4):
+        with pytest.raises(ValueError, match='row limit'):
+            staging.inspect_source(path, max_rows=limit)
+
+
 def test_stage_is_atomic_verified_and_discardable(pg, source):
     db, path = source
     batch = staging.stage_metadata(pg, path)

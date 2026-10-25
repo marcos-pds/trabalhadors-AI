@@ -98,6 +98,54 @@ def test_post_timeout_is_uncertain_and_is_never_automatically_retried(setup):
     assert len([req for req in requests if req.method == 'POST']) == 1
 
 
+@pytest.mark.parametrize('service,payload', [
+    ('github', {'number': 7, 'head': None}),
+    ('github', {'number': 7, 'base': []}),
+    ('github', {'number': 7, 'head': 'unexpected'}),
+    ('github', {'number': 2147483648}),
+    ('github', []),
+    ('gitlab', {'iid': 7, 'diff_refs': 'unexpected'}),
+])
+def test_malformed_post_response_is_uncertain_and_never_retried(setup, service, payload):
+    db, security = setup
+    connection = connect(db, security, 'alice', service, 'owner/repo', 'private-token')
+    _, reads = remote(service)
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main',
+                        'Fix', transport=reads)
+    writes = []
+    def respond(request):
+        if request.method == 'GET':
+            return reads.handle_request(request)
+        writes.append(request)
+        return httpx.Response(201, json=payload)
+    transport = httpx.MockTransport(respond)
+    with pytest.raises(HTTPException) as error:
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert error.value.status_code == 502
+    assert plans.status(db, 'alice', plan['id'])['state'] == 'uncertain'
+    with pytest.raises(HTTPException) as error:
+        plans.execute(db, security, 'alice', plan['id'], plan['confirmation'], transport)
+    assert error.value.status_code == 409
+    assert len(writes) == 1
+
+
+def test_string_draft_flag_cannot_confirm_draft_creation(setup):
+    db, security = setup
+    connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')
+    _, reads = remote()
+    plan = plans.create(db, security, 'alice', connection['id'], 'feature', 'main',
+                        'Fix', transport=reads)
+    def respond(request):
+        if request.method == 'GET':
+            return reads.handle_request(request)
+        return httpx.Response(201, json={'number': 7, 'draft': 'false',
+                              'head': {'sha': 'a' * 40}, 'base': {'sha': 'b' * 40}})
+    result = plans.execute(db, security, 'alice', plan['id'], plan['confirmation'],
+                           httpx.MockTransport(respond))
+    assert result['result']['draft'] is False
+    assert result['result']['requires_review'] is True
+
+
 def test_pagination_never_follows_external_link_or_forwards_credentials(setup):
     db, security = setup
     connection = connect(db, security, 'alice', 'github', 'owner/repo', 'private-token')

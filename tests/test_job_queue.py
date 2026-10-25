@@ -340,9 +340,10 @@ def test_migration_v8_is_additive_and_idempotent(tmp_path):
     from central.migrations import migrate
     db=Database(tmp_path/'migrate.db')
     try:
-        assert [r['version'] for r in db.all('SELECT version FROM schema_migrations')] == list(range(1,9))
+        from central.migrations import MIGRATIONS
+        assert [r['version'] for r in db.all('SELECT version FROM schema_migrations')] == [v for v, _, _ in MIGRATIONS]
         migrate(db)
-        assert len(db.all('SELECT version FROM schema_migrations'))==8
+        assert len(db.all('SELECT version FROM schema_migrations')) == len(MIGRATIONS)
         assert db.one("SELECT name FROM sqlite_master WHERE name='worker_liveness'")
     finally:
         db.close()

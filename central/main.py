@@ -1449,3 +1449,7 @@ def approve_git_plan(plan_id: str, data: GitPlanApprovalIn, user=Depends(current
     result = execute(DB, SEC, user['id'], plan_id, data.confirmation)
     ops_audit(DB, user['id'], 'git_draft_created', 'git_plan', plan_id)
     return result
+
+
+from .addon_api import router as resource_router
+app.include_router(resource_router(DB, SEC, current_user))

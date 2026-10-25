@@ -14,10 +14,22 @@ def main(argv=None):
     release.add_argument('--probe-docker', action='store_true')
     release.add_argument('--backup-file', help='Encrypted backup to verify without restoring')
     actions.add_parser('verify-backup').add_argument('source')
+    actions.add_parser('recovery-drill').add_argument('source')
     actions.add_parser('backup').add_argument('destination')
     restore = actions.add_parser('restore')
     restore.add_argument('source'); restore.add_argument('destination')
     args = parser.parse_args(argv)
+    if args.action == 'recovery-drill':
+        from .recovery_drill import rehearse
+        try:
+            result = rehearse(args.source)
+        except Exception:
+            # Never emit keys, ciphertext, database values or operator paths.
+            print(json.dumps({'verified': False, 'production_ready': False,
+                              'error': 'Recovery drill failed: check backup, key, schema and temporary storage.'}))
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0
     from .backups import create, restore as restore_backup, verify as verify_backup
     if args.action == 'verify-backup':
         print(json.dumps(verify_backup(args.source), indent=2))

@@ -1,6 +1,11 @@
 # Central de Trabalhadores IA
 
-**Versão 0.1.0 — MVP funcional, local e extensível.**
+**Versão 0.2.0 - MVP funcional, local e extensível.**
+
+A área **Skills e integrações** importa Skills como contexto selecionado de
+agentes e mantém pacotes VSIX/configurações MCP separados e inativos. Consulte
+[RESOURCES.md](RESOURCES.md) para formatos, confirmações, limites e permissões.
+Importar VSIX não instala no VS Code; importar MCP não conecta servidores.
 
 Plataforma multiagente em português: autenticação, chat com streaming SSE, agentes especializados, provedores com chaves criptografadas, roteamento por especialidade, execução paralela, dependências, modelos de reserva, retomada de checkpoints, fluxos persistidos e aprovação humana.
 
@@ -96,7 +101,7 @@ A aplicação **não procura preços ou disponibilidade em tempo real**; priorid
 7. Se uma tarefa falhar, o usuário pode configurar outro modelo e clicar em **Histórico → Retomar**; os nós já concluídos são preservados.
 8. Transmite eventos e tokens via SSE; o resultado consolidado aparece no histórico.
 
-**Regras de falha:** HTTP 401/403 e falta de créditos desabilitam o provedor; 429, timeouts e respostas HTTP 5xx têm tentativas limitadas. Retries fazem backoff com pequeno jitter; o circuit breaker temporário existe por processo. Nenhuma ferramenta externa com efeitos irreversíveis é executada nesta versão.
+**Regras de falha:** HTTP 401/403 e falta de créditos desabilitam o provedor; 429, timeouts e respostas HTTP 5xx têm tentativas limitadas. Retries fazem backoff com pequeno jitter; o circuit breaker temporário existe por processo. Operações Git de criação de rascunhos exigem aprovação de um plano e não são repetidas automaticamente após uma resposta incerta.
 
 ## Funcionalidades e limitações
 
@@ -117,13 +122,13 @@ A aplicação **não procura preços ou disponibilidade em tempo real**; priorid
 | Projetos para organizar conversas | ✅ Cadastro e associação básica |
 | Histórico e painel de monitoramento | ✅ Funcional com medições locais |
 | Orçamento por tarefa | ⚠ Verificação de estimativa, sem garantia de faturamento máximo |
-| Precificação oficial, latência observada, health check periódico | ❌ Não implementado |
-| Agentes capazes de modificar repositórios e executar ferramentas | ❌ Não implementado |
+| Preços e latência de provedores | Tarifas configuradas e latência observada; não consulta preços oficiais em tempo real |
+| Agentes capazes de modificar repositórios e executar ferramentas | Pasta autorizada, ferramentas delimitadas e aprovações; executor host ou Docker |
 | Editor avançado de nós condicionais, transformações, ferramentas, esperas | ❌ Não implementado |
-| Busca semântica, embeddings e memória RAG | ❌ Não implementado |
-| Work queues externas, escalabilidade entre máquinas | ❌ Não implementado |
+| Busca semântica, embeddings e memória RAG | Ollama opt-in, documentos privados/compartilhados e retenção; homologação com modelo real pendente |
+| Work queues externas, escalabilidade entre máquinas | PostgreSQL/Redis experimentais; aplicação continua usando SQLite |
 | Logs distribuídos, métricas históricas e tracing | ❌ Não implementado |
-| Sandboxing para execução de código e navegador remoto | ❌ Não implementado |
+| Sandboxing para execução de código e navegador remoto | Executor e prévia HTTP Docker; navegador remoto não implementado |
 | Segurança de implantação multi-tenant na internet | ❌ Requer auditoria, rate limit, TLS e infraestrutura adequada |
 
 ### Avisos de segurança
@@ -132,7 +137,7 @@ A aplicação **não procura preços ou disponibilidade em tempo real**; priorid
 - A pasta `data/` guarda as contas, conversas, API keys criptografadas e a **chave mestre** `secret.key`. **Faça backup da pasta inteira e nunca publique-a no GitHub.** Se perder `secret.key`, não será possível descriptografar as chaves já armazenadas.
 - O frontend não tem acesso às chaves de API; somente o backend realiza chamadas aos provedores.
 - Nunca conceda ao aplicativo chaves com privilégios desnecessários. Conteúdos enviados no chat podem ser transmitidos aos provedores habilitados, inclusive durante failover.
-- O editor atual não executa scripts arbitrários nem comandos shell inseridos por agentes. Agentes apenas **geram texto**.
+- Agentes podem ler e editar arquivos e solicitar comandos delimitados na pasta autorizada. Builds e testes executam código do projeto; habilite essas permissões apenas para pastas confiáveis e consulte os limites do executor Docker abaixo.
 - Custo apresentado na interface é **estimado pelo tamanho do texto** e pelas tarifas informadas por você. Não equivale a cobranças reais do provedor. Um orçamento estimado não oferece corte de gasto exato, sobretudo para tarefas paralelas.
 
 ## Testes
@@ -758,8 +763,8 @@ O mount de codigo e gravavel e um script pode ler todos os arquivos
 nesse mount; evite colocar credenciais, arquivos .env ou tokens nele.
 Projetos que possuem node_modules compilado para Windows podem falhar
 ao rodar testes numa imagem Linux. Prepare dependencias previamente
-em ambiente confiavel e compativel. O GitHub Actions simula o CLI Docker
-nos testes: nao comprova o funcionamento com Docker Desktop real.
+em ambiente confiavel e compativel. O GitHub Actions combina testes simulados
+com um job de Docker real em Linux; isso nao homologa Docker Desktop no Windows.
 Esse passo nao equivale a uma sandbox SaaS multitenant auditada.
 
 Diagnostico:
@@ -768,21 +773,13 @@ Diagnostico:
     python -m pytest tests/test_sandbox_executor.py -q
     python -m pytest -q
 
-### Etapas futuras pendentes
+### Etapas com implementação parcial
 
-- Fase 5: provisao segura de dependencias e previa isolada, rede e proxy.
-- Fase 6: memoria semantica por projeto/organizacao, embeddings e RAG.
-- Fase 7: refatorar servicos (RunOrchestrator, AgentRegistry,
-  ProviderManager, WorkspaceExecutor, ApprovalEngine) e templates.
-- Fase 8: integrar GitHub/GitLab, CLI, revisao de codigo e deploy seguro.
-- Fase 9: PostgreSQL, migracoes versionadas, Redis/fila distribuida,
-  idempotencia e observabilidade distribuida.
-- Fase 10: identidade enterprise, gestao de segredos, backup criptografado,
-  SSO/convites, auditoria, TLS e revisao de politicas por tenant.
-- Fase 11: experiencia do produto, preview/editor, exportacoes,
-  comparacao de provedores por custo/latencia e monitoramento visual.
-- Fase 12: homologacao de producao, carga, pentest, disaster recovery
-  e estrategia de deploy/escalabilidade.
+O [ROADMAP.md](ROADMAP.md) registra as entregas e os critérios restantes por fase.
+Entre as pendências estão Docker Desktop e Ollama reais, deploy aprovado,
+migração de produção para PostgreSQL, workers distribuídos, SSO/TLS, revisão
+visual, carga, pentest e recuperação externa. Os protótipos PostgreSQL/Redis
+não substituem o armazenamento e a fila SQLite da aplicação.
 
 Nenhuma das fases futuras deve ser apresentada como concluida antes
 de implementacao, testes e validacao em ambiente real.
@@ -800,8 +797,30 @@ isso evita enfraquecer acidentalmente as politicas de uma execucao.
 
 ## Fases 5 a 12: implementação e homologação
 
+### Ensaio local de recuperação de backup
+
+Com `CENTRAL_BACKUP_KEY` configurada fora do repositório, execute:
+
+```powershell
+.\.venv\Scripts\python.exe -m central.cli recovery-drill C:\Backups\central.enc
+```
+
+O comando restaura em uma pasta temporária, verifica o registro atual de
+migrações e testa a descriptografia das chaves de provedores e tokens Git com
+a chave incluída no backup. Remove a cópia ao terminar e apresenta apenas
+contagens e resultados. Não abre o banco ativo, aplica migrações, inicia
+workers ou chama provedores. Código de saída: `0` para ensaio aprovado e `1`
+para falha. Uma base sem credenciais é identificada como tal.
+
+Backups antigos precisam de um plano separado de compatibilidade; o ensaio
+exige o registro de migrações da versão atual. Esta verificação não testa
+validade das credenciais nos provedores nem substitui recuperação fora da
+máquina. O resultado não autoriza produção.
+
 O status atualizado, comandos e critérios pendentes estão em [ROADMAP.md](ROADMAP.md).
 A implementação local inclui dependências npm/Python, prévia HTTP Docker,
 memória semântica opcional, serviços separados, revisões GitHub/GitLab,
 exportação, migrações SQLite, convites e backup criptografado.
-PostgreSQL, Redis distribuído, SSO e homologação de produção continuam pendentes.
+Há protótipos isolados de fila PostgreSQL, sinais Redis e ensaio de migração de
+metadados. A integração deles na aplicação, SSO e homologação de produção
+continuam pendentes.

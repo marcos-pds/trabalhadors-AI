@@ -1,11 +1,15 @@
 """Encrypted recovery point checks must not restore over a live database."""
 import json
+import io
+import sqlite3
+import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-from central.backups import create, verify
+from central.backups import create, verify, restore
 from central.cli import main as cli
 from central.database import Database, utcnow
 from central.release_checks import report
@@ -107,3 +111,66 @@ def test_absent_backup_is_not_silently_accepted(tmp_path,monkeypatch):
         assert status=='not_checked'
     finally:
         db.close()
+
+
+def test_verify_handles_reserved_uri_characters_in_temp_path(encrypted_snapshot,
+                                                            tmp_path, monkeypatch):
+    _, _, file, _ = encrypted_snapshot
+    directory = tmp_path / 'verification # Unicode'
+    directory.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(directory))
+    assert verify(file)['verified'] is True
+
+
+@pytest.mark.parametrize('operation', ['verify', 'restore'])
+def test_duplicate_archive_members_are_rejected(encrypted_snapshot, tmp_path, operation):
+    _, _, file, key = encrypted_snapshot
+    cipher = Fernet(key.encode())
+    raw = io.BytesIO(cipher.decrypt(file.read_bytes()))
+    with zipfile.ZipFile(raw, 'a') as archive:
+        with pytest.warns(UserWarning, match='Duplicate name'):
+            archive.writestr('manifest.json', json.dumps({'format': 1, 'engine': 'sqlite'}))
+    malformed = tmp_path / 'duplicate.enc'
+    malformed.write_bytes(cipher.encrypt(raw.getvalue()))
+    destination = tmp_path / 'restored'
+    with pytest.raises(ValueError, match='member count'):
+        verify(malformed) if operation == 'verify' else restore(malformed, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize('operation', ['verify', 'restore'])
+def test_orphaned_rows_fail_recovery_validation(encrypted_snapshot, tmp_path, operation):
+    _, _, file, key = encrypted_snapshot
+    cipher = Fernet(key.encode())
+    with zipfile.ZipFile(io.BytesIO(cipher.decrypt(file.read_bytes()))) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    broken = tmp_path / 'orphaned.sqlite3'
+    broken.write_bytes(members['central.sqlite3'])
+    connection = sqlite3.connect(broken)
+    try:
+        connection.execute("INSERT INTO sessions VALUES('token','missing-user','2099-01-01')")
+        connection.commit()
+        assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    finally:
+        connection.close()
+    members['central.sqlite3'] = broken.read_bytes()
+    raw = io.BytesIO()
+    with zipfile.ZipFile(raw, 'w') as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    malformed = tmp_path / 'orphaned.enc'
+    malformed.write_bytes(cipher.encrypt(raw.getvalue()))
+    destination = tmp_path / 'restored'
+    with pytest.raises(ValueError, match='foreign key'):
+        verify(malformed) if operation == 'verify' else restore(malformed, destination)
+    assert not destination.exists()
+
+
+def test_backup_creation_rejects_orphaned_rows(encrypted_snapshot, tmp_path):
+    db, directory, _, _ = encrypted_snapshot
+    db.execute('PRAGMA foreign_keys=OFF')
+    db.execute("INSERT INTO sessions VALUES('token','missing-user','2099-01-01')")
+    destination = tmp_path / 'invalid.enc'
+    with pytest.raises(ValueError, match='foreign key'):
+        create(db, directory, destination)
+    assert not destination.exists()

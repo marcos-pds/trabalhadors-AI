@@ -117,9 +117,12 @@ def _read_source(path, max_rows=MAX_ROWS):
                          snapshot.execute('PRAGMA table_info("' + name + '")')}
             if not set(columns).issubset(available):
                 raise ValueError("Source schema is missing staging columns")
+            remaining = max_rows - sum(len(value) for value in rows.values())
             sql = ('SELECT ' + ",".join('"' + column + '"' for column in columns)
-                   + ' FROM "' + name + '" ORDER BY id')
-            rows[name] = [tuple(record) for record in snapshot.execute(sql)]
+                   + ' FROM "' + name + '" ORDER BY id LIMIT ?')
+            # Fetch one extra row to detect overflow without materializing the
+            # entire table before enforcing the operator's limit.
+            rows[name] = [tuple(record) for record in snapshot.execute(sql, (remaining + 1,))]
             if sum(len(value) for value in rows.values()) > max_rows:
                 raise ValueError("Source exceeds staging row limit")
         # SQLite permits cross-tenant references unless additionally checked.

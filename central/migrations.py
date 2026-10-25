@@ -10,6 +10,7 @@ from .invitations import SCHEMA as INVITATIONS_SCHEMA
 from .git_integrations import SCHEMA as GIT_SCHEMA
 from .knowledge import SCHEMA as KNOWLEDGE_SCHEMA
 from .git_change_plans import SCHEMA as GIT_PLAN_SCHEMA
+from .addon_schema import SCHEMA as ADDON_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -32,6 +33,7 @@ MIGRATIONS = (
     (8, 'job_queue_lease_token', (
         'ALTER TABLE job_queue ADD COLUMN lease_token TEXT',
     )),
+    (9, 'inert_resources_and_skill_bindings', ADDON_SCHEMA),
 )
 
 

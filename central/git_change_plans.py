@@ -236,13 +236,19 @@ def execute(db, security, user_id, plan_id, confirmation, transport=None):
         # No automatic retries. A transport error after this point is uncertain.
         posted = True
         response, _ = gateway.request('POST', suffix, payload)
+        if not isinstance(response, dict):
+            raise ValueError('Expected review object')
         number = response['number' if gateway.github else 'iid']
-        if type(number) is not int or number < 1:
+        if type(number) is not int or not 1 <= number <= 2147483647:
             raise ValueError('Invalid review number')
+        for field in (('head', 'base') if gateway.github else ('diff_refs',)):
+            if field in response and not isinstance(response[field], dict):
+                raise ValueError('Invalid review commit references')
         actual_sha = response.get('head', {}).get('sha') if gateway.github else response.get('sha')
         actual_base = (response.get('base', {}).get('sha') if gateway.github else
                        (response.get('diff_refs') or {}).get('start_sha'))
-        actual_draft = response.get('draft', response.get('work_in_progress', False))
+        actual_draft = (response.get('draft') is True or
+                        (not gateway.github and response.get('work_in_progress') is True))
         result = {'number': number, 'url': ('https://github.com/' + plan['repository'] + '/pull/' + str(number)
                   if gateway.github else 'https://gitlab.com/' + plan['repository'] + '/-/merge_requests/' + str(number)),
                   'draft': bool(actual_draft), 'head_matches_plan': actual_sha == plan['head_sha'],

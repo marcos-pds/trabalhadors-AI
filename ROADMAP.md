@@ -398,3 +398,97 @@ dados criptografados, backup independente, CDC ou parada coordenada,
 fencing nas ferramentas, rollback de operação e homologação externa.
 Nenhum `CENTRAL_DATABASE_URL` ou alternância automática de backend foi
 habilitado.
+
+
+## Revisão do projeto em 25/10/2026
+
+Base remota conferida: `2f901a3aa5f16009978b47a3c33b8581fd094083` do PR #8.
+A cópia local estava 57 commits atrás. Os 29 arquivos diferentes foram trazidos
+pela integração GitHub, pois o Git local não resolveu o host. O commit local
+`351dd55` registra esse snapshot; não reproduz o histórico dos 57 commits.
+O CI da base remota terminou com sucesso no run `40133496621`. Esse resultado
+não valida automaticamente os ajustes locais posteriores.
+
+Correções desta revisão:
+
+- Respostas malformadas após criar PR/MR passam a estado incerto, sem nova
+  tentativa de escrita. Flags textuais como `"false"` não confirmam rascunho.
+- Verificação e restauração rejeitam membros duplicados e relações SQLite
+  quebradas. A criação também rejeita registros órfãos. Caminhos temporários
+  com `#` são codificados corretamente na URI SQLite de leitura.
+- O ensaio de migração limita as linhas retornadas por tabela antes de
+  materializá-las. A cópia SQLite consistente continua em memória; esse limite
+  de linhas não estabelece um limite de bytes para o banco inteiro.
+- Campos do plano Git ficam desabilitados durante a solicitação, evitando
+  editar o formulário enquanto uma resposta do plano anterior está chegando.
+- README atualizado para 0.2.0 e para os recursos já implementados, mantendo
+  explícita a condição experimental de PostgreSQL/Redis.
+
+Validação local: 212 testes Python aprovados, 24 ignorados por dependências ou
+serviços opcionais ausentes, 6 deselecionados por dependerem de asyncio/sockets;
+4 testes JavaScript aprovados, build React e compileall aprovados. Foram
+adicionados 14 casos de regressão. A seleção cobriu 22 módulos de testes;
+não representa a suíte integral. Uma tentativa com TestClient travou em
+`socket._fallback_socketpair` do Python 3.15 e foi encerrada. Os testes foram
+preservados para execução no CI com Python 3.11. Não houve homologação visual,
+acesso a provedores pagos ou nova execução de Docker/PostgreSQL/Redis reais.
+
+A revisão não encerra as fases pendentes nem certifica prontidão de produção.
+
+
+### Fase 10 — Ensaio local de recuperação de credenciais
+
+`python -m central.cli recovery-drill <backup.enc>` restaura o backup em uma
+pasta temporária, usando o caminho real de restore, e abre somente essa cópia
+em modo de leitura. Confere o registro completo de migrações e seus checksums
+contra a versão atual, sem aplicar bootstrap ou migrações. Descriptografa as
+credenciais de `providers.api_key_enc` e `git_connections.token_enc` com a
+chave contida no backup, independentemente de CENTRAL_SECRET_KEY do ambiente.
+
+O resultado apresenta apenas contagens e estados; não exibe segredos, IDs,
+conteúdos ou caminhos. Credenciais vazias/ausentes não são contabilizadas como
+testadas. Limites: 100.000 credenciais no total e 1 MiB de ciphertext por
+credencial. Backup íntegro com chave de credenciais incorreta é rejeitado.
+A cópia temporária é removida inclusive em falhas de validação; falhas de
+limpeza também impedem um resultado aprovado. A remoção normal de arquivos
+não representa apagamento forense seguro do armazenamento.
+
+O CLI retorna 0 para sucesso ou 1 com mensagem sanitizada em caso de falha,
+sem abrir o banco ativo ou consultar provedores. Não migra backups antigos,
+não certifica validade de tokens no provedor, não verifica arquivos de
+workspaces nem substitui recuperação offsite. `production_ready` permanece
+false; SSO/OIDC, TLS implantado e revisão externa continuam pendentes.
+
+Validação desta entrega: 11 casos novos de ensaio, 32 testes aprovados no
+conjunto de recuperação, backups, fundamentos e release-check; compileall e
+ajuda do CLI aprovados. Dados e chaves utilizados eram temporários de teste;
+nenhum backup ou credencial real do usuário foi utilizado.
+
+
+### Skills, VSIX e MCP — recursos distintos (migração SQLite 9)
+
+Entrega local descrita em [RESOURCES.md](RESOURCES.md). Skills têm importação
+com prévia e confirmação, ativação separada, escopo pessoal/organizacional,
+associações explícitas por agente/projeto/execução e contexto real limitado
+nos dois caminhos do motor. Contexto é efêmero por chamada, sujeito a
+revalidação de acesso e orçamento, sem copiar o pacote para checkpoints.
+Scripts/anexos de Skills não são executados nem carregados pelo modelo.
+
+VSIX tem inspeção estática e gestão de pacotes, sem instalação no VS Code.
+MCP tem gestão de configurações declarativas inativas; não há transporte,
+descoberta de ferramentas, chamada remota, execução stdio ou credenciais MCP.
+Importar não ativa, compartilhar exige confirmação e administrador. Pacotes e
+metadados são criptografados com o mecanismo existente, com validação de ZIP,
+limites de recursos e auditoria sem conteúdo. As regras de workspace,
+aprovação, cotas e Docker não foram relaxadas.
+
+Validação: 286 testes Python na seleção ampliada, 25 ignorados e sete
+ desselecionados por limites do ambiente; 23 testes Node e build React
+aprovados. A suíte integral foi tentada, mas bloqueou na criação de sockets
+no Python 3.15 local e foi interrompida. Os testes não foram removidos do CI.
+O novo conftest direciona o banco da aplicação para pasta temporária antes
+de importar módulos, preservando os dados locais do operador.
+
+Ficam pendentes a suíte integral nesta versão em ambiente compatível,
+homologação visual, ponte autenticada VS Code e transporte MCP com segurança
+de rede/processos e autorização por ferramenta. A Central segue um MVP local.
