@@ -34,6 +34,17 @@ MIGRATIONS = (
         'ALTER TABLE job_queue ADD COLUMN lease_token TEXT',
     )),
     (9, 'inert_resources_and_skill_bindings', ADDON_SCHEMA),
+    (10, 'resource_run_participation', (
+        "CREATE TABLE resource_run_usage("
+        "id TEXT PRIMARY KEY,resource_id TEXT REFERENCES ai_resources(id) ON DELETE SET NULL,"
+        "run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,"
+        "user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+        "agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,"
+        "kind TEXT NOT NULL CHECK(kind IN ('skill','vsix','mcp')),"
+        "sha256 TEXT NOT NULL,used_at TEXT NOT NULL,"
+        "UNIQUE(resource_id,run_id,agent_id,sha256))",
+        'CREATE INDEX resource_run_usage_owner_time ON resource_run_usage(user_id,used_at)',
+    )),
 )
 
 

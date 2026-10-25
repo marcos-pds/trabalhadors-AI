@@ -13,7 +13,7 @@ const bundled = buildSync({ entryPoints: [fileURLToPath(new URL('./ResourcesPane
   external: ['react', 'react/jsx-runtime'] }).outputFiles[0].text
 const module = { exports: {} }
 new Function('require', 'module', 'exports', bundled)(createRequire(import.meta.url), module, module.exports)
-const { ImportReview } = module.exports
+const { ImportReview, ResourceStatuses } = module.exports
 
 for (const [kind, name] of [['skill', 'SKILL.md'], ['skill', 'pack.zip'], ['vsix', 'example.vsix'], ['mcp', 'server.json']]) {
   test('accepts compatible local file: ' + name, () => assert.doesNotThrow(() => preflight(kind, name, 100)))
@@ -86,3 +86,14 @@ for (const kind of ['skill', 'vsix', 'mcp']) {
     assert.ok(resourceKinds[kind].notice)
   })
 }
+
+test('resource UI shows distinct status signals', () => {
+  const item = { kind: 'skill', import_status: 'imported', validation_status: 'validated', enabled: true,
+    associated: true, availability: 'requires_run_context' }
+  const html = renderToStaticMarkup(React.createElement(ResourceStatuses, { item }))
+  assert.match(html, /Importado/)
+  assert.match(html, /Validado/)
+  assert.match(html, /Habilitado/)
+  assert.match(html, /Associado/)
+  assert.match(html, /Disponibilidade depende da execu/)
+})

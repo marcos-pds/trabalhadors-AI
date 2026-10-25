@@ -471,7 +471,7 @@ Entrega local descrita em [RESOURCES.md](RESOURCES.md). Skills têm importação
 com prévia e confirmação, ativação separada, escopo pessoal/organizacional,
 associações explícitas por agente/projeto/execução e contexto real limitado
 nos dois caminhos do motor. Contexto é efêmero por chamada, sujeito a
-revalidação de acesso e orçamento, sem copiar o pacote para checkpoints.
+revalidação de acesso e orçamento, sem copiar o pacote para checkpoints. Os estados de importação, validação, habilitação, associação e disponibilidade são exibidos separadamente; a disponibilidade por execução tem endpoint autenticado. A migração 10 registra quais Skills entraram no contexto por execução/agente, guardando apenas IDs, hash e horário, sem conteúdo.
 Scripts/anexos de Skills não são executados nem carregados pelo modelo.
 
 VSIX tem inspeção estática e gestão de pacotes, sem instalação no VS Code.

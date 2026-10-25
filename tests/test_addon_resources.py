@@ -337,12 +337,37 @@ def test_activation_binding_and_revocation_are_explicit(catalog):
         catalog.state('alice', saved['id'], 'active', 'not-confirmed')
     catalog.state('alice', saved['id'], 'active', saved['sha256'])
     assert catalog.context('alice', run, 'alice-agent')[0]['text'] == 'PRIVATE_SKILL_CONTEXT'
+    assert catalog.availability('alice', saved['id'], run, 'alice-agent') == {
+        'resource_id': saved['id'], 'available_for_current_run': True, 'reason': 'selected'}
+    documents = catalog.context('alice', run, 'alice-agent')
+    catalog.record_usage('alice', run, 'alice-agent', documents)
+    catalog.record_usage('alice', run, 'alice-agent', documents)
+    usage = catalog.db.all('SELECT * FROM resource_run_usage WHERE run_id=?', (run,))
+    assert len(usage) == 1 and usage[0]['resource_id'] == saved['id']
+    assert 'PRIVATE_SKILL_CONTEXT' not in str(dict(usage[0]))
+    assert catalog.get('alice', saved['id'])['associated']
     catalog.state('alice', saved['id'], 'inactive', saved['sha256'])
     assert catalog.context('alice', run, 'alice-agent') == []
     catalog.state('alice', saved['id'], 'active', saved['sha256'])
     catalog.state('alice', saved['id'], 'revoked', saved['sha256'])
     assert catalog.context('alice', run, 'alice-agent') == []
     assert not catalog.db.all('SELECT * FROM skill_bindings')
+
+
+def test_resource_states_are_distinct_and_unavailable_kinds_stay_inactive(catalog):
+    skill = imported(catalog)
+    vsix = imported(catalog, 'vsix', raw=raw_vsix())
+    mcp = imported(catalog, 'mcp', raw=json.dumps(MCP).encode())
+    assert (skill['import_status'], skill['validation_status'], skill['enabled'],
+            skill['associated'], skill['availability']) == ('imported', 'validated', False, False, 'disabled')
+    assert vsix['availability'] == 'not_installed' and not vsix['enabled']
+    assert mcp['availability'] == 'not_connected' and not mcp['enabled']
+    _, run = run_fixture(catalog)
+    assert catalog.availability('alice', mcp['id'], run, 'alice-agent')['available_for_current_run'] is False
+    with pytest.raises(HTTPException):
+        catalog.availability('bob', skill['id'], run, 'alice-agent')
+    with pytest.raises(HTTPException):
+        catalog.availability('alice', skill['id'], 'foreign-run', 'alice-agent')
 
 
 def test_org_sharing_roles_and_current_membership(catalog):

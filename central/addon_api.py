@@ -101,6 +101,10 @@ def router(db, security, current_user):
     def detail(resource_id: str, user=Depends(actor)):
         return catalog.get(user, resource_id)
 
+    @api.get('/{resource_id}/availability')
+    def availability(resource_id: str, run_id: str, agent_id: str, user=Depends(actor)):
+        return catalog.availability(user, resource_id, run_id, agent_id)
+
     @api.post('/{resource_id}/state')
     async def state(resource_id: str, request: Request, user=Depends(actor)):
         data = await body(request, ['state', 'confirmation'])

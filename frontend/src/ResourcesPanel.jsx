@@ -3,6 +3,20 @@ import { createResourceClient, resourceKinds, searchMarketplace } from './resour
 
 const button = 'rounded-xl border border-white/20 px-3 py-2 text-sm disabled:opacity-40'
 const input = 'rounded-lg border border-white/20 bg-panel p-2 text-sm'
+const statusLabel = { imported: 'Importado', validated: 'Validado', enabled: 'Habilitado',
+  associated: 'Associado', disabled: 'Desabilitado', not_associated: 'Sem associação',
+  requires_run_context: 'Disponibilidade depende da execução', not_connected: 'MCP não conectado',
+  not_installed: 'VSIX não instalado' }
+
+export function ResourceStatuses({ item }) {
+  return <div className="flex flex-wrap gap-2 text-xs" aria-label="Estados do recurso">
+    <span>{statusLabel[item.import_status] || 'Importado'}</span>
+    <span>{statusLabel[item.validation_status] || 'Validado'}</span>
+    <span>{item.enabled ? statusLabel.enabled : statusLabel.disabled}</span>
+    {item.kind === 'skill' && <span>{item.associated ? statusLabel.associated : statusLabel.not_associated}</span>}
+    <span>{statusLabel[item.availability] || item.availability}</span>
+  </div>
+}
 
 export function ImportReview({ preview, consent, busy, onConsent, onConfirm, onCancel }) {
   return <section className="space-y-3 rounded-2xl border border-violet-400/30 p-4" aria-label="Revisão de importação">
@@ -125,9 +139,12 @@ export default function ResourcesPanel({ api, data, me }) {
       })} onCancel={() => perform(cancelPreview)} />}
     <section className="space-y-2" aria-label="Recursos importados">
       <h2 className="font-semibold">Recursos importados</h2>
-      {items.filter(item => item.kind === kind).map(item => <button key={item.id} disabled={busy || !!preview || !!action} className={button + ' mr-2'} onClick={() => perform(async () => {
-        setSelected(await api('/resources/' + encodeURIComponent(item.id))); setOrg(item.organization_id || ''); setTarget('')
-      })}>{item.metadata.name} · {item.metadata.version} · {item.state} · {item.organization_id ? 'Organização' : 'Pessoal'}</button>)}
+      {items.filter(item => item.kind === kind).map(item => <div key={item.id} className="space-y-2 rounded-xl border border-white/10 p-3">
+        <button disabled={busy || !!preview || !!action} className={button} onClick={() => perform(async () => {
+          setSelected(await api('/resources/' + encodeURIComponent(item.id))); setOrg(item.organization_id || ''); setTarget('')
+        })}>{item.metadata.name} — {item.metadata.version} — {item.state} — {item.organization_id ? 'Organização' : 'Pessoal'}</button>
+        <ResourceStatuses item={item} />
+      </div>)}
       {!items.some(item => item.kind === kind) && <p className="text-sm text-muted">Nenhum recurso deste tipo.</p>}
     </section>
     {selected && !preview && <section className="space-y-3 rounded-2xl border border-white/15 p-4" aria-label="Detalhes do recurso">

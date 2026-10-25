@@ -20,8 +20,8 @@ de pastas em `computer_access.py`, vínculo imutável de workspace, aprovações
 no executor e Docker opcional. Esses componentes continuam responsáveis por
 autorizar qualquer ferramenta. Nenhum comando foi acrescentado ao executor.
 
-A migração SQLite **9**, aditiva e com checksum, cria `ai_resources` e
-`skill_bindings`. Conteúdo e metadados são criptografados com a chave existente
+As migrações SQLite **9 e 10**, aditivas e com checksum, criam `ai_resources`,
+`skill_bindings` e o registro mínimo `resource_run_usage`. Conteúdo e metadados são criptografados com a chave existente
 da Central. Proprietário, organização, tipo, SHA-256, estado, tamanho, data e
 origem genérica ficam no registro. Caminhos locais de importação não são
 persistidos. A versão pertence aos metadados imutáveis; uma nova versão exige
@@ -243,8 +243,9 @@ npm run build
 
 `tests/conftest.py` define uma pasta temporária antes de importar a aplicação,
 para nunca aplicar migrações ao banco local do usuário durante pytest.
-Os novos testes exercitam os parsers, RBAC, escopos, confirmações, expiração,
-revogação, contexto nos dois caminhos do motor, limites e UI renderizada.
+Os testes exercitam os parsers, RBAC, escopos, confirmações, expiração,
+revogação, estados distintos, disponibilidade por execução, registro idempotente
+de Skills oferecidas ao modelo, limites e UI renderizada.
 O CI inclui a suíte Python e os novos testes Node, além do build React.
 
 Referências de formato: [manifesto VS Code](https://code.visualstudio.com/api/references/extension-manifest)
