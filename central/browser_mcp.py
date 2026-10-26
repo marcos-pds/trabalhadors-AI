@@ -4,6 +4,7 @@ from contextlib import AsyncExitStack
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 from urllib.parse import urlsplit
@@ -136,7 +137,7 @@ def validate_request(request):
     if 'device' in arguments and arguments['device'] not in ('desktop', 'mobile'):
         raise ValueError('Dispositivo Lighthouse inválido.')
     if 'handleBeforeUnload' in arguments and arguments['handleBeforeUnload'] not in (
-            'accept', 'dismiss'):
+            'accept', 'decline'):
         raise ValueError('Tratamento de navegação inválido.')
     if 'uid' in arguments and (
             not isinstance(arguments['uid'], str) or len(arguments['uid']) > 80):
@@ -244,7 +245,37 @@ async def _open_session(db, user_id, run_id):
 
 def _pages(result):
     structured = getattr(result, 'structuredContent', None) or {}
-    return structured.get('pages', []) if isinstance(structured, dict) else []
+    pages = structured.get('pages') if isinstance(structured, dict) else None
+    if isinstance(pages, list):
+        return pages
+    # The pinned server normally returns a human-readable "## Pages" block.
+    # Structured content is optional, so parse only that block and validate
+    # each URL again before exposing it or allowing a page-scoped call.
+    pages = []
+    for block in getattr(result, 'content', []) or []:
+        if getattr(block, 'type', '') != 'text':
+            continue
+        in_pages = False
+        for line in getattr(block, 'text', '').splitlines():
+            if line.strip() == '## Pages':
+                in_pages = True
+                continue
+            if in_pages and line.startswith('## '):
+                break
+            if not in_pages:
+                continue
+            match = re.fullmatch(r'\s*(\d+):\s*(.+?)\s*', line)
+            if not match:
+                continue
+            label = match.group(2)
+            label = re.sub(r' isolatedContext=\S+$', '', label)
+            selected = label.endswith(' [selected]')
+            if selected:
+                label = label[:-len(' [selected]')]
+            url = label.rsplit(' (', 1)[-1].removesuffix(')')
+            pages.append({'id': int(match.group(1)), 'url': url,
+                          'selected': selected})
+    return pages
 
 
 def _page_is_local(page):

@@ -270,6 +270,14 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 }
                 if not required_tools.issubset(observed_actions):
                     missing = ', '.join(sorted(required_tools - observed_actions))
+                    fingerprint = hashlib.sha256(json.dumps(
+                        command, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                    consecutive_rejected_finishes = (
+                        consecutive_rejected_finishes + 1
+                        if fingerprint == last_rejected_finish else 1)
+                    last_rejected_finish = fingerprint
+                    last_action = 'finish_sem_navegador'
+                    last_result = 'Verificações DevTools pendentes: ' + missing
                     transcript.extend([
                         {'role': 'assistant', 'content': raw[:1000]},
                         {'role': 'user', 'content':
@@ -279,6 +287,12 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                          'os problemas encontrados e só então conclua.'},
                     ])
                     checkpoint()
+                    if consecutive_rejected_finishes >= 2:
+                        raise ProviderError(
+                            'response',
+                            'O modelo repetiu a conclusão sem executar as verificações '
+                            'Chrome DevTools exigidas. Tentando outro provedor.',
+                            retryable=False)
                     continue
             if require_code_changes and not changed_files:
                 fingerprint = hashlib.sha256(json.dumps(

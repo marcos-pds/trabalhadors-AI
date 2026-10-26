@@ -135,6 +135,7 @@ def delivery_evidence(db, run_id):
         "AND event IN ('workspace_action_result','workspace_validation') ORDER BY seq",
         (run_id,))
     changes, reads, validations, references, browser_tools = [], [], [], [], set()
+    browser_events = []
     last_change_seq = 0
     last_browser_seq = 0
     for row in rows:
@@ -154,6 +155,7 @@ def delivery_evidence(db, run_id):
                                   'step_id': payload.get('step_id')})
                 if summary.get('action') == 'browser_tool':
                     browser_tools.add(summary.get('tool', ''))
+                    browser_events.append((row['seq'], summary.get('tool', '')))
                     last_browser_seq = row['seq']
                 if payload.get('success') is True:
                     references.extend(payload.get('references', []))
@@ -176,6 +178,8 @@ def delivery_evidence(db, run_id):
         'changed_count': len(changes),
         'references': unique_references[:24],
         'browser_tools': sorted(browser_tools),
+        'browser_tools_after_last_change': sorted({tool for seq, tool in browser_events
+                                                   if seq > last_change_seq}),
         'last_change_seq': last_change_seq,
         'last_browser_seq': last_browser_seq,
         'tests_passed': bool(validations and validations[-1]['passed']),
@@ -205,8 +209,8 @@ def assert_implementation_delivered(db, run, require_browser=False,
             'alterado antes da conclusão.')
     if require_browser:
         required = {'take_snapshot', 'list_console_messages', 'lighthouse_audit'}
-        browser = set(evidence['browser_tools'])
-        if not required.issubset(browser) or evidence['last_change_seq'] >= evidence['last_browser_seq']:
+        browser = set(evidence['browser_tools_after_last_change'])
+        if not required.issubset(browser):
             missing = ', '.join(sorted(required - browser))
             raise RuntimeError(
                 'Entrega não validada no Chrome DevTools MCP após a última alteração. '

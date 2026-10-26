@@ -158,3 +158,29 @@ def test_browser_mcp_closes_session_and_locks_at_run_end():
         assert key not in browser_mcp._session_locks
 
     asyncio.run(scenario())
+
+def test_browser_mcp_parses_text_only_page_listing_without_trusting_urls():
+    result = SimpleNamespace(structuredContent=None, content=[
+        SimpleNamespace(type='text', text=(
+            '## Pages\n1: about:blank\n'
+            '2: NOVA STUDIO (http://127.0.0.1:53210/) [selected]\n'
+            '3: https://example.com/\n'
+            '4: http://localhost:8765/docs [selected] isolatedContext=project\n')),
+    ])
+    pages = browser_mcp._pages(result)
+    assert pages == [
+        {'id': 1, 'url': 'about:blank', 'selected': False},
+        {'id': 2, 'url': 'http://127.0.0.1:53210/', 'selected': True},
+        {'id': 3, 'url': 'https://example.com/', 'selected': False},
+        {'id': 4, 'url': 'http://localhost:8765/docs', 'selected': True},
+    ]
+    assert [page['id'] for page in pages if browser_mcp._page_is_local(page)] == [2, 4]
+
+def test_browser_mcp_accepts_only_supported_before_unload_values():
+    base = {'action': 'browser_tool', 'tool': 'navigate_page',
+            'arguments': {'pageId': 1, 'url': 'http://localhost:53210/',
+                          'handleBeforeUnload': 'decline'}}
+    assert validate_request(base)[0] == 'navigate_page'
+    base['arguments']['handleBeforeUnload'] = 'dismiss'
+    with pytest.raises(ValueError, match='navega'):
+        validate_request(base)

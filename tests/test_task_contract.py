@@ -219,3 +219,17 @@ def test_document_summary_requires_content_read_not_just_file_names():
     evidence = assert_inspection_performed(
         db, {'id': 'run', 'prompt': 'Leia os documentos e resuma o projeto'})
     assert len(evidence['inspected']) == 2
+
+def test_every_required_browser_check_must_follow_last_edit():
+    db = FakeEvents()
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'browser_tool', 'tool': 'take_snapshot'})
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'replace', 'path': 'src/App.jsx'})
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'})
+    db.add('workspace_validation', passed=True, results=[])
+    with pytest.raises(RuntimeError, match='Ferramentas pendentes'):
+        assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
