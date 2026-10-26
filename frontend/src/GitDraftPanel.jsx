@@ -32,7 +32,7 @@ export default function GitDraftPanel({ api, connection, onClose }) {
     event.preventDefault(); setBusy(true); setError(''); setNotice(''); setPlan(null)
     try {
       setPlan(await api('/git/connections/' + encodeURIComponent(connection.id) + '/draft-plans',
-        'POST', { head, base, title, body }))
+        'POST', { repository: connection.repository, head, base, title, body }))
       await refreshHistory()
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }

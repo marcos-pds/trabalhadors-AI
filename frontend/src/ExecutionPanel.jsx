@@ -8,9 +8,26 @@ function eventLabel(item) {
   if (kind === 'worker_heartbeat') return 'IA ainda processando'
   if (kind === 'worker_phase') return item.stage || 'Trabalhador em ação'
   if (kind === 'model_selected') return 'Modelo selecionado: ' + (item.model || 'não informado')
+  if (kind === 'skill_context_selected') {
+    const selected = (item.selected_skills || []).map(skill => skill.name)
+    return selected.length
+      ? 'Skills no contexto: ' + selected.join(', ')
+      : item.available_count
+        ? 'Skills ativas encontradas: ' + (item.available_skills || []).join(', ') +
+          (item.inventory_truncated ? ' (lista parcial)' : '') +
+          '; nenhuma foi relevante para este pedido'
+        : 'Nenhuma Skill ativa vinculada ao projeto ou trabalhador desta execução'
+  }
   if (kind === 'workspace_action_requested') return 'Iniciando: ' + (item.description || item.action || 'ferramenta')
   if (kind === 'workspace_action_result') return (item.success ? 'Concluído: ' : 'Falhou: ') + (item.description || item.action || 'ferramenta')
-  if (kind === 'worker_message') return 'Agente: ' + (item.action || 'ação') + (item.command || item.path ? ' · ' + (item.command || item.path) : '')
+  if (kind === 'worker_message') {
+    const action = item.action === 'reference_search' ? 'pesquisa de referências'
+      : item.action === 'browser_tool' ? 'Chrome DevTools MCP'
+        : item.action || 'ação'
+    return (item.ok === false ? 'Falha da ferramenta: ' : 'Agente: ') + action +
+      (item.command || item.path || item.tool
+        ? ' · ' + (item.command || item.path || item.tool) : '')
+  }
   if (kind === 'workspace_validation') return item.success === false ? 'Verificações falharam' : 'Validação executada'
   if (kind === 'workspace_approval_required') return 'Aguardando sua autorização'
   if (kind === 'workspace_feedback_received') return 'Ajuste recebido'
@@ -23,7 +40,7 @@ function eventLabel(item) {
   if (kind === 'worker_budget_warning') return 'Limite próximo: ' + item.remaining_rounds + ' ciclo(s) restante(s); checkpoint automático disponível'
   if (kind === 'run_status') return 'Estado: ' + (item.status || 'alterado')
   if (kind === 'step_status') return 'Etapa: ' + (item.status || 'executando')
-  if (kind === 'provider_error') return 'Provedor retornou erro'
+  if (kind === 'provider_error') return 'Provedor retornou erro: ' + (item.error || 'detalhe indisponível')
   return kind.replaceAll('_', ' ')
 }
 
@@ -45,7 +62,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
       if (!runId) return
       try {
         const response = await api('/runs/' + encodeURIComponent(runId) + '/activity')
-        if (mounted) setActivity(response)
+        if (mounted) { setActivity(response); setError('') }
       } catch (e) { if (mounted) setError(e.message) }
     }
     poll()
@@ -149,7 +166,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
       {checkpoints.length > 0 && <div className="mt-3 space-y-1 rounded-xl border border-violet-300/15 p-3">
         <strong className="block text-[11px] text-violet-200">Checkpoint do trabalhador</strong>
         {checkpoints.map(cp => <div key={cp.step_id} className="text-[11px] leading-5 text-muted">
-          <p>{cp.state==='paused_limit' ? 'Pausado e salvo' : cp.state==='completed' ? 'Etapa concluída' : 'Em execução'} · {cp.rounds_total} ciclos · {cp.actions_total} ações · {cp.resumes} retomada(s)</p>
+          <p>{cp.state==='paused_limit' ? 'Pausado e salvo' : cp.state==='blocked' ? 'Interrompido após ação repetida sem sucesso' : cp.state==='completed' ? 'Etapa concluída' : 'Em execução'} · {cp.rounds_total} ciclos · {cp.actions_total} ações · {cp.resumes} retomada(s)</p>
           <p>Última ação: <span className="break-all text-copy">{cp.last_action || 'Ainda não registrada'}</span></p>
           {cp.last_result && <p className="break-words">Resultado: {cp.last_result.slice(0,220)}</p>}
           {cp.changed_files?.length > 0 && <p className="break-words">Arquivos alterados: {cp.changed_files.join(', ')}</p>}
@@ -199,7 +216,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
 
     {(active || canContinue) && <form onSubmit={send} className="shrink-0 border-t border-white/10 p-3">
       <label className="block text-xs font-semibold">Conversar durante a execução</label>
-      <p className="mt-1 text-[10px] text-muted">{canContinue ? 'Salve um ajuste para o trabalhador ler quando clicar em Continuar execução.' : 'O próximo ciclo do trabalhador receberá seu ajuste. Isso não interrompe a operação já iniciada.'}</p>
+      <p className="mt-1 text-[10px] text-muted">{canContinue ? 'A execução não terminou. Confira o motivo e o último resultado acima; corrija arquivos/permissões ou envie um ajuste, depois clique em Continuar execução.' : 'O próximo ciclo do trabalhador receberá seu ajuste. Isso não interrompe a operação já iniciada.'}</p>
       <textarea value={note} onChange={e=>setNote(e.target.value)} maxLength={1800} rows={2}
         placeholder="Ex.: Deixe o título maior e troque a cor do botão..." className={input + ' mt-2 resize-y'}/>
       <button type="submit" disabled={!note.trim() || !!loading} className={btn + ' mt-2 border-violet-400/40'}>Enviar ajuste aos trabalhadores</button>

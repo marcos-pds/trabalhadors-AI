@@ -127,6 +127,7 @@ def test_engine_pauses_frontend_then_resumes_without_rerunning_architect(workspa
         [json.dumps({'action':'finish','message':'Arquitetura definida.'})] +
         calls_until_pause() +
         [json.dumps({'action':'finish','message':'Código implementado.'}),
+         json.dumps({'action':'read','path':'hello.py'}),
          json.dumps({'action':'finish','message':'Revisão finalizada.'})])
     engine = Engine(db, Crypto(), model)
 
@@ -163,7 +164,7 @@ def test_engine_pauses_frontend_then_resumes_without_rerunning_architect(workspa
         assert sum(x['event'] == 'run_paused_limit' for x in events) == 1
         assert sum(x['event'] == 'worker_checkpoint_restored' for x in events) == 1
         assert not any(x['event'] == 'run_failed' for x in events)
-        assert len(model.seen) == 15
+        assert len(model.seen) == 16
         return rid
 
     asyncio.run(scenario())

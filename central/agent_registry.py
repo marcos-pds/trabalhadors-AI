@@ -1,4 +1,6 @@
 """Agent templates, role recovery and deterministic team selection."""
+from .task_contract import _plain
+
 TEMPLATES = [
  ('Arquiteto IA','architecture','Planeje soluções técnicas de maneira clara. Defina dependências, interfaces e critérios de aceite.','◈'),
  ('Frontend IA','frontend','Implemente frontend com foco em UX, acessibilidade, componentes reais e responsividade.','◇'),
@@ -15,6 +17,40 @@ TEMPLATES = [
 
 STANDARD_SPECIALTIES = {name: (specialty, instructions)
                         for name, specialty, instructions, _avatar in TEMPLATES}
+ROLE_SIGNALS = {
+    'architecture': ('arquiteto', 'arquiteta', 'arquitetura', 'solution architect', 'software architect'),
+    'frontend': ('frontend', 'front-end', 'react', 'interface', 'desenvolvedor web', 'web developer'),
+    'backend': ('backend', 'back-end', 'api', 'servidor', 'desenvolvedor backend', 'backend developer'),
+    'design': ('designer', 'design visual', 'ux designer', 'ui designer', 'experiencia do usuario'),
+    'code': ('programador', 'programadora', 'desenvolvedor', 'desenvolvedora', 'software engineer', 'engenheiro de software', 'programacao'),
+    'review': ('revisor', 'revisora', 'qa', 'quality assurance', 'testador', 'testadora', 'auditoria', 'qualidade'),
+    'research': ('pesquisador', 'pesquisadora', 'researcher', 'pesquisa', 'analista de pesquisa'),
+    'devops': ('devops', 'sre', 'infraestrutura', 'infrastructure', 'platform engineer', 'engenheiro de confiabilidade'),
+    'video': ('video', 'legendas', 'legendagem', 'transcricao', 'editor de video'),
+    'coordination': ('coordenador', 'coordenadora', 'coordinator', 'gerente de projeto', 'project manager'),
+}
+
+
+def _contains_signal(text, signal):
+    return f' {_plain(signal)} ' in f' {text} '
+
+
+def suggested_agent_specialty(agent):
+    """Infer a role only from a clear profile match; ambiguous agents stay unchanged."""
+    default = suggested_default_specialty(agent)
+    if default:
+        return default
+    name = _plain(agent.get('name', ''))
+    instructions = _plain(agent.get('instructions', ''))
+    scores = {}
+    for specialty, signals in ROLE_SIGNALS.items():
+        named = any(_contains_signal(name, signal) for signal in signals)
+        described = sum(_contains_signal(instructions, signal) for signal in signals)
+        scores[specialty] = (4 if named else 0) + min(2, described)
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    if not ranked or ranked[0][1] < 2 or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
+        return None
+    return ranked[0][0]
 
 
 def suggested_default_specialty(agent):
@@ -53,14 +89,14 @@ def team_for_task(agents, prompt):
               'react', 'pagina', 'website', 'design visual', 'layout'))
     api = any(x in normalized for x in
               ('backend', 'back-end', 'api', 'autenticacao', 'servidor', 'banco de dados'))
-    order = (('frontend', 'code', 'backend') if ui else
-             ('backend', 'code', 'frontend') if api else
+    order = (('frontend', 'code') if ui else
+             ('backend', 'code') if api else
              ('code', 'frontend', 'backend'))
     def select(specialties, exclude):
         return next((a for specialty in specialties for a in available
                      if effective_specialty(a) == specialty and a['id'] not in exclude), None)
     result = []
-    for candidates in (('architecture', 'coordination'), order,
+    for candidates in (('architecture', 'coordination'), ('research',), order,
                        ('review',)):
         pick = select(candidates, {a['id'] for a in result})
         if pick is not None:

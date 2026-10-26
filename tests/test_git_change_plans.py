@@ -417,8 +417,8 @@ def test_reconciliation_routes_require_owner_and_csrf(monkeypatch):
                  'base':{'ref':'main','sha':'b'*40}}])
         api_transport = httpx.MockTransport(respond)
         monkeypatch.setattr(plans, 'Gateway',
-                            lambda row,security,transport=None:
-                                OriginalGateway(row,security,api_transport))
+                            lambda row,security,transport=None,repository=None:
+                                OriginalGateway(row,security,api_transport,repository=repository))
         uri = '/api/git/draft-plans/' + plan['id'] + '/reconcile'
         history_uri = ('/api/git/connections/' + connection['id'] + '/draft-plans')
         assert stranger.get(history_uri).status_code == 404

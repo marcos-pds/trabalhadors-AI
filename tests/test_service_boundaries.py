@@ -91,3 +91,37 @@ def test_concurrent_approval_decisions_have_only_one_winner(monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(decide, [True, False])) == ['accepted', 'conflict']
     db.close()
+
+
+def test_replayed_workspace_action_reuses_only_its_pending_approval():
+    from central.approval_engine import issue_approval
+    db = Database(':memory:'); user(db, 'alice'); convo(db, 'alice', 'chat')
+    db.execute('INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,created_at,updated_at) '
+               'VALUES(?,?,?,?,?,?,?,?,?,?)',
+               ('run', 'alice', 'chat', 'test', 'running', 'auto', '[]', '[]', utcnow(), utcnow()))
+    db.execute('INSERT INTO steps(id,run_id,name,deps,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
+               ('step', 'run', 'Step', '[]', 'running', utcnow(), utcnow()))
+    request = {'action': 'command', 'command': 'npm install --ignore-scripts package'}
+    first = issue_approval(db, 'alice', 'run', 'step', 'folder', request, {})
+    replay = issue_approval(
+        db, 'alice', 'run', 'step', 'folder',
+        {'command': 'npm install --ignore-scripts package', 'action': 'command'}, {})
+    assert replay == first
+    assert db.one('SELECT COUNT(*) AS count FROM workspace_action_approvals')['count'] == 1
+
+    original = db.one('SELECT * FROM workspace_action_approvals WHERE id=?', (first,))
+    db.execute('''INSERT INTO workspace_action_approvals
+        (id,user_id,run_id,step_id,folder,request_json,status,expires_at,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?)''',
+        ('stale-copy', 'alice', 'run', 'step', 'folder', original['request_json'],
+         'pending', original['expires_at'], '9999-01-01T00:00:00+00:00'))
+    current = issue_approval(db, 'alice', 'run', 'step', 'folder', request, {})
+    assert current == 'stale-copy'
+    assert db.one('SELECT status FROM workspace_action_approvals WHERE id=?',
+                  (first,))['status'] == 'denied'
+    assert db.one("SELECT COUNT(*) AS count FROM workspace_action_approvals WHERE status='pending'")['count'] == 1
+
+    db.execute("UPDATE workspace_action_approvals SET status='denied' WHERE id=?", (current,))
+    next_request = issue_approval(db, 'alice', 'run', 'step', 'folder', request, {})
+    assert next_request != current
+    db.close()

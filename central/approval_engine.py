@@ -7,14 +7,28 @@ from .computer_access import policy
 from .workspace_guard import enforce_run_scope
 
 def issue_approval(db, user_id, run_id, step_id, folder, request, summary):
+    # Reuse the current approval when a recovered worker replays the same action.
+    request_json = json.dumps(request, ensure_ascii=False, sort_keys=True)
+    now = datetime.now(timezone.utc).isoformat()
+    existing = db.one('''SELECT id FROM workspace_action_approvals
+      WHERE user_id=? AND run_id=? AND step_id=? AND folder=? AND request_json=?
+        AND status='pending' AND expires_at>?
+      ORDER BY created_at DESC LIMIT 1''',
+      (user_id, run_id, step_id, folder, request_json, now))
+    if existing:
+        db.execute('''UPDATE workspace_action_approvals SET status='denied'
+          WHERE user_id=? AND run_id=? AND step_id=? AND folder=? AND request_json=?
+            AND status='pending' AND id<>?''',
+          (user_id, run_id, step_id, folder, request_json, existing['id']))
+        return existing['id']
+
     # Store pending edits/commands inside the local DB; no secrets are returned to other users.
     token = uid()
     expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     db.execute('''INSERT INTO workspace_action_approvals
       (id,user_id,run_id,step_id,folder,request_json,status,expires_at,created_at)
       VALUES(?,?,?,?,?,?,?,?,?)''',
-      (token, user_id, run_id, step_id, folder, json.dumps(request, ensure_ascii=False),
-       'pending', expires, utcnow()))
+      (token, user_id, run_id, step_id, folder, request_json, 'pending', expires, utcnow()))
     return token
 
 

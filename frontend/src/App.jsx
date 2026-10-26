@@ -5,10 +5,12 @@ import ComputerAccessPanel from './ComputerAccessPanel'
 import ExecutionPanel from './ExecutionPanel'
 import OperationalOverview from './OperationalOverview'
 import OrganizationPanel from './OrganizationPanel'
+import GitIntegrationsPanel from './GitIntegrationsPanel'
 import ResourcesPanel from './ResourcesPanel'
+import TokenUsagePanel from './TokenUsagePanel'
 import { providerCategory } from './providerFilters'
 
-const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações' }
+const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
 const chatCommands = [
   { command: '/ajuda', label: 'Ver comandos', description: 'Mostrar os comandos disponíveis' },
   { command: '/novo', label: 'Nova conversa', description: 'Começar uma conversa limpa' },
@@ -19,11 +21,12 @@ const chatCommands = [
   { command: '/fluxos', label: 'Fluxos', description: 'Abrir fluxos de trabalho' },
   { command: '/historico', label: 'Histórico', description: 'Ver execuções anteriores' },
   { command: '/monitoramento', label: 'Monitoramento', description: 'Ver saúde e métricas' },
+  { command: '/tokens', label: 'Uso de tokens', description: 'Acompanhar o consumo de tokens' },
   { command: '/configuracoes', label: 'Configurações', description: 'Preferências e conta' },
   { command: '/aprovar', label: 'Aprovar etapa', description: 'Autorizar a etapa que aguarda aprovação' },
   { command: '/rejeitar', label: 'Rejeitar etapa', description: 'Recusar a etapa que aguarda aprovação' },
 ]
-const navGroups = [['WORKSPACE', [['chat','▣'],['dashboard','◫'],['agents','◈'],['workflows','⌁'],['projects','▤']]], ['GERENCIAR', [['history','◷'],['monitoring','⌁'],['providers','⬡'],['resources','+'],['settings','⚙']]]]
+const navGroups = [['WORKSPACE', [['chat','▣'],['dashboard','◫'],['agents','◈'],['workflows','⌁'],['projects','▤']]], ['GERENCIAR', [['history','◷'],['monitoring','⌁'],['tokens','◉'],['providers','⬡'],['resources','+'],['settings','⚙']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
   {id:'zai',name:'Z.ai / GLM',kind:'zai',model:'glm-4.7-flash',base_url:'https://api.z.ai/api/paas/v4',group:'Grátis limitado',badge:'Modelos Flash gratuitos com limites',note:'Use glm-4.7-flash ou glm-4.5-flash e uma chave API padrão. Outros modelos podem ser pagos; confira as cotas da conta.'},
@@ -90,6 +93,9 @@ function dateLabel(value, detailed = false) {
 }
 
 function Icon({ children, className = '' }) { return <span aria-hidden="true" className={`inline-grid w-5 shrink-0 place-items-center text-[16px] ${className}`}>{children}</span> }
+function GitHubMark({ className = '' }) {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.02c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.2 1.77 1.2 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.29-5.27-5.73 0-1.27.45-2.31 1.2-3.12-.12-.3-.52-1.48.11-3.08 0 0 .98-.31 3.16 1.19a10.97 10.97 0 0 1 5.76 0c2.2-1.5 3.17-1.19 3.17-1.19.63 1.6.23 2.78.11 3.08.75.81 1.2 1.85 1.2 3.12 0 4.45-2.7 5.43-5.28 5.72.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+}
 function Button({ children, primary = false, quiet = false, small = false, danger = false, className = '', ...props }) {
   return <button {...props} className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 font-medium transition duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aqua disabled:pointer-events-none disabled:opacity-50 ${small ? 'min-h-8 px-3 text-xs' : 'min-h-10 text-sm'} ${primary ? 'border-transparent bg-gradient-to-r from-[#4285f4] via-[#9b72cb] to-[#d96570] text-white shadow-lg shadow-violet-950/20 hover:brightness-110' : danger ? 'border-rose-400/25 bg-rose-400/5 text-rose-300 hover:bg-rose-400/10' : quiet ? 'border-transparent bg-transparent text-muted hover:bg-white/[.06] hover:text-copy' : 'border-white/10 bg-white/[.045] text-copy hover:border-lilac/40 hover:bg-white/[.08]'} ${className}`}>{children}</button>
 }
@@ -149,7 +155,7 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
             title={convo.title} className={`mb-0.5 flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs transition ${convo.id === data.currentConvo ? 'bg-white/[.09] text-copy' : 'text-[#b8b5bd] hover:bg-white/[.05] hover:text-copy'}`}>
             <span className="truncate">{convo.title}</span>
           </button>)}
-        </div>) : <p className="px-2.5 py-2 text-[11px] leading-5 text-muted">Suas conversas aparecem aqui.</p>}</div><div className="border-t border-white/[.08] pt-3"><p className="mb-2 flex items-center gap-2 px-2 text-[10px] text-muted"><span className={`h-2 w-2 rounded-full ${data.providers.some(p=>p.enabled) ? 'bg-emerald-300' : 'bg-amber-300'}`} />{data.providers.some(p=>p.enabled) ? `${data.providers.filter(p=>p.enabled).length} provedor(es) ativo(s)` : 'Nenhum provedor conectado'}</p><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-cyan-700 to-violet-700 text-xs font-bold text-white">{me.email[0]?.toUpperCase()}</span><span className="min-w-0 flex-1 truncate text-xs text-copy">{me.email.split('@')[0]}<small className="mt-0.5 block text-[10px] text-muted">Minha conta</small></span><button onClick={onLogout} title="Sair" className="rounded-lg p-2 text-muted hover:bg-white/[.06] hover:text-copy">⎋</button></div></div></aside>
+        </div>) : <p className="px-2.5 py-2 text-[11px] leading-5 text-muted">Suas conversas aparecem aqui.</p>}</div><div className="border-t border-white/[.08] pt-3"><button type="button" onClick={() => onNavigate('git')} title="Conectar GitHub" className={`mb-3 flex min-h-10 w-full items-center gap-3 rounded-xl border border-white/10 px-3 text-left text-[12px] text-[#c0bec5] transition hover:border-white/20 hover:bg-white/[.06] hover:text-copy ${page === 'git' ? 'border-white/20 bg-white/[.08] text-copy' : ''}`}><GitHubMark className="h-[18px] w-[18px]"/><span>Conectar GitHub</span><span className="ml-auto text-[10px] text-muted">Git</span></button><p className="mb-2 flex items-center gap-2 px-2 text-[10px] text-muted"><span className={`h-2 w-2 rounded-full ${data.providers.some(p=>p.enabled) ? 'bg-emerald-300' : 'bg-amber-300'}`} />{data.providers.some(p=>p.enabled) ? `${data.providers.filter(p=>p.enabled).length} provedor(es) ativo(s)` : 'Nenhum provedor conectado'}</p><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-cyan-700 to-violet-700 text-xs font-bold text-white">{me.email[0]?.toUpperCase()}</span><span className="min-w-0 flex-1 truncate text-xs text-copy">{me.email.split('@')[0]}<small className="mt-0.5 block text-[10px] text-muted">Minha conta</small></span><button onClick={onLogout} title="Sair" className="rounded-lg p-2 text-muted hover:bg-white/[.06] hover:text-copy">⎋</button></div></div></aside>
 }
 
 function ChatWelcome({ onSuggest }) {
@@ -169,6 +175,8 @@ function RichText({ text }) {
 function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, autonomous, setAutonomous, workspaceApprovals, onWorkspaceApproval, onOpenExecution, onMenu, onCommand }) {
   const fileRef = useRef(null)
   const transcriptRef = useRef(null)
+  const sendLockRef = useRef(false)
+  const [sending, setSending] = useState(false)
   const [activeCommand, setActiveCommand] = useState(0)
   const matchingCommands = prompt.startsWith('/')
     ? chatCommands.filter(item => item.command.startsWith(prompt.trim().toLowerCase()) || item.label.toLowerCase().includes(prompt.trim().slice(1).toLowerCase()))
@@ -187,6 +195,17 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     }
     e.target.value = ''
   }
+  async function submitMessage() {
+    if (sendLockRef.current) return
+    sendLockRef.current = true
+    setSending(true)
+    try {
+      await onSend()
+    } finally {
+      sendLockRef.current = false
+      setSending(false)
+    }
+  }
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
       if (matchingCommands.length) { e.preventDefault(); setPrompt('') }
@@ -197,7 +216,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (matchingCommands.length) onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command)
-      else onSend()
+      else submitMessage()
     }
   }
   const activeProject = data.projects.find(p => p.id === (data.conversations.find(c => c.id === currentConvo)?.project_id || selectedProject))
@@ -213,7 +232,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
       </div>
     </header>
     <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
-      {!messages.length ? <ChatWelcome onSuggest={onSuggest} /> : <div className="mx-auto max-w-3xl py-5">{messages.map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}</div>}
+      {!messages.length ? <ChatWelcome onSuggest={onSuggest} /> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
       {steps.length > 0 && <section aria-live="polite" className="mx-auto mb-5 max-w-3xl rounded-2xl border border-white/10 bg-white/[.035] p-4">
         <div className="mb-3 flex items-center justify-between"><strong className="text-xs font-semibold">Etapas da execução</strong><span className="text-[10px] text-muted">{steps.filter(step => step.status === 'completed').length}/{steps.length} concluídas</span></div>
         <div className="space-y-2">{steps.map(step => <div key={step.id} className="rounded-xl border border-white/[.07] bg-black/10 p-3">
@@ -235,7 +254,9 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             <strong className="text-xs text-amber-200">Trabalhador solicita permissão</strong>
             <p className="mt-2 break-words text-xs">{item.summary?.description || 'Operação em arquivo'}</p>
             {item.summary?.diff && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-2 text-[10px] text-muted">{item.summary.diff}</pre>}
-            <p className="mt-2 text-[10px] text-muted">Verifique antes de autorizar. Um comando pode executar código de dependências do projeto.</p>
+            <p className="mt-2 text-[10px] text-muted">{item.summary?.description?.startsWith('Chrome DevTools')
+              ? 'Verifique a página e os argumentos. Esta chamada só pode acessar um endereço local.'
+              : 'Verifique antes de autorizar. Um comando pode executar código de dependências do projeto.'}</p>
             <div className="mt-3 flex gap-2">
               <Button small quiet onClick={() => onWorkspaceApproval(item.approval_id, false)}>Negar</Button>
               <Button small primary onClick={() => onWorkspaceApproval(item.approval_id, true)}>Permitir esta operação</Button>
@@ -246,16 +267,20 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
           {matchingCommands.map(item => <button key={item.command} type="button" role="option" onClick={() => onCommand(item.command)} className={'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ' + (matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)]?.command === item.command ? 'bg-white/[.07]' : 'hover:bg-white/[.07]')}><code className="min-w-28 text-xs font-semibold text-lilac">{item.command}</code><span className="min-w-0"><strong className="block text-xs font-medium text-copy">{item.label}</strong><small className="text-[10px] text-muted">{item.description}</small></span></button>)}
         </div>}
         <div className={"chat-composer rounded-[23px] shadow-xl shadow-black/15 focus-within:ring-4 focus-within:ring-lilac/5 " + (prompt.trim() ? "is-typing" : "")}>
-          <textarea value={prompt} onChange={e => { setPrompt(e.target.value); setActiveCommand(0) }} onKeyDown={handleKeyDown} rows={2} placeholder={running ? "Peça ajustes aos trabalhadores enquanto eles executam..." : "Escreva uma mensagem ou digite / para ver comandos..."} className="block max-h-40 min-h-[67px] w-full resize-y bg-transparent px-5 pt-4 text-sm text-copy outline-none placeholder:text-[#aaa7b1]" />
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 flex-wrap items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><label title="Autorizar agentes a editar e testar dentro da pasta configurada" className="flex cursor-pointer items-center gap-1 rounded-lg border border-lilac/25 px-2 py-1.5 text-[11px] text-lilac"><input type="checkbox" checked={autonomous} disabled={computerAccess?.mode === 'blocked' || running} onChange={e => {
+          <textarea value={prompt} disabled={sending} onChange={e => { setPrompt(e.target.value); setActiveCommand(0) }} onKeyDown={handleKeyDown} rows={2} placeholder={sending ? 'Enviando para a Central…' : running ? "Peça ajustes aos trabalhadores enquanto eles executam..." : "Escreva uma mensagem ou digite / para ver comandos..."} className="block max-h-40 min-h-[67px] w-full resize-y bg-transparent px-5 pt-4 text-sm text-copy outline-none placeholder:text-[#aaa7b1] disabled:opacity-70" />
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 flex-wrap items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><label title="Autorizar agentes a editar e testar dentro da pasta configurada" className="flex cursor-pointer items-center gap-1 rounded-lg border border-lilac/25 px-2 py-1.5 text-[11px] text-lilac"><input type="checkbox" checked={autonomous} disabled={computerAccess?.mode === 'blocked' || running} onChange={e => {
         if(e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
         setAutonomous(e.target.checked)
-      }} className="accent-violet-400"/> Autonomia</label><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : onSend()} disabled={!prompt.trim()}>{running ? 'Enviar ajuste ↑' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
+      }} className="accent-violet-400"/> Autonomia      </label><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : submitMessage()} disabled={!prompt.trim() || sending}>{sending ? 'Enviando…' : running ? 'Enviar ajuste ↑' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
         </div>
       </div>
       <p className="mx-auto mt-2 max-w-[690px] text-center text-[10px] text-muted">Tarefas usam suas próprias chaves de provedor e podem gerar cobranças.</p>
     </div>
   </div>
+}
+
+function GitConnectPage({ api }) {
+  return <div className="mx-auto w-full max-w-4xl px-8 py-8 max-sm:px-4"><Heading eyebrow="INTEGRAÇÃO" title="Conectar conta Git" description="Conecte GitHub ou GitLab para consultar repositórios e revisões. A Central usa um token de acesso salvo criptografado, limitado ao repositório que você informar." /><GitIntegrationsPanel api={api} initiallyOpen /></div>
 }
 
 function Dashboard({ data, stats, page, navigate, onHistory }) {
@@ -277,7 +302,7 @@ function Providers({ data, onEdit, onDelete, onTest, onHistory, onConnected }) {
     <Heading eyebrow="INTEGRAÇÕES" title="Conecte sua equipe de IA" description="Catálogo oficial de modelos, configuração automática e conexões verificadas." action={<Button quiet onClick={()=>onEdit(null)}>Configuração manual</Button>} />
     <ProviderCatalog filter={filter} onFilter={setFilter} presets={providerPresets.map(p=>({...p,access:p.group,quick:false,keys_url:providerKeyLinks[p.kind]||providerKeyLinks.compatible,source_url:providerKeyLinks[p.kind]||providerKeyLinks.compatible,checked_at:"catálogo manual"}))} api={api} providers={data.providers} onConnected={onConnected} onManual={kind=>onEdit(null,providerPresets.find(p=>p.kind===kind))}/>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-semibold">Suas conexões · {filteredProviders.filter(p=>p.enabled).length} ativas</h2><input aria-label="Buscar conexão salva" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar conexão ou modelo..." className="min-h-10 rounded-xl border border-white/10 bg-panel px-3 text-xs"/></div>
-    <div className="overflow-x-auto rounded-2xl border border-white/[.09] bg-panel"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-white/[.035] text-[10px] uppercase tracking-wider text-muted"><tr>{['Provedor','Modelo','Prioridade','Saúde','Ações'].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{filteredProviders.map(p=>{const h=p.health||{};const state=!p.enabled?['Pausado','failed']:h.state==='healthy'?['Saudável','completed']:h.state==='suspended'?['Suspenso','failed']:h.state==='degraded'?['Instável','running']:['Sem medições',''];return <tr key={p.id} className="border-t border-white/[.07]"><td className="px-4 py-4"><strong>{p.name}</strong><small className="block text-muted">{providerKindLabels[p.kind]||p.kind} · {p.has_key?'Chave armazenada':'Sem chave'}</small></td><td className="px-4 py-4">{p.model}</td><td className="px-4 py-4">{p.priority}</td><td className="px-4 py-4"><Status value={state[1]}>{state[0]}</Status><small className="mt-1 block text-muted">{h.success_rate==null?'—':`${h.success_rate.toFixed(1)}% sucesso`} · {h.avg_latency_ms==null?'—':`${h.avg_latency_ms} ms`}</small></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><Button small onClick={()=>onTest(p)}>Testar</Button><Button small quiet onClick={()=>onHistory(p)}>Histórico</Button><Button small quiet onClick={()=>onEdit(p)}>Editar</Button><Button small danger onClick={()=>onDelete(p)}>Excluir</Button></div></td></tr>})}{!filteredProviders.length&&<tr><td colSpan="5"><Empty icon="⬡" title={data.providers.length?'Nenhuma conexão neste filtro':'Nenhum provedor conectado'}>{data.providers.length?'Ajuste a categoria ou o texto pesquisado.':'Escolha um preset acima para preencher a conexão.'}</Empty></td></tr>}</tbody></table></div>
+    <div className="overflow-x-auto rounded-2xl border border-white/[.09] bg-panel"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-white/[.035] text-[10px] uppercase tracking-wider text-muted"><tr>{['Provedor','Modelo','Prioridade','Saúde','Ações'].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{filteredProviders.map(p=>{const h=p.health||{};const state=!p.enabled?['Pausado','failed']:h.state==='healthy'?['Saudável','completed']:h.state==='suspended'?['Suspenso','failed']:h.state==='degraded'?['Instável','running']:['Sem medições',''];return <tr key={p.id} className="border-t border-white/[.07]"><td className="px-4 py-4"><strong>{p.name}</strong><small className="block text-muted">{providerKindLabels[p.kind]||(p.kind==='openai_chatgpt'?'ChatGPT (assinatura)':p.kind)} · {p.auth_type==='chatgpt_plan'?'Conta ChatGPT autorizada':p.has_key?'Chave armazenada':'Sem chave'}</small></td><td className="px-4 py-4">{p.model}</td><td className="px-4 py-4">{p.priority}</td><td className="px-4 py-4"><Status value={state[1]}>{state[0]}</Status><small className="mt-1 block text-muted">{h.success_rate==null?'—':`${h.success_rate.toFixed(1)}% sucesso`} · {h.avg_latency_ms==null?'—':`${h.avg_latency_ms} ms`}</small></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><Button small onClick={()=>onTest(p)}>Testar</Button><Button small quiet onClick={()=>onHistory(p)}>Histórico</Button>{p.auth_type!=='chatgpt_plan'&&<Button small quiet onClick={()=>onEdit(p)}>Editar</Button>}<Button small danger onClick={()=>onDelete(p)}>Excluir</Button></div></td></tr>})}{!filteredProviders.length&&<tr><td colSpan="5"><Empty icon="⬡" title={data.providers.length?'Nenhuma conexão neste filtro':'Nenhum provedor conectado'}>{data.providers.length?'Ajuste a categoria ou o texto pesquisado.':'Escolha um preset acima para preencher a conexão.'}</Empty></td></tr>}</tbody></table></div>
   </div>
 }
 
@@ -298,7 +323,32 @@ function Agents({ data, onEdit, onRestored }) {
       window.dispatchEvent(new CustomEvent('app-toast', { detail: error.message }))
     } finally { setRepairing(false) }
   }
-  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="EQUIPE IA" title="Seus trabalhadores inteligentes" description="Veja a especialidade de cada agente nos cartões ou altere-a em Configurar." action={<Button primary onClick={()=>onEdit(null)}>＋ Criar trabalhador</Button>} />
+  async function distributeAgents() {
+    if (!data.agents.length || repairing) return
+    setRepairing(true)
+    setRepairResult('')
+    try {
+      const preview = await api('/agents/assign-specialties', 'POST', { apply: false })
+      if (!preview.assignments.length) {
+        setRepairResult(preview.unresolved_count
+          ? `Nenhuma alteração segura encontrada. ${preview.unresolved_count} agente(s) sem correspondência clara foram mantidos.`
+          : 'As especialidades já correspondem aos agentes.')
+        return
+      }
+      const labels = Object.fromEntries(specialtyOptions.map(([value, label]) => [value, label]))
+      const changes = preview.assignments.map(item =>
+        `${item.name}: ${labels[item.old_specialty] || item.old_specialty} → ${labels[item.new_specialty] || item.new_specialty}`)
+      const skipped = preview.unresolved_count
+        ? `\n\n${preview.unresolved_count} agente(s) sem correspondência clara ficarão como estão.` : ''
+      if (!window.confirm(`Distribuir os agentes conforme seus nomes e instruções?\n\n${changes.join('\n')}${skipped}`)) return
+      const result = await api('/agents/assign-specialties', 'POST', { apply: true })
+      await onRestored()
+      setRepairResult(`${result.assigned_count} especialidade(s) atribuída(s). ${result.unresolved_count} agente(s) ambíguo(s) preservado(s).`)
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent('app-toast', { detail: error.message }))
+    } finally { setRepairing(false) }
+  }
+  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="EQUIPE IA" title="Seus trabalhadores inteligentes" description="Veja a especialidade de cada agente nos cartões ou altere-a em Configurar." action={<div className="flex flex-wrap gap-2"><Button small disabled={!data.agents.length || repairing} onClick={distributeAgents}>{repairing ? 'Distribuindo...' : 'Distribuir agentes'}</Button><Button primary onClick={()=>onEdit(null)}>＋ Criar trabalhador</Button></div>} />
     {mismatches.length > 0 && <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/[.06] p-4">
       <div><strong className="text-xs text-amber-200">Especialidades inconsistentes detectadas</strong>
         <p className="mt-1 text-xs leading-5 text-muted">{mismatches.map(a => a.name).join(', ')}: os nomes e instruções originais indicam outras especialidades. A seleção automática já considera os papéis corretos.</p>
@@ -364,14 +414,66 @@ export default function App() {
   useEffect(()=>{let cancelled=false;api('/me').then(async me=>{if(cancelled)return;setUser(me);await loadAll()}).catch(()=>{}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[loadAll])
   useEffect(()=>{if(user&&(page==='dashboard'||page==='monitoring'))refreshStats()},[page,user,refreshStats])
   useEffect(()=>{if(!user)return;let active=true;api('/computer-access').then(value=>{if(active)setComputerAccess(value)}).catch(()=>{if(active)setComputerAccess({mode:'blocked',folder:''});setAutonomous(false);setWorkspaceApprovals([])});return()=>{active=false}},[user?.id])
-  useEffect(()=>{if(!user||page!=='chat')return;let active=true;if(!currentConvo){setMessages([]);return}api(`/conversations/${currentConvo}/messages`).then(items=>{if(active)setMessages(items.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})))}).catch(error=>notify(error.message));return()=>{active=false}},[currentConvo,page,user,notify])
+  useEffect(()=>{if(!user||page!=='chat')return;let active=true;if(!currentConvo){setMessages([]);return}const load=async()=>{try{let items=await api(`/conversations/${currentConvo}/messages`);const latest=data.runs.find(run=>run.conversation_id===currentConvo);if(latest&&['paused_limit','failed','cancelled'].includes(latest.status)){await api(`/runs/${latest.id}/feedback-summary`,'POST',{});items=await api(`/conversations/${currentConvo}/messages`)}if(active)setMessages(old=>[...items.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})),...old.filter(item=>item.type==='token_usage'&&data.runs.some(run=>run.id===item.runId&&run.conversation_id===currentConvo))])}catch(error){if(active)notify(error.message)}};load();return()=>{active=false}},[currentConvo,page,user,data.runs,notify])
+  useEffect(()=>{
+    if(!user||page!=='chat'||!inspectedRun)return
+    let active=true
+    let inFlight=false
+    let wasRunning=false
+    let terminalLoaded=false
+    let errorNotified=false
+    const syncRun=async()=>{
+      if(inFlight)return
+      inFlight=true
+      try{
+        const detail=await api(`/runs/${inspectedRun}`)
+        if(!active)return
+        setSteps(detail.steps||[])
+        if(['queued','running','awaiting_approval'].includes(detail.status)){
+          if(!wasRunning)setExecutionPanelOpen(true)
+          wasRunning=true
+          setCurrentRun(inspectedRun)
+          const approvals=await api(`/runs/${inspectedRun}/workspace/approvals`)
+          if(active)setWorkspaceApprovals(approvals)
+        }else{
+          wasRunning=false
+          setCurrentRun(runId=>runId===inspectedRun?null:runId)
+          setWorkspaceApprovals([])
+          if(!terminalLoaded&&['completed','paused_limit','failed','cancelled'].includes(detail.status)){
+            terminalLoaded=true
+            const saved=await api(`/conversations/${detail.conversation_id}/messages`)
+            if(active)setMessages(old=>[
+              ...saved.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})),
+              ...old.filter(item=>item.type==='token_usage'&&item.runId!==inspectedRun),
+            ])
+            try{
+              const usage=await api(`/runs/${inspectedRun}/token-usage`)
+              if(active)setMessages(old=>[...old,{type:'token_usage',runId:inspectedRun,...usage}])
+            }catch(error){if(active)notify(`Não foi possível carregar o consumo de tokens: ${error.message}`)}
+            await loadAll()
+          }
+        }
+        errorNotified=false
+      }catch(error){
+        if(active&&!errorNotified){notify(`Não foi possível sincronizar a execução: ${error.message}`);errorNotified=true}
+      }finally{inFlight=false}
+    }
+    syncRun()
+    const timer=setInterval(syncRun,3000)
+    return()=>{active=false;clearInterval(timer)}
+  },[inspectedRun,page,user?.id,loadAll,notify])
   useEffect(()=>()=>{sourceRef.current?.close();clearTimeout(toastTimer.current)},[])
   async function login(authMode,credentials){const me=await api(`/${authMode}`,'POST',credentials);setUser(me);setPage('chat');await loadAll()}
   async function logout(){sourceRef.current?.close();await api('/logout','POST');setMenuOpen(false);setUser(null);setCurrentConvo(null);setData(emptyData);setMessages([]);setComputerAccess({mode:'blocked',folder:''})}
   const navigate=next=>{sourceRef.current?.close();setPage(next);setMenuOpen(false)}
   function newChat(){sourceRef.current?.close();setInspectedRun(null);setExecutionPanelOpen(false);setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
   async function openConversation(id){
-    sourceRef.current?.close();setCurrentRun(null);setSteps([]);setCurrentConvo(id);setSelectedProject(null);setPage('chat');setMenuOpen(false)
+    sourceRef.current?.close();setCurrentRun(null);setWorkspaceApprovals([]);setSteps([]);setCurrentConvo(id);setSelectedProject(null);setPage('chat');setMenuOpen(false)
+    const conversationRuns=data.runs.filter(run=>run.conversation_id===id)
+    const latest=conversationRuns.find(run=>['queued','running','awaiting_approval'].includes(run.status))||conversationRuns[0]
+    const needsAttention=latest&&latest.status!=='completed'
+    setInspectedRun(needsAttention?latest.id:null)
+    setExecutionPanelOpen(Boolean(needsAttention))
     if (!data.conversations.some(c => c.id === id)) {
       try {
         const older = await api('/conversations/' + encodeURIComponent(id))
@@ -403,7 +505,7 @@ export default function App() {
     return result
   }
   async function sendMessage(){const text=prompt.trim();if(!text)return;if(currentRun){try{await sendRunFeedback(text);setPrompt('')}catch(error){notify(error.message)}return;}const attached=files.map(f=>`\n\nArquivo: ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('');try{let cid=currentConvo;if(!cid){const convo=await api('/conversations','POST',{title:'Nova conversa',project_id:selectedProject||null});cid=convo.id;setCurrentConvo(cid);setSelectedProject(null);setData(old=>({...old,conversations:[convo,...old.conversations]}))}const run=await api('/runs','POST',{conversation_id:cid,prompt:text+attached,mode,agent_ids:mode==='manual'&&selectedAgent?[selectedAgent]:[],workflow_id:selectedWorkflow||null,autonomous},{'Idempotency-Key':crypto.randomUUID()});setPrompt('');setFiles([]);setMessages(old=>[...old,{role:'user',content:text+attached}]);setSelectedWorkflow(null);setCurrentRun(run.id);setInspectedRun(run.id);setExecutionPanelOpen(true);setSteps([]);setWorkspaceApprovals([]);const stream=new EventSource(`/api/runs/${run.id}/events?after=0`);sourceRef.current=stream;stream.onmessage=event=>{let msg;try{msg=JSON.parse(event.data)}catch{return}const d=msg.data||{};if(msg.event==='token')setMessages(old=>{const index=old.findIndex(item=>item.stepId===d.step_id);if(index<0)return [...old,{role:'assistant',agent:d.agent,content:d.text,stepId:d.step_id}];return old.map((item,i)=>i===index?{...item,content:item.content+d.text}:item)});if(msg.event==='step_reset')setMessages(old=>old.map(item=>item.stepId===d.step_id?{...item,content:''}:item));if(msg.event==='run_created')setSteps(d.plan.map(item=>({...item,status:'queued'})));if(msg.event==='step_status')setSteps(old=>old.map(item=>item.id===d.id?{...item,...d}:item));if(msg.event==='model_selected')setSteps(old=>old.map(item=>item.id===d.step_id?{...item,model:d.model,provider:d.provider}:item));if(msg.event==='approval_requested')setSteps(old=>old.map(item=>item.id===d.step_id?{...item,status:'awaiting_approval'}:item));if(msg.event==='workspace_approval_required')setWorkspaceApprovals(list=>list.some(x=>x.approval_id===d.approval_id)?list:[...list,d]);if(msg.event==='workspace_action_result' && d.success===false)setMessages(old=>[...old,{type:'event',content:'Falha da ferramenta: '+(d.summary?.description||'ação')+' · '+(d.output||'Verifique a ação solicitada.').slice(0,380)}]);if(msg.event==='workspace_validation')setMessages(old=>[...old,{type:'event',content:'Validação final: '+(d.passed?'aprovada':'falhou; agente tentará corrigir')}]);if(msg.event==='memory_recalled' && d.sources?.length)setMessages(old=>old.some(item=>item.memoryRun===run.id)?old:[...old,{type:'event',memoryRun:run.id,content:'Memória do projeto consultada: '+[...new Set(d.sources.map(item=>item.title))].join(', ')}]);if(['provider_error','failover','provider_suspended','provider_recovered','provider_probe'].includes(msg.event))setMessages(old=>[...old,{type:'event',content:d.message||`${d.provider||'Provedor'}: ${d.category||msg.event}`}]);if(msg.event==='run_failed'){notify(`Falha na execução: ${d.error}`);finishRun(stream,cid,false,run.id)}if(msg.event==='run_paused_limit'){notify('Limite de ciclos atingido. Checkpoint salvo. Use Continuar execução.');setSteps(old=>old.map(item=>item.status==='running'?{...item,status:'paused_limit',error:d.error}:item));finishRun(stream,cid,false,run.id)}if(msg.event==='run_completed'){if(d.evidence?.changed_files?.length)setMessages(old=>[...old,{type:'event',content:'Entrega verificada: '+d.evidence.changed_files.join(', ')+' · testes/build aprovados após a última alteração.'}]);finishRun(stream,cid,true,run.id);}if(msg.event==='run_status'&&d.status==='cancelled'){notify('Execução cancelada.');finishRun(stream,cid,false,run.id)}};stream.onerror=()=>{if(sourceRef.current===stream&&stream.readyState===EventSource.CLOSED)notify('A conexão foi interrompida. Atualize o histórico da conversa.')}}catch(error){notify(error.message);setCurrentRun(null)}}
-  async function finishRun(stream,cid,success,runId){stream.close();setWorkspaceApprovals([]);if(sourceRef.current===stream)sourceRef.current=null;setCurrentRun(null);if(runId){try{const detail=await api('/runs/'+runId);setSteps(detail.steps||[])}catch{}}if(success){try{const saved=await api(`/conversations/${cid}/messages`);setMessages(saved.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})))}catch{}}await loadAll()}
+  async function finishRun(stream,cid,success,runId){stream.close();setWorkspaceApprovals([]);if(sourceRef.current===stream)sourceRef.current=null;setCurrentRun(null);if(runId){try{const detail=await api('/runs/'+runId);setSteps(detail.steps||[])}catch(error){notify(`Não foi possível atualizar as etapas: ${error.message}`)}}try{const saved=await api(`/conversations/${cid}/messages`);setMessages(old=>[...saved.map(m=>({role:m.role,agent:m.agent_name||'Central IA',content:m.content})),...old.filter(item=>item.type==='token_usage')])}catch(error){notify(`Não foi possível carregar o resultado da conversa: ${error.message}`)}if(runId){try{const usage=await api(`/runs/${runId}/token-usage`);setMessages(old=>[...old.filter(item=>item.type!=='token_usage'||item.runId!==runId),{type:'token_usage',runId,...usage}])}catch(error){notify(`Não foi possível carregar o consumo de tokens: ${error.message}`)}}await loadAll()}
   async function cancelRun(){if(!currentRun)return;try{await api(`/runs/${currentRun}/cancel`,'POST')}catch(error){notify(error.message)}}
   async function approval(stepId,approved){if(!currentRun)return;try{await api(`/runs/${currentRun}/steps/${stepId}/approval`,'POST',{approved});notify(approved?'Etapa aprovada.':'Etapa rejeitada.')}catch(error){notify(error.message)}}
   async function saveEditor(kind,id,payload){const endpoints={provider:'/providers',agent:'/agents',project:'/projects',workflow:'/workflows'};if(id&&kind!=='project')await api(`${endpoints[kind]}/${id}`,'PUT',payload);else await api(endpoints[kind],'POST',payload);await loadAll();if(kind==='provider'||kind==='agent')notify(kind==='provider'?'Provedor salvo com segurança.':'Trabalhador salvo.')}
@@ -417,7 +519,7 @@ export default function App() {
     if (command === '/novo') return newChat()
     if (command === '/menu') return setMenuOpen(true)
     if (command === '/ajuda') {
-      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
+      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
       return
     }
     if (command === '/aprovar' || command === '/rejeitar') {
@@ -425,7 +527,7 @@ export default function App() {
       if (!pending) return notify('Não há etapa aguardando aprovação nesta conversa.')
       return approval(pending.id, command === '/aprovar')
     }
-    const destinations = { '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/configuracoes': 'settings' }
+    const destinations = { '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/configuracoes': 'settings' }
     if (destinations[command]) return navigate(destinations[command])
   }
   const selectSuggestion=value=>setPrompt(value)
@@ -451,7 +553,9 @@ export default function App() {
         {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id)}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
         {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={useWorkflow}/>}
         {page === 'history' && <History data={data} onOpen={openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
+        {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
+        {page === 'git' && <GitConnectPage api={api}/>}
         {page === 'settings' && <Settings theme={theme} onTheme={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} me={user} onLogout={() => logout().catch(e => notify(e.message))}/>}
       </section>
     </main>

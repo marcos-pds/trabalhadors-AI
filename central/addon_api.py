@@ -1,12 +1,15 @@
 """Local authenticated endpoints; imported bytes never become executable code."""
+import asyncio
 from urllib.parse import unquote, urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from .addon_catalog import Catalog
-from .addon_git_import import import_preview as git_skill_preview
+from .addon_git_import import (GitConnectionRequired, import_skill_previews as git_skill_previews)
 from .addon_marketplace import search as marketplace_search
 from . import addon_packages as packages
 from .computer_access import local_only
 from .ops import audit
+from .database import uid, utcnow
+from . import vscode_install
 
 
 def router(db, security, current_user):
@@ -77,16 +80,33 @@ def router(db, security, current_user):
 
     @api.post('/preview-git')
     async def git_preview(request: Request, user=Depends(actor)):
-        data = await body(request, ['connection_id', 'repository_url'])
-        raw, _, source = git_skill_preview(db, security, user, data['connection_id'], data['repository_url'])
-        return catalog.preview(user, 'skill', 'skill.zip', raw, origin='git_repository', source=source)
+        try:
+            data = packages.unique_json(await raw_body(request, 4096))
+            if not isinstance(data, dict) or set(data) not in (
+                    {'repository_url'}, {'repository_url', 'connection_id'}):
+                packages.reject()
+            repository_url = packages.text(data['repository_url'], 2048)
+            connection_id = packages.text(data['connection_id'], 300) if data.get('connection_id') else None
+        except (packages.InvalidPackage, TypeError):
+            raise HTTPException(422, 'Solicitação inválida.') from None
+        try:
+            entries = await asyncio.to_thread(
+                git_skill_previews, db, security, user, connection_id, repository_url)
+        except GitConnectionRequired as required:
+            return {'requires_connection': True, 'provider': required.service,
+                    'repository': required.repository}
+        if len(entries) == 1:
+            entry = entries[0]
+            return catalog.preview(user, 'skill', 'skill.zip', entry['raw'],
+                                   origin='git_repository', source=entry['source'])
+        return catalog.preview_many(user, entries)
 
     @api.post('/marketplace/search')
     async def marketplace(request: Request, user=Depends(actor)):
         data = await body(request, ['query', 'consent'])
         if data['consent'] is not True:
             raise HTTPException(403, 'Consinta o envio do termo ao Marketplace.')
-        return marketplace_search(data['query'])
+        return await asyncio.to_thread(marketplace_search, data['query'])
 
     @api.delete('/previews/{key}')
     def cancel_preview(key: str, user=Depends(actor)):
@@ -96,6 +116,53 @@ def router(db, security, current_user):
     async def confirm(key: str, request: Request, user=Depends(actor)):
         data = await body(request, ['confirmation'])
         return catalog.confirm(user, key, data['confirmation'])
+
+    @api.get('/vscode/targets')
+    def vscode_targets(user=Depends(actor)):
+        return vscode_install.list_targets()
+
+    async def vscode_action(resource_id, data, user, action):
+        row = catalog._row(user, resource_id, write=True)
+        if row['kind'] != 'vsix' or row['owner_id'] != user or row['organization_id']:
+            raise HTTPException(403, 'Instalação local exige um VSIX pessoal do próprio usuário.')
+        if row['state'] == 'revoked' and action == 'installed':
+            raise HTTPException(409, 'Reimporte o VSIX antes de instalá-lo no Visual Studio Code.')
+        if data['confirmation'] != row['sha256'] or data['consent'] is not True:
+            raise HTTPException(409, 'Confirme separadamente a instalação ou desinstalação e revise os riscos.')
+        filename, raw = catalog.payload(row)
+        if action == 'installed':
+            operation = vscode_install.install_vsix
+        else:
+            operation = vscode_install.uninstall_vsix
+        try:
+            result = await asyncio.to_thread(operation, data['target_id'], filename, raw)
+        except vscode_install.VscodeError as exc:
+            metadata = vscode_install.addon_packages.inspect('vsix', filename, raw)
+            db.execute('INSERT INTO vscode_install_events VALUES(?,?,?,?,?,?,?,?,?)',
+                       (uid(), resource_id, user, data['target_id'],
+                        metadata['publisher'] + '.' + metadata['name'], metadata['version'],
+                        action, 'failed', utcnow()))
+            audit(db, user, 'vscode_'+action+'_failed', 'ai_resource', resource_id)
+            raise HTTPException(502, str(exc)) from None
+        db.execute('INSERT INTO vscode_install_events VALUES(?,?,?,?,?,?,?,?,?)',
+                   (uid(), resource_id, user, result['target_id'], result['extension_id'],
+                    result['extension_version'] if action == 'installed' else metadata_version(filename, raw),
+                    action, 'succeeded', utcnow()))
+        audit(db, user, 'vscode_'+action, 'ai_resource', resource_id)
+        return result
+
+    def metadata_version(filename, raw):
+        return vscode_install.addon_packages.inspect('vsix', filename, raw)['version']
+
+    @api.post('/{resource_id}/vscode/install')
+    async def vscode_install_resource(resource_id: str, request: Request, user=Depends(actor)):
+        data = await body(request, ['target_id', 'confirmation', 'consent'])
+        return await vscode_action(resource_id, data, user, 'installed')
+
+    @api.post('/{resource_id}/vscode/uninstall')
+    async def vscode_uninstall_resource(resource_id: str, request: Request, user=Depends(actor)):
+        data = await body(request, ['target_id', 'confirmation', 'consent'])
+        return await vscode_action(resource_id, data, user, 'uninstalled')
 
     @api.get('/{resource_id}')
     def detail(resource_id: str, user=Depends(actor)):

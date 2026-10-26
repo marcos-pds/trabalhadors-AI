@@ -1,7 +1,7 @@
 export const resourceKinds = {
   skill: { label: 'Skills de IA', accept: '.md,.zip', notice: 'Instruções não confiáveis. Importar não ativa. Scripts e anexos nunca são executados; somente o corpo de SKILL.md pode entrar no contexto.' },
   vsix: { label: 'Extensões VS Code', accept: '.vsix', notice: 'Somente inspeção e armazenamento. Não instala no VS Code nem fornece ferramentas aos agentes. Uma extensão instalada no VS Code pode executar código com seus privilégios.' },
-  mcp: { label: 'Configurações MCP', accept: '.json', notice: 'Somente configurações inativas. Ferramentas e permissões são declarações não verificadas. Nenhuma conexão, servidor ou ferramenta MCP será executada.' },
+  mcp: { label: 'Configurações MCP', accept: '.json', notice: 'Apenas o manifesto oficial Chrome DevTools MCP 1.0.1 pode ser ativado. A Central executa o pacote npm fixado, nunca comandos importados, e exige aprovação para cada ferramenta. Somente navegação HTTP(S) local é permitida.' },
 }
 
 export function preflight(kind, filename, size) {
@@ -31,7 +31,11 @@ export function createResourceClient(api, fetcher = fetch) {
     },
     state(resource, state, consent) {
       if (consent !== true) throw new Error('Confirmação separada obrigatória.')
-      if (state === 'active' && resource.kind !== 'skill') throw new Error('Execução MCP e instalação VS Code não implementadas.')
+      if (state === 'active' && resource.kind !== 'skill' &&
+          !(resource.kind === 'mcp' && resource.metadata?.server_id === 'chrome-devtools' &&
+            resource.metadata?.version === '1.0.1')) {
+        throw new Error('Somente o Chrome DevTools MCP oficial e fixado pode ser ativado.')
+      }
       return api('/resources/' + encodeURIComponent(resource.id) + '/state', 'POST', { state, confirmation: resource.sha256 })
     },
   }

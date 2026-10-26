@@ -2,10 +2,9 @@
 
 **Versão 0.2.0 - MVP funcional, local e extensível.**
 
-A área **Skills e integrações** importa Skills como contexto selecionado de
-agentes e mantém pacotes VSIX/configurações MCP separados e inativos. Consulte
-[RESOURCES.md](RESOURCES.md) para formatos, confirmações, limites e permissões.
-Importar VSIX não instala no VS Code; importar MCP não conecta servidores.
+A área **Skills e integrações** importa Skills como contexto selecionado de agentes. VSIX são inspecionados e podem ser instalados/desinstalados no VS Code local após confirmação separada. O Chrome DevTools MCP oficial pode ser ativado separadamente; ferramentas de navegador são restritas a páginas locais e exigem aprovação por chamada. Consulte [RESOURCES.md](RESOURCES.md) para formatos, confirmações, limites e permissões.
+
+Para testar a importação de Skills, instalação VSIX e os limites atuais do MCP, siga o [guia de testes](docs/GUIA-TESTE-SKILLS-VSIX-MCP.md) e use a [Skill de exemplo](examples/skills/revisao-python-segura/SKILL.md).
 
 Plataforma multiagente em português: autenticação, chat com streaming SSE, agentes especializados, provedores com chaves criptografadas, roteamento por especialidade, execução paralela, dependências, modelos de reserva, retomada de checkpoints, fluxos persistidos e aprovação humana.
 
@@ -90,16 +89,26 @@ central-trabalhadores-ia/
 
 A aplicação **não procura preços ou disponibilidade em tempo real**; prioridades e modelos são configurados pelo usuário. `Testar` faz uma pequena chamada real e pode gerar custos no provedor. APIs podem mudar, e é necessário validar cada integração com credenciais reais antes de usá-la em produção.
 
-### Como o sistema trabalha
+### Acompanhar consumo de tokens
 
-1. Recebe um pedido no chat e grava a conversa.
-2. Classifica por palavras-chave e especialidades habilitadas; admite seleção manual.
-3. Cria um grafo persistente de tarefas independentes.
-4. Executa especialistas em paralelo com um limite global de 5 e limite por trabalhador.
-5. Quando há mais de um especialista, adiciona automaticamente um **Revisor IA** dependente das entregas anteriores, se o agente estiver habilitado.
-6. Cada tarefa tenta o provedor preferido e depois outros provedores ativados; registra eventos, tentativas e erros.
-7. Se uma tarefa falhar, o usuário pode configurar outro modelo e clicar em **Histórico → Retomar**; os nós já concluídos são preservados.
-8. Transmite eventos e tokens via SSE; o resultado consolidado aparece no histórico.
+A tela **Uso de tokens** agrega o consumo dos últimos 7, 30 ou 90 dias, detalha entradas e saídas por provedor/modelo e lista execuções recentes. Ao terminar uma execução no chat, a Central também mostra o consumo daquela pergunta, incluindo as chamadas dos trabalhadores e eventuais tentativas registradas.
+
+Quando o provedor informa a contagem no fluxo, ela é marcada como **reportada**. Se não houver metadados de uso, a Central apresenta uma estimativa local baseada no tamanho do texto (aproximadamente quatro caracteres por token), claramente separada dos valores reportados. Execuções anteriores à ativação do registro não são reconstruídas.
+
+Saldo, créditos, limite gratuito e tokens restantes são específicos da conta/provedor e não têm uma API comum; a tela não inventa esses valores. Consulte o painel de uso/faturamento do respectivo provedor para ver saldo ou cota restante. Os valores de custo da Central também continuam sendo estimativas, não uma fatura.
+
+### Fluxo de desenvolvimento dos trabalhadores
+
+1. Recebe e classifica o pedido; tarefas autônomas de implementação exigem uma pasta autorizada. O usuário pode indicar critérios de aceite, restrições e uma URL local para teste.
+2. Inspeciona a estrutura e os arquivos relevantes antes de propor mudanças, respeitando limites de leitura e protegendo credenciais e diretórios internos.
+3. Monta uma sequência persistente de **planejamento → pesquisa técnica → implementação → revisão** usando os trabalhadores disponíveis. Se não houver Pesquisador IA, a execução segue sem pesquisa externa e informa essa limitação.
+4. Quando a pesquisa externa é pertinente, o Pesquisador consulta o DuckDuckGo com termos técnicos mínimos. Cada consulta aguarda aprovação explícita e mostra exatamente o texto enviado. Os resultados são referências não confiáveis; a Central não baixa nem executa páginas encontradas.
+5. Implementa em alterações incrementais e registra cada ação, resultado e checkpoint. Escritas, instalações, comandos e ferramentas do navegador passam pelos limites e aprovações correspondentes.
+6. Ao finalizar, executa as verificações reais aplicáveis (testes, compilação e/ou build), envia erros ao trabalhador e permite correções limitadas. A entrega só é marcada como concluída se houver alterações registradas e validação posterior aprovada.
+7. Se o pedido exigir Chrome DevTools MCP, a Central exige que a integração esteja ativa e comprova snapshot, inspeção do console e Lighthouse após a última alteração. Cada chamada do navegador local precisa de aprovação no chat; o servidor ou URL local precisa estar disponível.
+8. O Revisor confere o resultado e a resposta final apresenta arquivos alterados, verificações observadas, referências realmente consultadas e bloqueios restantes. Limites ou permissões não resolvidos pausam/falham a tarefa com orientação de retomada, sem alegar sucesso.
+
+As tarefas independentes de chat podem continuar em paralelo; o fluxo autônomo de implementação é sequencial para que pesquisa e planejamento cheguem ao implementador e a revisão avalie a versão final. Failover de provedor, eventos SSE, consumo de tokens e retomada de checkpoints permanecem ativos.
 
 **Regras de falha:** HTTP 401/403 e falta de créditos desabilitam o provedor; 429, timeouts e respostas HTTP 5xx têm tentativas limitadas. Retries fazem backoff com pequeno jitter; o circuit breaker temporário existe por processo. Operações Git de criação de rascunhos exigem aprovação de um plano e não são repetidas automaticamente após uma resposta incerta.
 
@@ -124,6 +133,7 @@ A aplicação **não procura preços ou disponibilidade em tempo real**; priorid
 | Orçamento por tarefa | ⚠ Verificação de estimativa, sem garantia de faturamento máximo |
 | Preços e latência de provedores | Tarifas configuradas e latência observada; não consulta preços oficiais em tempo real |
 | Agentes capazes de modificar repositórios e executar ferramentas | Pasta autorizada, ferramentas delimitadas e aprovações; executor host ou Docker |
+| Pesquisa técnica com referências | Busca pública limitada, consulta aprovada individualmente e URLs registradas; páginas não são baixadas nem executadas |
 | Editor avançado de nós condicionais, transformações, ferramentas, esperas | ❌ Não implementado |
 | Busca semântica, embeddings e memória RAG | Ollama opt-in, documentos privados/compartilhados e retenção; homologação com modelo real pendente |
 | Work queues externas, escalabilidade entre máquinas | PostgreSQL/Redis experimentais; aplicação continua usando SQLite |
@@ -381,6 +391,17 @@ dos modelos contêm pedidos de ferramenta em JSON: listar, ler, criar pasta,
 criar arquivo UTF-8, substituir um trecho exato e executar um comando de
 desenvolvimento permitido. Cada acesso passa novamente pela política da pasta.
 
+**Retomar um projeto pelo chat:** pedidos curtos como “continue o projeto”
+são vinculados ao pedido de implementação mais recente da mesma conversa.
+A Central acrescenta esse escopo e as evidências registradas da execução
+anterior, sem tratar o relato do modelo como prova de alterações ou testes.
+Se Autonomia estiver desligada, a Central bloqueia a execução antes de criar
+uma tarefa ou salvar uma mensagem fantasma e explica que a pasta precisa ser
+autorizada. Ao ativá-la, o trabalhador recebe a instrução de inspecionar o
+estado atual, continuar apenas o trabalho faltante e validar as alterações.
+Sem uma implementação anterior na conversa, a frase não é interpretada como
+ordem para alterar arquivos.
+
 **Comandos permitidos:** npm run build, npm test, npm ci --ignore-scripts,
 npm install --ignore-scripts PACOTE, python -m pytest -q,
 python -m compileall -q ., python -m venv .venv, pip install -r
@@ -455,18 +476,25 @@ edição, comando de ferramenta e resultado de validação. A fase Arquiteto
 tem limite menor (até 6 rodadas). Próximo ao limite, os trabalhadores
 recebem um aviso para terminar uma parte verificável.
 
-**Pausado por limite** NÃO significa falha no projeto: os arquivos já
-modificados permanecem no workspace, a etapa incompleta vira
-`paused_limit` e as etapas seguintes (como Revisor IA) ficam na fila.
-No Chat -> Atividade / Prévia, veja a última ação, os arquivos alterados,
-o resultado do último teste e **Continuar execução**. O mesmo botão aparece
-em Histórico. A retomada é explicitamente autorizada pela pessoa e
-recupera o histórico recente de ferramentas; não reexecuta o Arquiteto
-nem repete propositalmente a última alteração já confirmada.
+**Pausado por limite** NÃO significa falha no projeto, mas também não é
+conclusão: os arquivos já modificados permanecem no workspace, a etapa
+incompleta vira `paused_limit` e as etapas seguintes (como Revisor IA) ficam
+na fila. O chat agora registra uma resposta da Central indicando etapas
+concluídas/pendentes, motivo, última ação/resultado e o próximo passo.
+No Chat -> Atividade / Prévia, confira esses detalhes e use **Continuar
+execução** somente depois de corrigir o bloqueio ou orientar o trabalhador.
+A retomada é explicitamente autorizada pela pessoa e recupera o histórico
+recente de ferramentas; não reexecuta etapas concluídas.
+
+Se a mesma ação de ferramenta falhar duas vezes seguidas, o trabalhador é
+interrompido como bloqueado em vez de gastar o restante dos ciclos repetindo
+a chamada. O chat informa a falha e orienta corrigir caminho, arquivo ou
+permissão antes de retomar.
 
 **Falhou por erro** indica problemas reais de ferramenta, permissão,
 provedor ou validação que não puderam ser corrigidos na execução.
-É possível tentar retomá-la quando ainda há trabalhador pendente.
+O chat registra o motivo e o passo recomendado. É possível tentar retomá-la
+quando ainda há trabalhador pendente.
 **Concluído** só é permitido para uma implementação com alteração real
 e build/teste aprovado depois da última alteração. Logs de execução e
 checkpoints permanecem disponíveis por tarefa.
@@ -824,3 +852,13 @@ exportação, migrações SQLite, convites e backup criptografado.
 Há protótipos isolados de fila PostgreSQL, sinais Redis e ensaio de migração de
 metadados. A integração deles na aplicação, SSO e homologação de produção
 continuam pendentes.
+
+### OpenAI ChatGPT por assinatura (local)
+
+A Central também oferece **ChatGPT (assinatura)** como conexão separada da **OpenAI API**. Na tela Provedores, escolha ChatGPT, marque o consentimento e use **Continuar com ChatGPT**. A autorização abre no site oficial da OpenAI; após aprovar, a Central consulta a lista de modelos visível para aquela conta. Selecione um modelo, confirme o uso da cota do plano e a Central faz uma chamada de validação antes de cadastrá-lo.
+
+Essa modalidade usa o fluxo oficial Sign in with ChatGPT para aplicações open source/locais e a Responses API pública; não usa cookies do navegador nem endpoints internos do ChatGPT. Só funciona quando a Central é acessada por loopback local (`127.0.0.1`/`localhost`). Aplicações hospedadas remotamente ou em serviço comercial precisam de elegibilidade/integração própria da OpenAI. Ao desconectar, a Central tenta revogar a sessão renovável na OpenAI e apaga as credenciais locais; se a rede impedir a confirmação, a interface orienta a revogação nas configurações da conta ChatGPT. A disponibilidade depende da elegibilidade e da liberação do recurso para a conta.
+
+O token OAuth e o refresh token ficam cifrados no banco local usando a chave Fernet existente. Eles não são enviados ao React. A seleção de modelos usa o catálogo retornado pela conta autenticada e não presume que todos os modelos GPT estejam liberados. Cada teste e execução usa os limites e a cota elegível do plano ChatGPT; a API por chave continua separada e pode ter cobrança própria. O fluxo de assinatura usa Responses API com `store=false` e `stream=true`; ferramentas hospedadas pela OpenAI, áudio/vídeo e outros campos ainda indisponíveis nesse fluxo não são habilitados pela conexão.
+
+Referências oficiais: [Sign in with ChatGPT para apps open source/locais](https://developers.openai.com/siwc/token-sharing-open-source), [registro e autorização](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [modelos e inferência](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) e [limitações atuais](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).

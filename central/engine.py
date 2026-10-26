@@ -6,6 +6,9 @@ import time
 from collections import defaultdict
 from .database import uid, utcnow
 from .providers import ProviderClient, ProviderError
+from .token_usage import (estimate_tokens, reset_usage_callback,
+                          set_usage_callback)
+from . import chatgpt_plan
 from .memory import build_memory
 from .agent_autonomy import autonomous_worker
 from .observability import log_event
@@ -16,7 +19,7 @@ from .workspace_guard import bind_run, binding_summary
 from .quotas import require_capacity
 from .task_contract import (is_implementation_request, is_workspace_inspection_request,
                             needs_workspace_tools, assert_implementation_delivered,
-                            assert_inspection_performed)
+                            assert_inspection_performed, requires_browser_validation)
 
 from .agent_registry import (
     AgentRegistry, TEMPLATES, STANDARD_SPECIALTIES, KEYWORDS, suggested_default_specialty,
@@ -57,6 +60,75 @@ class RunOrchestrator:
     @health.setter
     def health(self, value):
         self.providers.health = value
+
+    def _record_run_feedback(self, run, status, error=''):
+        steps = self.db.all(
+            'SELECT id,name,status,error FROM steps WHERE run_id=? ORDER BY created_at',
+            (run['id'],))
+        completed = sum(step['status'] == 'completed' for step in steps)
+        progress = f'{completed} de {len(steps)} etapas concluídas'
+        pending = [step for step in steps if step['status'] != 'completed']
+        checkpoints = checkpoint_summary(self.db, run['user_id'], run['id'])
+        checkpoint = next((item for item in checkpoints
+                           if item['state'] in ('paused_limit', 'blocked', 'working')), None)
+
+        if status == 'paused_limit':
+            lines = [
+                'A execução foi pausada por limite; ela NÃO foi concluída.',
+                f'Progresso: {progress}.',
+            ]
+            if pending:
+                lines.append('Etapas pendentes: ' + ', '.join(
+                    f"{step['name']} ({step['status']})" for step in pending) + '.')
+            if error:
+                lines.append('Motivo: ' + error[:500])
+            if checkpoint:
+                step_name = next(
+                    (step['name'] for step in steps
+                     if step['id'] == checkpoint['step_id']), 'trabalhador')
+                lines.append(
+                    f"Última ação de {step_name}: "
+                    f"{checkpoint['last_action'] or 'não registrada'}. "
+                    f"Resultado: {checkpoint['last_result'] or 'não registrado'}.")
+            lines.append(
+                'Ação necessária: revise o último resultado no painel da execução. '
+                'Se houver um bloqueio de arquivo ou permissão, corrija-o na pasta autorizada; '
+                'se precisar orientar o trabalhador, envie um ajuste no painel. '
+                'Depois clique em “Continuar execução”.')
+        elif status == 'failed':
+            lines = [
+                'A execução falhou e não foi concluída.',
+                f'Progresso: {progress}.',
+            ]
+            failed = [step for step in steps if step['status'] == 'failed']
+            if failed:
+                lines.append('Etapa(s) com falha: ' + ', '.join(
+                    f"{step['name']}: {step['error'] or 'erro não informado'}"
+                    for step in failed) + '.')
+            if error and not failed:
+                lines.append('Motivo: ' + error[:500])
+            lines.append(
+                'Ação necessária: resolva o erro indicado acima. Se a falha depende '
+                'de arquivo, pasta ou autorização, corrija isso no workspace autorizado; '
+                'se depende do provedor, verifique a conexão ou escolha outro modelo. '
+                'Então use “Continuar execução” para retomar o checkpoint.')
+        else:
+            lines = [
+                'A execução foi parada antes da conclusão.',
+                f'Progresso: {progress}.',
+                'Ação necessária: retome a execução se deseja continuar; caso contrário, '
+                'as etapas pendentes não foram entregues.',
+            ]
+        message = '\n\n'.join(lines)
+        existing = self.db.one(
+            'SELECT id FROM messages WHERE conversation_id=? AND role=? AND content=? LIMIT 1',
+            (run['conversation_id'], 'assistant', message))
+        if not existing:
+            self.db.execute(
+                'INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                (uid(), run['conversation_id'], run['user_id'], 'assistant',
+                 'Central IA', message, utcnow()))
+        return message
 
     def emit(self, run_id, kind, data):
         self.db.event(run_id, kind, data)
@@ -132,6 +204,12 @@ class RunOrchestrator:
         finally:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
+            from .browser_mcp import close_run
+            try:
+                await close_run(rid)
+            except Exception as exc:
+                self.emit(rid, 'browser_mcp_cleanup_failed',
+                          {'error': str(exc)[:500]})
             row = self.db.one('SELECT status,error FROM runs WHERE id=?', (rid,))
             mapping = {'completed':'completed','paused_limit':'paused',
                        'failed':'failed','cancelled':'cancelled'}
@@ -178,6 +256,12 @@ class RunOrchestrator:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
         task_policy = validate_run_policy(classify_task(prompt, autonomous), autonomous)
+        if requires_browser_validation(prompt):
+            from .browser_mcp import available as browser_mcp_available
+            if not browser_mcp_available(self.db, user_id):
+                raise ValueError(
+                    'Esta tarefa exige teste com Chrome DevTools MCP. Ative a integração '
+                    'oficial em Skills e integrações antes de iniciar.')
         conversation = self.db.one(
             'SELECT user_id,project_id FROM conversations WHERE id=? AND user_id=?',
             (conversation_id,user_id))
@@ -205,7 +289,7 @@ class RunOrchestrator:
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
         else:
             chosen = self.registry.select(agents, prompt, mode, agent_ids)
-            if autonomous and mode == 'team' and not agent_ids:
+            if autonomous and implementation and not agent_ids:
                 # Use the correct implementation role for the actual task, and
                 # recover intact factory agents whose stored specialties drifted.
                 chosen = team_for_task(agents, prompt)
@@ -225,6 +309,10 @@ class RunOrchestrator:
                 raise ValueError(
                     'Uma implementação precisa de Programador, Frontend ou Backend IA. '
                     'Selecione Equipe ou inclua um trabalhador de programação.')
+            if autonomous and 'review' not in selected_specialties:
+                raise ValueError(
+                    'O fluxo autônomo de implementação exige um Revisor IA habilitado '
+                    'e incluído na equipe.')
             if mode == 'team' and 'review' not in selected_specialties:
                 raise ValueError(
                     'Modo Equipe exige um Revisor IA habilitado para verificar a entrega.')
@@ -299,7 +387,15 @@ class RunOrchestrator:
             steps = self.db.all('SELECT * FROM steps WHERE run_id=?', (run_id,))
             evidence = None
             if is_implementation_request(run['prompt']):
-                evidence = assert_implementation_delivered(self.db, run)
+                review_step = next((
+                    step for step in steps
+                    if step['kind'] == 'agent' and
+                    (agent := self.registry.get(run['user_id'], step['agent_id'])) and
+                    effective_specialty(agent) == 'review'), None)
+                evidence = assert_implementation_delivered(
+                    self.db, run,
+                    require_browser=requires_browser_validation(run['prompt']),
+                    require_review_step_id=review_step['id'] if review_step else None)
             elif is_workspace_inspection_request(run['prompt']):
                 evidence = assert_inspection_performed(self.db, run)
             complete = [s for s in steps if s['kind']=='agent' and s['output']]
@@ -310,6 +406,13 @@ class RunOrchestrator:
                     output += ('\n\n## Evidências verificadas\nArquivos modificados: ' +
                                ', '.join(evidence['changed_files']) +
                                '\nTestes/build aprovados após as alterações.')
+                    if evidence.get('references'):
+                        output += '\n\n## Referências pesquisadas\n' + '\n'.join(
+                            f"- {item['title']}: {item['url']}"
+                            for item in evidence['references'][:12])
+                    if evidence.get('browser_tools'):
+                        output += ('\n\nChrome DevTools MCP após as alterações: ' +
+                                   ', '.join(evidence['browser_tools']) + '.')
                 elif evidence.get('inspected'):
                     output += ('\n\n## Evidências verificadas\nItens consultados: ' +
                                ', '.join(item['path'] or '(raiz)' for item in evidence['inspected'][:8]))
@@ -338,8 +441,9 @@ class RunOrchestrator:
             self.db.execute(
                 "UPDATE runs SET status='paused_limit',error=?,updated_at=? WHERE id=?",
                 (error, utcnow(), run_id))
+            message = self._record_run_feedback(run, 'paused_limit', error)
             self.emit(run_id, 'run_paused_limit',
-                      {'error': error, 'message': 'Progresso salvo; clique em Continuar execução.',
+                      {'error': error, 'message': message,
                        'checkpoints': checkpoint_summary(self.db, run['user_id'], run_id)})
             self.emit(run_id, 'run_status', {'status': 'paused_limit'})
         except asyncio.CancelledError:
@@ -350,6 +454,8 @@ class RunOrchestrator:
                           else 'queued' if self.shutting_down else 'cancelled')
             self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (new_status,utcnow(),run_id))
             self.db.execute("UPDATE steps SET status='queued' WHERE run_id=? AND status IN ('running','awaiting_approval')", (run_id,))
+            if new_status == 'cancelled':
+                self._record_run_feedback(run, 'cancelled')
             self.emit(run_id,'run_status',{'status':new_status})
             raise
         except Exception as ex:
@@ -362,7 +468,8 @@ class RunOrchestrator:
                 self.emit(run_id, 'step_status',
                           {'id': item['id'], 'status': 'failed', 'error': error})
             self.db.execute("UPDATE runs SET status='failed',error=?,updated_at=? WHERE id=?", (error,utcnow(),run_id))
-            self.emit(run_id,'run_failed',{'error':error})
+            message = self._record_run_feedback(run, 'failed', error)
+            self.emit(run_id,'run_failed',{'error':error, 'message':message})
             self.emit(run_id,'run_status',{'status':'failed'})
 
     async def execute_step(self, run, step):
@@ -387,7 +494,19 @@ class RunOrchestrator:
         agent = self.registry.get(user, step['agent_id'])
         if not agent: raise RuntimeError('Trabalhador não encontrado.')
         from .addon_catalog import SkillContextClient
-        skill_client = SkillContextClient(self.client, self.db, self.security, user, run['id'], agent['id'])
+        skill_client = SkillContextClient(
+            self.client, self.db, self.security, user, run['id'], agent['id'],
+            on_selection=lambda inventory, docs: self.emit(
+                run['id'], 'skill_context_selected', {
+                    'step_id': sid,
+                    'available_count': inventory['total'],
+                    'available_skills': [item['name'] for item in inventory['skills']],
+                    'inventory_truncated': inventory['truncated'],
+                    'selected_skills': [{
+                        'name': item['name'], 'scope': item['scope'],
+                        'relevance_score': item['relevance_score'],
+                    } for item in docs],
+                }))
         specialty = effective_specialty(agent)
         prev = self.db.all('SELECT name,output FROM steps WHERE run_id=? AND status=? AND output IS NOT NULL', (run['id'],'completed'))
         context = '\n\n'.join(f"{p['name']}:\n{p['output'][:2500]}" for p in prev)[:5500]
@@ -414,6 +533,21 @@ class RunOrchestrator:
             '\nUse memórias somente do projeto atual ou da conversa avulsa atual; não presuma fatos ausentes.'
             '\nIdentifique as fontes recuperadas como documento ou conversa e indique quando puderem estar desatualizadas.'
         )
+        if run.get('autonomous') and is_implementation_request(run['prompt']):
+            if specialty == 'research':
+                system += (
+                    '\nETAPA DE PESQUISA: inspecione a stack detectada e faça buscas '
+                    'pontuais por documentação oficial ou fontes primárias quando '
+                    'isso reduzir risco técnico. Use reference_search e cite somente '
+                    'títulos/URLs registrados. Entregue recomendações verificáveis '
+                    'ao implementador; não edite arquivos.')
+            elif specialty == 'review':
+                system += (
+                    '\nETAPA DE REVISÃO/QA: confira os arquivos alterados e os resultados '
+                    'reais de build/teste. Leia ao menos um arquivo alterado e corrija '
+                    'defeitos concretos que encontrar; se corrigir '
+                    'qualquer arquivo, valide novamente depois da alteração. Nunca '
+                    'declare uma verificação que não executou.')
         if memory['sources']:
             self.emit(run['id'], 'memory_recalled', {
                 'step_id': sid, 'scope': memory['scope'],
@@ -431,7 +565,8 @@ class RunOrchestrator:
             for provider_index, provider in enumerate(providers):
                 if provider_index > 0:
                     self.emit(run['id'],'step_reset',{'step_id':sid,'reason':'failover'})
-                model = agent['model'] if provider['id']==agent['provider_id'] and agent['model'] else provider['model']
+                model = (provider['model'] if provider['kind'] == 'openai_chatgpt' else
+                    agent['model'] if provider['id']==agent['provider_id'] and agent['model'] else provider['model'])
                 if not model: continue
                 allowed, half_open = self.health.acquire(provider['id'], model)
                 if not allowed:
@@ -459,30 +594,70 @@ class RunOrchestrator:
                     parts = []
                     started = time.monotonic()
                     try:
-                        if run.get('autonomous'):
-                            output = await autonomous_worker(
-                                skill_client, self.db, user, run['id'], sid, provider,
-                                self.security.decrypt(provider['api_key_enc']), model,
-                                system, messages, self.emit,
-                                validate_at_finish=(is_implementation_request(run['prompt']) and
-                                                    specialty not in (
-                                                        'architecture', 'design', 'research', 'coordination')),
-                                require_code_changes=(is_implementation_request(run['prompt']) and
-                                                      specialty in ('code', 'frontend', 'backend')),
-                                require_observation=is_workspace_inspection_request(run['prompt']),
-                                require_document_read=('document' in run['prompt'].lower() or
-                                                       'arquivo' in run['prompt'].lower()),
-                                planning_only=specialty in ('architecture', 'coordination',
-                                                            'design', 'research'),
-                                workspace_executor=self.workspace)
-                            self.emit(run['id'], 'token', {
-                                'step_id': sid, 'agent': agent['name'], 'text': output})
+                        if provider['kind'] == 'openai_chatgpt':
+                            stored = await chatgpt_plan.stored_credentials(self.db, self.security,
+                                provider.get('chatgpt_connection_id'))
+                            api_credential = stored['access_token']
                         else:
-                            async for token in skill_client.stream(provider,self.security.decrypt(provider['api_key_enc']),model,system,messages):
-                                parts.append(token)
-                                self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
-                            output = ''.join(parts)
+                            api_credential = self.security.decrypt(provider['api_key_enc'])
+                        reported_usage = []
+
+                        def record_usage(usage):
+                            reported_usage.append(usage)
+                            self.db.execute(
+                                '''INSERT INTO token_usage
+                                   (id,user_id,run_id,step_id,agent_name,provider_name,
+                                    model,input_tokens,output_tokens,source,created_at)
+                                   VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
+                                (uid(), user, run['id'], sid, agent['name'], provider['name'],
+                                 model, usage['input_tokens'], usage['output_tokens'],
+                                 usage['source'], utcnow()))
+
+                        usage_scope = set_usage_callback(record_usage)
+                        try:
+                            if run.get('autonomous'):
+                                output = await autonomous_worker(
+                                    skill_client, self.db, user, run['id'], sid, provider,
+                                    api_credential, model,
+                                    system, messages, self.emit,
+                                    validate_at_finish=(is_implementation_request(run['prompt']) and
+                                                        specialty not in (
+                                                            'architecture', 'design', 'research', 'coordination')),
+                                    require_code_changes=(is_implementation_request(run['prompt']) and
+                                                          specialty in ('code', 'frontend', 'backend')),
+                                    require_observation=(
+                                        is_workspace_inspection_request(run['prompt']) or
+                                        (is_implementation_request(run['prompt']) and
+                                         specialty == 'review')),
+                                    require_document_read=(
+                                        'document' in run['prompt'].lower() or
+                                        'arquivo' in run['prompt'].lower() or
+                                        (is_implementation_request(run['prompt']) and
+                                         specialty == 'review')),
+                                    require_browser_validation=(
+                                        requires_browser_validation(run['prompt']) and
+                                        specialty in ('code', 'frontend', 'backend', 'review')),
+                                    planning_only=(is_implementation_request(run['prompt']) and
+                                                   specialty in ('architecture', 'coordination',
+                                                                 'design', 'research')),
+                                    workspace_executor=self.workspace)
+                                self.emit(run['id'], 'token', {
+                                    'step_id': sid, 'agent': agent['name'], 'text': output})
+                            else:
+                                async for token in skill_client.stream(provider,api_credential,model,system,messages):
+                                    parts.append(token)
+                                    self.emit(run['id'],'token',{'step_id':sid,'agent':agent['name'],'text':token})
+                                output = ''.join(parts)
+                        finally:
+                            reset_usage_callback(usage_scope)
                         if not output.strip(): raise ProviderError('response','Resposta vazia.',True)
+                        if not reported_usage:
+                            record_usage({
+                                'input_tokens': estimate_tokens(
+                                    system + ''.join(m.get('content', '') for m in messages)),
+                                'output_tokens': estimate_tokens(output),
+                                'source': 'estimated',
+                            })
                         health_event = self.health.record(provider['id'], model, success=True,
                             latency_ms=(time.monotonic()-started)*1000, run_id=run['id'], step_id=sid)
                         if health_event['recovered']:

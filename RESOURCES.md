@@ -4,13 +4,14 @@ Esta entrega mantém o perfil local da Central. São três tipos distintos:
 
 | Tipo | Implementado | Não implementado |
 | --- | --- | --- |
-| Skill | Importação por arquivo/pasta e repositório Git conectado, prévia, confirmação, gestão, ativação explícita, associações por usuário e contexto real nos modelos | Scripts, hooks, carregamento dinâmico de anexos e instalação de dependências |
-| VSIX | Inspeção estática, armazenamento privado, busca consentida de metadados públicos do Marketplace, exportação e remoção da Central | Instalação/desinstalação no VS Code, download do Marketplace e ponte de ferramentas |
-| MCP | Configuração declarativa, prévia das ferramentas/permissões declaradas, armazenamento inativo, revogação e exclusão | Conexão, descoberta de ferramentas, `stdio`, HTTP/SSE, chamada de ferramentas e credenciais de servidor |
+| Skill | Importação por arquivo/pasta e URL GitHub pública; token de leitura é solicitado somente quando necessário, com prévia, confirmação, gestão, ativação, associações e contexto nos modelos | Scripts, hooks, carregamento dinâmico de anexos e instalação de dependências |
+| VSIX | Inspeção estática, armazenamento privado, busca consentida de metadados públicos do Marketplace, exportação, instalação e desinstalação local com revisão separada | Download do Marketplace, dependências automáticas e ponte de ferramentas |
+| MCP | Importação inativa; ativação do manifesto oficial Chrome DevTools MCP 1.0.1; cliente `stdio` fixo; inspeção local aprovada por chamada | Comandos/args/env importados, servidores MCP arbitrários, HTTP/SSE e navegação para sites externos |
 
 Importação nunca ativa recursos. A inspeção não certifica segurança ou
-autenticidade do autor. VSIX e MCP não oferecem ferramentas aos agentes.
-O campo `runtime_enabled` só pode ser verdadeiro para uma Skill ativa.
+autenticidade do autor. VSIX não oferece ferramentas aos agentes. Skills
+precisam de associação explícita. O servidor MCP só é executado após ativação
+separada, com pacote npm fixado e sem usar comandos declarados no arquivo.
 
 ## Arquitetura e decisões
 
@@ -20,7 +21,7 @@ de pastas em `computer_access.py`, vínculo imutável de workspace, aprovações
 no executor e Docker opcional. Esses componentes continuam responsáveis por
 autorizar qualquer ferramenta. Nenhum comando foi acrescentado ao executor.
 
-As migrações SQLite **9 e 10**, aditivas e com checksum, criam `ai_resources`,
+As migrações SQLite **9, 10 e 11**, aditivas e com checksum, criam `ai_resources`,
 `skill_bindings` e o registro mínimo `resource_run_usage`. Conteúdo e metadados são criptografados com a chave existente
 da Central. Proprietário, organização, tipo, SHA-256, estado, tamanho, data e
 origem genérica ficam no registro. Caminhos locais de importação não são
@@ -32,34 +33,77 @@ permissões/persistência e HTTP. As rotas usam a autenticação existente, exig
 cliente local e validam CSRF e origem (incluindo porta) nas mutações.
 Arquivos são enviados ao backend local, nunca a serviços de inspeção externos.
 Não há extração de ZIP para o disco ou execução de hooks. Configurações MCP
-nunca resolvem endpoints. As únicas leituras externas são pedidos explícitos
-a uma conexão GitHub do usuário e buscas consentidas de metadados do Marketplace.
+nunca resolvem endpoints. As leituras externas do importador Git acontecem somente após ação explícita do usuário; repositórios públicos são consultados sem credencial. Buscas de metadados do Marketplace exigem consentimento.
 
 ### Importação de Skill pelo Git
 
-O importador usa uma conexão GitHub já salva pelo próprio usuário.
-O link precisa corresponder exatamente ao provedor e repositório da conexão;
-tokens não são aceitos em URLs. Links de repositório usam a branch padrão;
-links `tree` podem apontar uma branch simples (sem `/`) e pasta. O importador precisa encontrar
-exatamente um `SKILL.md`, limita o número e tamanho dos arquivos, rejeita
-symlinks/submódulos e cria uma prévia que precisa de confirmação separada.
-O hash do commit e a origem ficam associados ao recurso; o nome/caminho privado
-do repositório só aparece ao proprietário. O importador não faz checkout e
-não executa scripts, mesmo que a Skill contenha arquivos executáveis.
+Cole uma URL HTTPS do GitHub. Repositórios públicos são consultados sem token; a URL da raiz usa a branch padrão. Links `tree` também podem especificar uma branch simples e uma pasta.
+
+Na URL da raiz, a Central procura todas as pastas que contenham `SKILL.md` e mostra uma prévia em lote. Cada Skill distinta aparece separadamente; cópias byte a byte idênticas (mesmo SHA de blob) são agrupadas e importadas uma só vez, com seus caminhos exibidos. A confirmação cria todas como recursos privados e inativos em uma única transação; se uma delas falhar, nenhuma é salva. São aceitas até 50 Skills por lote e até 32 MiB no conjunto. O escaneamento da raiz é limitado a 50.000 entradas e a resposta da API a 8 MiB; quando o GitHub trunca a árvore, a prévia avisa que a lista pode estar incompleta. Um link `tree` para uma pasta continua limitando a busca à pasta indicada.
+
+Na busca pela raiz, pastas `test`, `tests`, `__tests__` e `fixtures` são excluídas; links diretos continuam permitindo inspecioná-las. Se os anexos excederem os limites por arquivo, quantidade ou tamanho total, a prévia oferece somente `SKILL.md` e informa o número de arquivos omitidos antes da confirmação. Essa modalidade não instala o CLI, scripts ou referências auxiliares do pacote. O limite de 64 KiB do próprio `SKILL.md` permanece obrigatório. A versão também pode ser declarada em `metadata.version`, como nas variantes Codex. Campos `user-invocable`, `disable-model-invocation` e `argument-hint` são aceitos como metadados inertes, sem alterar permissões.
+
+A Central interpreta apenas `SKILL.md` e arquivos auxiliares dentro da pasta escolhida. Não converte extensões VSIX, manifests MCP, comandos ou arquivos específicos de outras ferramentas em Skills; esses recursos continuam separados. Scripts e hooks nunca são executados.
+
+A API acessada é fixa (`api.github.com`), sem seguir redirecionamentos e sem usar proxy do ambiente. Quando a consulta pública falha por acesso privado/inexistente, a tela oferece uma conexão Git salva correspondente ou permite cadastrar um token fine-grained de leitura. Se a URL for pública, não é necessário conectar uma conta. O token é cifrado pelo mecanismo existente e nunca é aceito dentro da URL. Respostas que indiquem limite temporário da API são exibidas como limite, não como falta de autenticação.
+
+A prévia precisa de confirmação separada. O hash do commit e a origem ficam associados ao recurso; o nome/caminho privado do repositório só aparece ao proprietário. O importador limita o número e o tamanho dos arquivos, rejeita symlinks e submódulos, não faz checkout e não executa arquivos, mesmo que o pacote contenha arquivos executáveis.
 
 ### Busca de extensões VS Code
 
 Na aba VSIX, a busca só ocorre depois de marcar consentimento. Somente o texto
 de busca é enviado ao endpoint fixo do Marketplace; são devolvidos no máximo
-20 registros de metadados. O código não solicita arquivos/URLs de pacotes,
-não baixa VSIX e não instala extensões. Uma extensão listada não está
-instalada nem fornece ferramentas aos agentes. Importar um VSIX local continua
-sendo uma ação separada com inspeção estática.
+20 registros de metadados. O código não solicita arquivos/URLs de pacotes nem
+baixa VSIX. Uma extensão listada não está instalada nem fornece ferramentas aos
+agentes. Importar um VSIX local continua sendo uma ação separada com inspeção
+estática; a instalação só ocorre após revisão e confirmação na Central.
 
-MCP pode expor ferramentas de Git quando um servidor MCP dedicado as implementa.
-Esta Central não conecta nem executa esse servidor; sua configuração permanece
-declarativa e inativa. A importação Git acima usa as conexões Git existentes,
-sem alegar integração MCP funcional.
+### Chrome DevTools MCP
+
+Importe o `server.json` do registro oficial MCP, disponível no projeto em
+`examples/chrome-devtools/server.json` (versão 1.0.1), e revise a prévia. A
+Central aceita a ativação somente desse manifesto exato e inicia
+`chrome-devtools-mcp@1.0.1` com `npx`; valores importados de `command`, `args`,
+`env`, endpoints ou headers nunca são executados. O Python MCP SDK é uma
+dependência da Central. O Node.js e um Chrome compatível precisam estar
+instalados no host.
+
+As ações disponibilizadas aos agentes são leitura de páginas, snapshot,
+console, estilos, Lighthouse e abertura/navegação local. O agente não recebe
+shell, execução de JavaScript na página, upload, digitação ou submissão de
+formulários. O usuário aprova cada chamada no chat. Só são aceitos endereços
+HTTP(S) em `localhost`, `127.0.0.1` ou `::1`; a allowlist de navegação também
+bloqueia redirecionamentos externos. Abas não locais são ocultadas e não podem
+ser selecionadas. A integração não conecta ao perfil pessoal do Chrome.
+
+No painel **Memória e histórico** de cada projeto, escolha entre:
+
+- **Isolada por execução** (padrão): perfil Chromium temporário e removido ao
+  encerrar a execução.
+- **Persistente no projeto**: perfil separado do Chrome pessoal, em diretório
+  privado da Central, mantendo cookies e armazenamento local entre execuções
+  daquele projeto. O perfil não é compartilhado entre contas.
+
+O servidor MCP permanece aberto durante a execução e é encerrado ao finalizar,
+falhar, pausar ou cancelar a tarefa. As seis Skills do repositório oficial são
+importadas separadamente pelo preview GitHub como lote privado e inativo; a
+Central não as ativa nem associa automaticamente.
+
+### Pesquisa técnica e referências externas
+
+Nas tarefas autônomas, o Pesquisador IA pode consultar documentação pública por
+uma busca fixa no DuckDuckGo. Antes de cada requisição, a Central mostra a
+consulta exata e aguarda aprovação; só o texto dessa consulta é enviado ao
+serviço de busca. Não inclua nomes privados de projetos, trechos do workspace,
+prompts completos ou segredos. A Central não abre nem baixa os resultados da
+busca: registra título, URL e trecho retornados como referências externas não
+confiáveis, que devem ser conferidas antes de orientar mudanças.
+
+Tarefas que pedem explicitamente teste com Chrome DevTools MCP não começam se
+a integração oficial estiver inativa. A conclusão também é bloqueada até que
+snapshot, console e Lighthouse tenham sido executados depois da última mudança
+de código. Cada chamada ainda depende da aprovação individual no chat e só
+pode acessar endereços locais.
 
 Prévias validadas ficam somente em memória por até dez minutos de validade,
 com limite de duas por conta, 16 por processo e 64 MiB de conteúdo no processo.
@@ -147,19 +191,36 @@ com os mesmos privilégios no host.
 
 ### Seleção e contexto real
 
-Seleção somente por associações explícitas. A ordem determinística é:
-**execução → projeto da conversa → agente**, com IDs ordenados dentro de cada
-grupo, deduplicação e no máximo quatro Skills. O corpo de cada Skill é
-truncado em até 3.500 caracteres, com até 10.000 caracteres de corpos e limite
-serializado de 11.000 caracteres; a mensagem adicional total fica abaixo de
-12.000. Nem toda Skill associada cabe necessariamente no contexto.
+Busca somente entre Skills **ativas e explicitamente associadas** à execução,
+ao projeto da conversa ou ao agente. Não há busca fora desse escopo. A Central
+monta um catálogo factual limitado às primeiras 20 Skills (com indicação de
+truncamento), compara termos do pedido com nome, descrição e instruções e
+seleciona até quatro correspondências. Nome e descrição têm maior peso; texto
+de instruções desempata/reforça correspondências. O ranqueamento é lexical,
+não semântico: termos sem correspondência textual podem não encontrar a Skill.
+Em caso de empate, prevalece a ordem **execução → projeto → agente**, com IDs
+ordenados dentro de cada grupo e deduplicação. Cada corpo selecionado tem até
+3.500 caracteres e 10.000 caracteres totais. Quando o `SKILL.md` é maior, o
+contexto mantém seu início e prioriza blocos com termos relevantes ao pedido,
+sem incluir anexos ou referências não importadas. Regras fora dos trechos ainda
+podem ficar indisponíveis. O limite serializado é de 11.000 caracteres. O catálogo factual enviado junto do contexto
+inclui nomes, descrições resumidas e escopo; a aplicação registra na atividade
+quais Skills estavam disponíveis e quais foram selecionadas para a chamada.
 
 `SkillContextClient` envolve o cliente no motor, incluindo o caminho autônomo.
 Acrescenta contexto efêmero a cada chamada e revalida estado/permissões. Não
 altera o transcript original ou o checkpoint, nem registra as instruções em
-eventos de auditoria. Respostas do modelo seguem o fluxo normal de conversa e
-podem mencionar o contexto; isso não representa cópia automática do pacote
-para o histórico. O tamanho adicional entra na estimativa de orçamento.
+eventos de auditoria. Respostas factuais sobre disponibilidade devem usar o
+catálogo enviado, e o modelo é instruído a não alegar uso de Skills que não
+estejam na lista selecionada. Como a resposta ainda é gerada por um modelo,
+isso melhora a fundamentação e a rastreabilidade, mas não garante obediência
+perfeita. O contexto da Skill é enviado antes do pedido atual, que permanece
+como última mensagem, e o modelo recebe instruções para seguir a Skill pertinente
+sem inventar conteúdo ausente. O papel de planejamento restrito só é aplicado
+a trabalhadores de planejamento quando a tarefa pede uma implementação.
+Respostas seguem o fluxo normal de conversa e podem mencionar o
+contexto; isso não representa cópia automática do pacote para o histórico. O
+catálogo e o contexto adicional entram na estimativa de orçamento.
 
 O conteúdo é identificado como não confiável. Não substitui a solicitação do
 usuário, não modifica política, não cria ferramentas e não concede acesso à
@@ -180,11 +241,9 @@ especiais, reparse points, duplicatas (incluindo diferenças de caixa/Unicode),
 colisões arquivo/diretório, criptografia ou proporção de compressão excessiva
 são rejeitados. Validação estrutural não equivale a antivírus ou assinatura.
 
-**Remover pacote da Central não desinstala nada do VS Code.** Uma instalação
-real exigiria escolha e validação do VS Code de destino, confirmação específica
-e verificação dos riscos: extensões executam código com privilégios do usuário.
-Uma ponte futura com agentes precisará de protocolo autenticado e autorização
-de workspace separados. Não há download do Marketplace nesta entrega.
+**Remover pacote da Central não desinstala nada do VS Code.** Para instalar, selecione o VS Code estável encontrado nos caminhos padrão do Windows e confirme a ação separadamente após revisar o risco: extensões executam código com privilégios do usuário. O instalador só aceita VSIX pessoal, recusa dependências/pacotes de extensão, escreve temporariamente o arquivo já revisado e chama o `Code.exe` validado com argumentos fixos. A Central verifica a versão instalada antes de informar sucesso. Não usa `--force`, não baixa do Marketplace e não instala dependências.
+
+A desinstalação também requer confirmação separada e identifica a extensão pelo publisher/nome do VSIX importado. Ela desinstala do destino VS Code selecionado, mas não remove o pacote da Central. Somente instalações estáveis localizadas em `%LOCALAPPDATA%\Programs\Microsoft VS Code`, `%PROGRAMFILES%\Microsoft VS Code` ou `%PROGRAMFILES(X86)%\Microsoft VS Code` são listadas. Extensões com dependências declaradas precisam ser tratadas manualmente no VS Code. Uma ponte futura com agentes precisará de protocolo autenticado e autorização de workspace separados. Não há download do Marketplace nesta entrega.
 
 ## Configuração declarativa MCP da Central
 
@@ -210,28 +269,13 @@ JSON até 128 KiB, sem campos desconhecidos ou chaves JSON duplicadas:
 }
 ```
 
-Transportes declarados: `stdio`, `streamable-http`, `sse`. Para `stdio`, omita
-`endpoint`; não inclua `command`, `args` ou `env`. Para HTTP, o endpoint deve
-ser URL HTTP(S) sem credenciais, query ou fragmento. Não há resolução DNS nem
-conexão — inclusive URLs locais são apenas dados inativos, não endpoints
-aprovados para uso futuro.
-
-Ferramentas: até 100 nomes únicos, descrições até 1.000 caracteres e
-`inputSchema` de objeto, com profundidade limitada e sem referências externas,
-defaults ou examples. Permissões declaradas: `workspace.read`,
-`workspace.write`, `network`, `external.write`. Declarar não concede nenhuma.
-Esses dados são a descrição do importador; `tools_verified=false` indica que
-não houve descoberta no servidor. Não é um formato universal de configuração
-de clientes MCP; converta manifestos de outros clientes conscientemente.
-
-Não são aceitos tokens, headers ou variáveis de ambiente de autenticação.
-Nenhuma credencial MCP é usada ou necessária enquanto não houver transporte.
-Não existe rota de conexão/chamada; a API rejeita ativação MCP. Portanto não
-há SSRF de transporte, subprocesso ou contorno do Docker nesta entrega.
-O transporte futuro exige proteção SSRF/DNS rebinding/redirects, consentimento,
-allowlists por usuário/organização, timeouts, cancelamento, limites de resposta
-e a mesma autorização de workspace. `stdio` exige configuração de executáveis
-pelo operador, isolamento e encerramento confiável. Até lá, tudo fica inativo.
+Configurações declarativas de outros servidores podem ser importadas e
+exportadas, mas não ativadas. O importador só ativa o manifesto exato do
+Chrome DevTools MCP 1.0.1, sem aceitar executáveis, argumentos, variáveis de
+ambiente, endpoints ou credenciais do arquivo. A execução passa pela política
+de workspace e por uma aprovação humana de cada ferramenta; veja a seção
+**Chrome DevTools MCP** acima. Endpoints declarativos, inclusive URLs locais,
+continuam sem conexão.
 
 ## Verificação
 
@@ -250,33 +294,39 @@ O CI inclui a suíte Python e os novos testes Node, além do build React.
 
 Referências de formato: [manifesto VS Code](https://code.visualstudio.com/api/references/extension-manifest)
 e [transportes MCP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
-Essas referências não significam que a Central executa extensões ou MCP.
+Essas referências não significam suporte a extensões arbitrárias ou a servidores
+MCP fora do Chrome DevTools oficial, pinado e aprovado.
 
 ### Arquivos desta entrega
 
 - Backend: `central/addon_packages.py`, `central/addon_catalog.py`,
-  `central/addon_api.py`, `central/addon_git_import.py`,
-  `central/addon_marketplace.py`, `central/addon_schema.py`, `central/migrations.py`,
-  `central/main.py` e `central/engine.py`.
+  `central/addon_api.py`, `central/vscode_install.py`, `central/addon_git_import.py`,
+  `central/addon_marketplace.py`, `central/addon_schema.py`,
+  `central/browser_mcp.py`, `central/migrations.py`, `central/main.py` e
+  `central/engine.py`.
 - Interface: `frontend/src/ResourcesPanel.jsx`, `frontend/src/resourceClient.mjs`
-  e `frontend/src/App.jsx`.
-- Testes: `tests/test_addon_resources.py`, `tests/conftest.py`,
-  `tests/test_job_queue.py`, `tests/test_production_foundations.py` e
+  `frontend/src/ConversationMemoryPanel.jsx` e `frontend/src/App.jsx`.
+- Testes: `tests/test_addon_resources.py`, `tests/test_browser_mcp.py`,
+  `tests/test_app.py`, `tests/test_agent_autonomy.py` e
   `frontend/src/resources.test.mjs`.
+- Histórico seguro das operações VS Code: migração 11 em `central/migrations.py`.
+- Preferência e perfil de navegador por projeto: migração 14 em `central/migrations.py`.
 - Execução dos testes: `package.json` e `.github/workflows/ci.yml`.
 - Documentação: `README.md`, `ROADMAP.md` e este arquivo.
 
-### Evidência local desta entrega
+### Evidência local desta etapa
 
-Em 25/10/2026, a seleção ampliada de 24 módulos aprovou **286 testes Python**,
-com 25 ignorados (serviços opcionais/limitação de symlink do Windows) e sete
-deselecionados por dependerem de sockets/asyncio. Os testes específicos desta
-entrega aprovaram 63 casos, com um ignorado e um TestClient deselecionado.
-**23 testes Node**, build React, compileall e `git diff --check` aprovados.
+Nesta alteração, a suíte Python completa aprovou **457 testes, com 26 ignorados**;
+`npm test` aprovou **31 testes**, `npm run build`, `compileall` e
+`git diff --check` também passaram. Os testes cobrem importação/ativação estrita
+do manifesto, restrição a loopback, filtro de páginas, aprovação por ferramenta,
+preferência do navegador por projeto e remoção explícita do perfil. O teste
+automatizado não iniciou o pacote npm nem o Chrome real: a conexão real só deve
+ser iniciada em modo headless após o usuário ativar o recurso e aprovar uma chamada
+no chat.
 
-A suíte `pytest -q` integral foi iniciada e interrompida após 45 segundos:
-o TestClient travou em `socket._fallback_socketpair`, antes de despachar a
-requisição. Isso não é uma aprovação da suíte integral. O teste HTTP completo
-permanece no CI; autorização HTTP, CSRF/origem e handlers de importação/exportação
-também foram exercitados diretamente sem sockets. Não houve homologação visual
-em navegador nem instalação VS Code ou execução de MCP.
+### Compatibilidade de metadados externos
+
+Skills aceitam também `license` e `allowed-tools` (texto ou lista simples de até 32 itens). Esses campos são apenas declarativos: não liberam ferramentas, comandos, permissões ou execução. Outros formatos YAML continuam sujeitos à validação restrita.
+
+O teste `test_real_impeccable_metadata_and_private_import` usa um snapshot real obtido em 25/10/2026 de https://github.com/pbakaus/impeccable/blob/main/.agent/skills/impeccable/SKILL.md (Apache 2.0). Verifica validação, confirmação, gravação privada e estado inativo. Não equivale a um teste de download do repositório inteiro nem da interface em execução.

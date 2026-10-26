@@ -12,6 +12,8 @@ export default function ConversationMemoryPanel({
   const [projectId, setProjectId] = useState(currentProjectId || '')
   const [notes, setNotes] = useState('')
   const [retrieval, setRetrieval] = useState(null)
+  const [browserMode, setBrowserMode] = useState('run_isolated')
+  const [profileCleared, setProfileCleared] = useState(false)
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState('project')
   const [results, setResults] = useState(null)
@@ -32,6 +34,16 @@ export default function ConversationMemoryPanel({
     return () => { active = false }
   }, [projectId, api])
 
+  useEffect(() => {
+    let active = true
+    setBrowserMode('run_isolated')
+    setProfileCleared(false)
+    if (projectId) api('/projects/' + encodeURIComponent(projectId) + '/browser-session')
+      .then(value => { if (active) setBrowserMode(value.mode) })
+      .catch(err => { if (active) setError(err.message) })
+    return () => { active = false }
+  }, [projectId, api])
+
   async function toggleRetrieval() {
     setBusy('retrieval'); setError('')
     try {
@@ -47,6 +59,30 @@ export default function ConversationMemoryPanel({
       await api('/projects/' + encodeURIComponent(activeProject.id) + '/memory', 'PUT', { notes })
       await onRefresh()
     } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
+  async function saveBrowserMode(mode) {
+    if (!activeProject) return
+    setBusy('browser')
+    setError('')
+    try {
+      const saved = await api('/projects/' + encodeURIComponent(activeProject.id) +
+        '/browser-session', 'PUT', { mode })
+      setBrowserMode(saved.mode)
+      setProfileCleared(false)
+    } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
+
+  async function clearBrowserProfile() {
+    if (!activeProject || !window.confirm(
+      'Apagar permanentemente cookies e armazenamento local do perfil privado deste projeto?')) return
+    setBusy('browser')
+    setError('')
+    try {
+      await api('/projects/' + encodeURIComponent(activeProject.id) + '/browser-session',
+        'DELETE')
+      setProfileCleared(true)
+    } catch (err) { setError(err.message) } finally { setBusy('') }
   }
 
   async function saveScope() {
@@ -120,6 +156,23 @@ export default function ConversationMemoryPanel({
           <span className="text-[10px] text-muted">{notes.length}/8000 caracteres</span>
           <button type="button" className={action} onClick={saveNotes} disabled={!!busy || notes === (activeProject.memory_notes || '')}>{busy === 'notes' ? 'Salvando...' : 'Salvar notas'}</button>
         </div>
+      </section>}
+
+      {activeProject && <section className="mt-4 rounded-2xl border border-white/10 p-4">
+        <h3 className="text-sm font-semibold">Sessão do navegador para testes</h3>
+        <p className="mt-2 text-xs leading-5 text-muted">A escolha vale para as execuções autônomas deste projeto. Ambos os modos usam um Chromium gerenciado pela Central, limitado a sites locais autorizados e com aprovação antes de cada ferramenta.</p>
+        <label className="mt-3 block text-xs text-muted">Persistência da sessão
+          <select aria-label="Persistência da sessão do navegador" value={browserMode}
+            disabled={!!busy} onChange={e => saveBrowserMode(e.target.value)} className={field + ' mt-2'}>
+            <option value="run_isolated">Isolada por execução — apaga a sessão ao terminar</option>
+            <option value="project_persistent">Persistente no projeto — mantém cookies e armazenamento entre execuções</option>
+          </select>
+        </label>
+        {browserMode === 'project_persistent' && <div className="mt-2 space-y-2">
+          <p className="text-xs text-amber-200">O perfil é privado deste projeto e separado do seu Chrome pessoal. Use o modo isolado quando não quiser reutilizar cookies e armazenamento local do projeto.</p>
+          <button type="button" className={action} disabled={!!busy} onClick={clearBrowserProfile}>Apagar perfil persistente do projeto</button>
+          {profileCleared && <p role="status" className="text-xs">Perfil apagado; será recriado vazio no próximo uso.</p>}
+        </div>}
       </section>}
 
       {activeProject && <KnowledgePanel key={activeProject.id} api={api} projectId={activeProject.id} />}

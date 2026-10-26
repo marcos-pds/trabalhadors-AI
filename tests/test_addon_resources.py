@@ -29,6 +29,22 @@ MCP = {'name': 'test', 'version': '1.0.0', 'transport': 'streamable-http',
        'endpoint': 'https://mcp.example.test/api', 'permissions': ['workspace.read'],
        'tools': [{'name': 'read', 'description': 'Declared only',
                   'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}}}]}
+DEVTOOLS_SERVER = {
+    '$schema': 'https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json',
+    'name': 'io.github.ChromeDevTools/chrome-devtools-mcp',
+    'title': 'Chrome DevTools MCP',
+    'description': 'MCP server for Chrome DevTools',
+    'repository': {'url': 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
+                   'source': 'github'},
+    'version': '1.0.1',
+    'packages': [{
+        'registryType': 'npm',
+        'registryBaseUrl': 'https://registry.npmjs.org',
+        'identifier': 'chrome-devtools-mcp',
+        'version': '1.0.1',
+        'transport': {'type': 'stdio'},
+    }],
+}
 
 
 def zipped(entries):
@@ -161,8 +177,20 @@ def test_git_repository_skill_is_read_limited_previewed_and_never_executed(catal
         path = request.url.path
         if path.endswith('/branches/main'):
             return httpx.Response(200, json={'commit': {'sha': commit}})
-        if path.endswith('/git/trees/' + commit):
-            return httpx.Response(200, json={'truncated': False, 'tree': list(blobs.values())})
+        tree_sha = path.rsplit('/', 1)[-1]
+        if '/git/trees/' in path:
+            if tree_sha == commit:
+                return httpx.Response(200, json={'tree': [{'path': 'skills', 'type': 'tree', 'sha': 'd'*40}]})
+            if tree_sha == 'd'*40:
+                return httpx.Response(200, json={'tree': [{'path': 'review', 'type': 'tree', 'sha': 'e'*40}]})
+            if tree_sha == 'e'*40 and request.url.params.get('recursive') == '1':
+                return httpx.Response(200, json={'truncated': False, 'tree': [
+                    {**blobs[skill_path], 'path': 'SKILL.md'},
+                    {**blobs[script_path], 'path': 'helper.py'}]})
+            if tree_sha == 'e'*40:
+                return httpx.Response(200, json={'tree': [
+                    {'path': 'SKILL.md', 'type': 'blob', 'sha': 'b'*40},
+                    {'path': 'helper.py', 'type': 'blob', 'sha': 'c'*40}]})
         if '/git/blobs/' in path:
             raw = by_sha[path.rsplit('/', 1)[-1]]
             return httpx.Response(200, json={'encoding': 'base64', 'content': base64.b64encode(raw).decode()})
@@ -177,7 +205,7 @@ def test_git_repository_skill_is_read_limited_previewed_and_never_executed(catal
     )
     assert metadata['name'] == 'review-code'
     assert source['commit'] == commit and source['path'] == 'skills/review'
-    assert len(requests) == 4
+    assert len(requests) == 6
     assert all(r.headers['authorization'] == 'Bearer read-token' for r in requests)
     preview = catalog.preview('alice', 'skill', 'skill.zip', raw, 'git_repository', source)
     assert preview['source']['repository'] == 'acme/skills'
@@ -294,6 +322,40 @@ def test_mcp_tool_duplicates_external_schema_refs_and_duplicate_json():
             pkg.inspect('mcp', 'server.json', json.dumps(config).encode())
     with pytest.raises(pkg.InvalidPackage):
         pkg.inspect('mcp', 'server.json', b'{"name":"x","name":"y"}')
+
+
+def test_official_devtools_manifest_is_pinned_and_never_imports_commands(catalog):
+    metadata = pkg.inspect('mcp', 'server.json',
+                           json.dumps(DEVTOOLS_SERVER).encode())
+    assert metadata['server_id'] == 'chrome-devtools'
+    assert metadata['version'] == '1.0.1'
+    assert metadata['execution_enabled'] is False
+    assert metadata['tools_verified'] is False
+    compatible = json.loads(json.dumps(DEVTOOLS_SERVER))
+    compatible['packages'][0]['environmentVariables'] = []
+    assert pkg.inspect('mcp', 'server.json',
+                       json.dumps(compatible).encode()) == metadata
+    for mutate in (
+        lambda item: item['packages'][0].update(version='latest'),
+        lambda item: item['packages'][0].update(environmentVariables=[{'name': 'X'}]),
+        lambda item: item['packages'][0].update(identifier='other-package'),
+        lambda item: item['packages'][0].update(command='powershell'),
+    ):
+        candidate = json.loads(json.dumps(DEVTOOLS_SERVER))
+        mutate(candidate)
+        with pytest.raises(pkg.InvalidPackage):
+            pkg.inspect('mcp', 'server.json', json.dumps(candidate).encode())
+
+
+def test_only_official_personal_devtools_resource_can_be_activated(catalog):
+    generic = imported(catalog, 'mcp', raw=json.dumps(MCP).encode())
+    with pytest.raises(HTTPException) as ex:
+        catalog.state('alice', generic['id'], 'active', generic['sha256'])
+    assert ex.value.status_code == 409
+    resource = imported(catalog, 'mcp', raw=json.dumps(DEVTOOLS_SERVER).encode())
+    active = catalog.state('alice', resource['id'], 'active', resource['sha256'])
+    assert active['enabled'] is True
+    assert active['availability'] == 'ready_for_approval'
 
 
 def test_vsix_minimum_vscode_version_is_not_invented_for_complex_ranges():
@@ -424,6 +486,84 @@ def test_deterministic_context_limits_and_no_script_injection(catalog):
     assert docs == catalog.context('alice', run, 'alice-agent')
 
 
+def test_skill_context_includes_relevant_rules_after_prefix_limit(catalog):
+    _, run = run_fixture(catalog)
+    prefix = 'General design guidance. ' * 200
+    instructions = (prefix + '\n\n## Commands\n\n'
+                    '| `audit [target]` | Evaluate | Technical quality checks | reference/audit.md |\n\n'
+                    'When explicitly asked to run a command, load its reference and follow it.')
+    saved = imported(catalog, raw=(
+        '---\nname: impeccable\ndescription: Design and audit frontend interfaces\n'
+        'version: 1.0.0\n---\n' + instructions).encode())
+    catalog.state('alice', saved['id'], 'active', saved['sha256'])
+    catalog.bind('alice', saved['id'], 'run', run, True)
+
+    docs = catalog.context(
+        'alice', run, 'alice-agent',
+        query='What does this skill say to do when asked to run audit?')
+
+    assert docs and len(docs[0]['text']) <= 3500
+    assert '`audit [target]`' in docs[0]['text']
+    assert 'load its reference and follow it' in docs[0]['text']
+
+
+def test_skill_context_ranks_relevant_active_skills_within_explicit_scope(catalog):
+    project, run = run_fixture(catalog)
+    entries = [
+        ('frontend-design', 'Build responsive landing pages',
+         'Use accessible HTML, React, CSS, responsive layouts, and motion preferences.'),
+        ('database-migrations', 'Manage database schema changes',
+         'Use transactional migrations and verify SQL constraints.'),
+    ]
+    saved = []
+    for name, description, instructions in entries:
+        raw = f'---\nname: {name}\ndescription: {description}\nversion: 1.0.0\n---\n{instructions}'.encode()
+        item = imported(catalog, raw=raw)
+        catalog.state('alice', item['id'], 'active', item['sha256'])
+        catalog.bind('alice', item['id'], 'agent', 'alice-agent', True)
+        saved.append(item)
+
+    inventory = catalog.inventory('alice', run, 'alice-agent')
+    selected = catalog.context(
+        'alice', run, 'alice-agent',
+        query='Crie uma landing page responsiva com React e CSS.')
+    assert inventory['total'] == 2
+    assert {item['name'] for item in inventory['skills']} == {
+        'frontend-design', 'database-migrations'}
+    assert [item['skill_id'] for item in selected] == [saved[0]['id']]
+    assert selected[0]['relevance_score'] >= 3
+
+    status_question = catalog.context(
+        'alice', run, 'alice-agent', query='Quais Skills estão ativas?')
+    assert status_question == []
+    assert inventory['total'] == 2
+
+
+def test_skill_context_does_not_match_only_a_declared_exclusion(catalog):
+    project, run = run_fixture(catalog)
+    raw = (
+        '---\nname: impeccable\n'
+        'description: Improve frontend interfaces, accessibility, and visual design. '
+        'Not for backend-only or non-UI tasks.\nversion: 1.0.0\n---\n'
+        'Use this workflow to polish frontend components and responsive layouts. '
+        'Not for backend-only requests.'
+    ).encode()
+    skill = imported(catalog, raw=raw)
+    catalog.state('alice', skill['id'], 'active', skill['sha256'])
+    catalog.bind('alice', skill['id'], 'project', project, True)
+
+    explanatory = catalog.context(
+        'alice', run, 'alice-agent', query='Para que serve a Skill Impeccable?')
+    frontend = catalog.context(
+        'alice', run, 'alice-agent', query='Melhore a interface e a responsividade')
+    backend = catalog.context(
+        'alice', run, 'alice-agent',
+        query='Implemente uma rota de backend com consultas SQL')
+    assert explanatory and explanatory[0]['name'] == 'impeccable'
+    assert frontend and frontend[0]['name'] == 'impeccable'
+    assert backend == []
+
+
 def finish_coroutine(coro):
     # These fake async streams do no IO; avoid the Windows sandbox socketpair.
     try:
@@ -437,22 +577,33 @@ def finish_coroutine(coro):
 
 def test_model_context_is_ephemeral_and_revalidated_without_changing_tools(catalog):
     _, run = run_fixture(catalog)
+    catalog.db.execute('UPDATE runs SET prompt=? WHERE id=?',
+                       ('Review this code carefully', run))
     saved = imported(catalog)
     catalog.bind('alice', saved['id'], 'agent', 'alice-agent', True)
     catalog.state('alice', saved['id'], 'active', saved['sha256'])
     calls = []
+    selections = []
     class FakeClient:
         async def stream(self, provider, key, model, system, messages):
             calls.append((system, messages))
             yield 'answer'
-    wrapper = SkillContextClient(FakeClient(), catalog.db, catalog.security, 'alice', run, 'alice-agent')
+    wrapper = SkillContextClient(
+        FakeClient(), catalog.db, catalog.security, 'alice', run, 'alice-agent',
+        on_selection=lambda inventory, docs: selections.append((inventory, docs)))
     messages = [{'role': 'user', 'content': 'original checkpoint transcript'}]
     async def collect():
         return [x async for x in wrapper.stream({}, '', 'fake', 'Original policy', messages)]
     assert finish_coroutine(collect()) == ['answer']
     assert 'PRIVATE_SKILL_CONTEXT' in json.dumps(calls[0])
+    assert selections[0][0]['total'] == 1
+    assert selections[0][1][0]['name'] == 'review-code'
     assert messages == [{'role': 'user', 'content': 'original checkpoint transcript'}]
     assert calls[0][0].startswith('Original policy')
+    assert 'siga as instruções e o fluxo da Skill selecionada' in calls[0][0]
+    assert 'PRIVATE_SKILL_CONTEXT' in calls[0][1][0]['content']
+    assert calls[0][1][-1] == {
+        'role': 'user', 'content': 'original checkpoint transcript'}
     catalog.state('alice', saved['id'], 'revoked', saved['sha256'])
     finish_coroutine(collect())
     assert 'PRIVATE_SKILL_CONTEXT' not in json.dumps(calls[-1])
@@ -514,6 +665,8 @@ def test_folder_symlink_is_rejected(catalog, tmp_path):
 def test_engine_routes_real_model_calls_through_skill_context(catalog, monkeypatch, autonomous):
     from central import engine as engine_module
     _, run_id = run_fixture(catalog)
+    catalog.db.execute('UPDATE runs SET prompt=? WHERE id=?',
+                       ('Review this code carefully', run_id))
     saved = imported(catalog)
     catalog.bind('alice', saved['id'], 'run', run_id, True)
     catalog.state('alice', saved['id'], 'active', saved['sha256'])
@@ -533,11 +686,12 @@ def test_engine_routes_real_model_calls_through_skill_context(catalog, monkeypat
     monkeypatch.setattr(engine_module, 'build_memory', lambda *args: {'text': '', 'sources': []})
     executor_seen = []
     async def fake_autonomy(client, db, user, run, step, provider, key, model, system, messages, emit, **kwargs):
-        executor_seen.append(kwargs['workspace_executor'])
+        executor_seen.append((kwargs['workspace_executor'], kwargs['planning_only']))
         assert 'PRIVATE_SKILL_CONTEXT' not in json.dumps(messages)  # checkpoint input
         return ''.join([x async for x in client.stream(provider, key, model, system, messages)])
     if autonomous:
         monkeypatch.setattr(engine_module, 'autonomous_worker', fake_autonomy)
+        db.execute("UPDATE agents SET specialty='design' WHERE id='alice-agent'")
     engine = engine_module.Engine(db, catalog.security, client=Client())
     run = db.one('SELECT * FROM runs WHERE id=?', (run_id,))
     run['autonomous'] = autonomous
@@ -545,8 +699,14 @@ def test_engine_routes_real_model_calls_through_skill_context(catalog, monkeypat
     assert calls and 'PRIVATE_SKILL_CONTEXT' in json.dumps(calls)
     assert db.one("SELECT status FROM steps WHERE id='s'")['status'] == 'completed'
     assert 'PRIVATE_SKILL_CONTEXT' not in str(db.all('SELECT * FROM events'))
+    selected_events = db.all(
+        "SELECT payload FROM events WHERE run_id=? AND event='skill_context_selected'",
+        (run_id,))
+    assert selected_events
+    assert 'review-code' in selected_events[-1]['payload']
+    assert 'PRIVATE_SKILL_CONTEXT' not in selected_events[-1]['payload']
     if autonomous:
-        assert executor_seen == [engine.workspace]
+        assert executor_seen == [(engine.workspace, False)]
 
 
 def test_skill_context_cannot_bypass_budget(catalog):
@@ -679,3 +839,528 @@ def test_resource_route_permissions_and_upload_without_sockets(catalog):
     with pytest.raises(HTTPException) as error:
         finish_coroutine(confirm.endpoint(preview['preview_id'], bad, 'alice'))
     assert 'DO_NOT_LEAK' not in str(error.value)
+
+
+def test_vscode_install_requires_personal_owner_and_separate_confirmation(catalog, monkeypatch):
+    import asyncio
+    import threading
+    from starlette.requests import Request
+    from central.addon_api import router
+    from central import vscode_install
+    routes = router(catalog.db, catalog.security, lambda request: {'id': 'alice'}).routes
+    install = next(r for r in routes if r.path.endswith('/{resource_id}/vscode/install'))
+    uninstall = next(r for r in routes if r.path.endswith('/{resource_id}/vscode/uninstall'))
+    saved = imported(catalog, 'vsix', raw=raw_vsix())
+    calls = []
+    thread_ids = []
+    def install_vsix(*args):
+        calls.append(args)
+        thread_ids.append(threading.get_ident())
+        return {'installed': True, 'target_id': args[0], 'extension_id': 'publisher.example', 'extension_version': '1.2.3'}
+    def uninstall_vsix(*args):
+        thread_ids.append(threading.get_ident())
+        return {'uninstalled': True, 'target_id': args[0], 'extension_id': 'publisher.example'}
+    monkeypatch.setattr(vscode_install, 'install_vsix', install_vsix)
+    monkeypatch.setattr(vscode_install, 'uninstall_vsix', uninstall_vsix)
+
+    def req(data):
+        raw = json.dumps(data).encode()
+        async def receive():
+            return {'type': 'http.request', 'body': raw, 'more_body': False}
+        return Request({'type': 'http', 'method': 'POST', 'scheme': 'http',
+                        'server': ('localhost', 8765), 'path': '/api/resources/x/vscode/install',
+                        'query_string': b'', 'headers': [(b'x-central-request', b'1'),
+                            (b'content-type', b'application/json')]}, receive)
+
+    base = {'target_id': 'a'*32, 'confirmation': saved['sha256'], 'consent': True}
+    with pytest.raises(HTTPException):
+        finish_coroutine(install.endpoint(saved['id'], req(dict(base, consent=False)), 'alice'))
+    with pytest.raises(HTTPException):
+        finish_coroutine(install.endpoint(saved['id'], req(base), 'bob'))
+    with pytest.raises(HTTPException):
+        finish_coroutine(install.endpoint(saved['id'], req(dict(base, confirmation='wrong')), 'alice'))
+    assert calls == []
+    assert asyncio.run(install.endpoint(saved['id'], req(base), 'alice')) == {'installed': True, 'target_id': base['target_id'], 'extension_id': 'publisher.example', 'extension_version': '1.2.3'}
+    assert len(calls) == 1 and calls[0][0] == base['target_id']
+    assert thread_ids[0] != threading.get_ident()
+    catalog.state('alice', saved['id'], 'revoked', saved['sha256'])
+    with pytest.raises(HTTPException) as error:
+        finish_coroutine(install.endpoint(saved['id'], req(base), 'alice'))
+    assert error.value.status_code == 409
+    assert asyncio.run(uninstall.endpoint(saved['id'], req(base), 'alice')) == {
+        'uninstalled': True, 'target_id': base['target_id'], 'extension_id': 'publisher.example'}
+    assert thread_ids[1] != threading.get_ident()
+    event = catalog.db.one('SELECT * FROM vscode_install_events')
+    assert event['result'] == 'succeeded' and event['user_id'] == 'alice'
+    assert catalog.db.one("SELECT COUNT(*) n FROM vscode_install_events WHERE action='uninstalled'")['n'] == 1
+
+
+def test_vscode_cli_targets_are_standard_windows_installs_only(tmp_path, monkeypatch):
+    from central import vscode_install
+    base = tmp_path / 'local'
+    root = base / 'Programs' / 'Microsoft VS Code'
+    root.mkdir(parents=True)
+    executable = root / 'Code.exe'
+    executable.write_bytes(b'test stub')
+    outside = tmp_path / 'Downloads' / 'Microsoft VS Code'
+    outside.mkdir(parents=True)
+    (outside / 'Code.exe').write_bytes(b'untrusted stub')
+    targets_from_paths = vscode_install.candidate_paths({'LOCALAPPDATA': str(base)})
+    assert targets_from_paths == [executable.resolve()]
+    monkeypatch.setattr(vscode_install, 'candidate_paths', lambda: [executable])
+    calls = []
+    def run(path, args, timeout=20):
+        calls.append((Path(path), args, timeout))
+        if args == ['--version']:
+            return '1.100.0\ncommit\nx64'
+        if args == ['--list-extensions', '--show-versions']:
+            return 'pub.example@1.2.3\n'
+        raise AssertionError(args)
+    monkeypatch.setattr(vscode_install, 'run_cli', run)
+    targets = vscode_install.list_targets()
+    assert len(targets) == 1
+    assert targets[0]['target_id'] == vscode_install.target_id(executable)
+    assert targets[0]['installed_extensions'] == [{'id': 'pub.example', 'version': '1.2.3'}]
+
+
+def test_vscode_install_uses_fixed_cli_arguments_and_verifies_exact_version(catalog, tmp_path, monkeypatch):
+    from central import vscode_install
+    install_manifest = dict(MANIFEST, extensionDependencies=[], extensionPack=[])
+    install_raw = zipped([('extension/package.json', json.dumps(install_manifest))])
+    saved = imported(catalog, 'vsix', raw=install_raw)
+    executable = tmp_path / 'Microsoft VS Code' / 'Code.exe'
+    executable.parent.mkdir()
+    executable.write_bytes(b'stub')
+    target = vscode_install.target_id(executable)
+    monkeypatch.setattr(vscode_install, 'candidate_paths', lambda: [executable])
+    import tempfile as tempfile_module
+    real_temporary_directory = tempfile_module.TemporaryDirectory
+    monkeypatch.setattr(vscode_install, 'tempfile', tempfile_module)
+    monkeypatch.setattr(vscode_install.tempfile, 'TemporaryDirectory', lambda prefix: real_temporary_directory(prefix=prefix, dir=tmp_path))
+    installed_before, installed_after = [], [{'id': 'publisher.example', 'version': '1.2.3'}]
+    states = iter([installed_before, installed_after])
+    monkeypatch.setattr(vscode_install, '_version', lambda exe: '1.100.0')
+    monkeypatch.setattr(vscode_install, '_installed', lambda exe: next(states))
+    commands = []
+    def run(exe, args, timeout=20):
+        commands.append((list(args), timeout))
+        return ''
+    monkeypatch.setattr(vscode_install, 'run_cli', run)
+    filename, raw = catalog.payload(catalog._row('alice', saved['id']))
+    result = vscode_install.install_vsix(target, filename, raw)
+    assert result['installed'] is True and result['extension_version'] == '1.2.3'
+    assert commands[0][0][:2] == ['--install-extension', commands[0][0][1]]
+    assert commands[0][0][1].endswith('reviewed.vsix')
+    assert commands[0][0] == ['--install-extension', commands[0][0][1]] and commands[0][1] == 120
+    assert not Path(commands[0][0][1]).exists()
+
+
+def test_vscode_install_refuses_dependency_packages_and_uninstall_is_explicit(catalog, tmp_path, monkeypatch):
+    from central import vscode_install
+    executable = tmp_path / 'Microsoft VS Code' / 'Code.exe'
+    executable.parent.mkdir()
+    executable.write_bytes(b'stub')
+    target = vscode_install.target_id(executable)
+    monkeypatch.setattr(vscode_install, 'candidate_paths', lambda: [executable])
+    monkeypatch.setattr(vscode_install, '_version', lambda exe: '1.100.0')
+    states = iter([[{'id': 'publisher.example', 'version': '1.2.3'}], []])
+    monkeypatch.setattr(vscode_install, '_installed', lambda exe: next(states))
+    commands = []
+    monkeypatch.setattr(vscode_install, 'run_cli', lambda exe, args, timeout=20: commands.append((args, timeout)) or '')
+    raw = zipped([('extension/package.json', json.dumps(dict(MANIFEST, extensionDependencies=[], extensionPack=[])))])
+    filename = 'extension.vsix'
+    result = vscode_install.uninstall_vsix(target, filename, raw)
+    assert result['uninstalled'] is True
+    assert commands == [(['--uninstall-extension', 'publisher.example'], 120)]
+    with pytest.raises(vscode_install.VscodeError, match='dependências'):
+        vscode_install._review_installable({'dependencies': ['pub.dependency'], 'extension_pack': []})
+
+def test_public_github_skill_import_reads_without_saved_connection(catalog, monkeypatch):
+    from central.addon_git_import import import_preview
+    import subprocess
+    commit = 'a' * 40
+    item = {'sha': 'b' * 40, 'path': 'skills/review/SKILL.md',
+            'type': 'blob', 'mode': '100644', 'size': len(SKILL)}
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.url.host == 'api.github.com'
+        assert 'authorization' not in request.headers
+        if request.url.path.endswith('/branches/main'):
+            return httpx.Response(200, json={'commit': {'sha': commit}})
+        tree_sha = request.url.path.rsplit('/', 1)[-1]
+        if '/git/trees/' in request.url.path:
+            if tree_sha == commit:
+                return httpx.Response(200, json={'tree': [{'path': 'skills', 'type': 'tree', 'sha': 'd'*40}]})
+            if tree_sha == 'd'*40:
+                return httpx.Response(200, json={'tree': [{'path': 'review', 'type': 'tree', 'sha': 'e'*40}]})
+            if tree_sha == 'e'*40 and request.url.params.get('recursive') == '1':
+                return httpx.Response(200, json={'truncated': False, 'tree': [dict(item, path='SKILL.md')]})
+            if tree_sha == 'e'*40:
+                return httpx.Response(200, json={'tree': [{'path': 'SKILL.md', 'type': 'blob'}]})
+        if request.url.path.endswith('/git/blobs/' + item['sha']):
+            return httpx.Response(200, json={'encoding': 'base64',
+                'content': base64.b64encode(SKILL).decode()})
+        raise AssertionError(request.url)
+
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **k: (_ for _ in ()).throw(AssertionError('checkout')))
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: (_ for _ in ()).throw(AssertionError('execute')))
+    packed, details, source = import_preview(catalog.db, catalog.security, 'alice', None,
+        'https://github.com/acme/public-skills/tree/main/skills/review', httpx.MockTransport(handler))
+    assert details['name'] == 'review-code'
+    assert source == {'provider': 'github', 'repository': 'acme/public-skills', 'ref': 'main',
+                      'commit': commit, 'path': 'skills/review'}
+    assert len(seen) == 5
+    assert pkg.inspect('skill', 'skill.zip', packed)['instructions'] == 'PRIVATE_SKILL_CONTEXT'
+
+
+def test_saved_account_token_falls_back_to_public_skill_read(catalog):
+    from central.git_integrations import connect
+    from central.addon_git_import import import_preview
+    token = connect(catalog.db, catalog.security, 'alice', 'github', '*', 'fine-grained-token')
+    commit = 'a' * 40
+    skill_sha = 'b' * 40
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if request.headers.get('authorization') == 'Bearer fine-grained-token':
+            return httpx.Response(404, json={'message': 'Not Found'})
+        if request.url.path == '/repos/pbakaus/impeccable':
+            return httpx.Response(200, json={'default_branch': 'main'})
+        if request.url.path.endswith('/branches/main'):
+            return httpx.Response(200, json={'commit': {'sha': commit}})
+        tree_sha = request.url.path.rsplit('/', 1)[-1]
+        directories = {commit: ('.agent', 'c'*40), 'c'*40: ('skills', 'd'*40),
+                       'd'*40: ('impeccable', 'e'*40)}
+        if '/git/trees/' in request.url.path:
+            if tree_sha in directories:
+                name, child_sha = directories[tree_sha]
+                return httpx.Response(200, json={'tree': [{'path': name, 'type': 'tree', 'sha': child_sha}]})
+            if tree_sha == 'e'*40 and request.url.params.get('recursive') == '1':
+                return httpx.Response(200, json={'truncated': False, 'tree': [{
+                    'path': 'SKILL.md', 'type': 'blob', 'mode': '100644',
+                    'sha': skill_sha, 'size': len(SKILL)}]})
+            if tree_sha == 'e'*40:
+                return httpx.Response(200, json={'tree': [{'path': 'SKILL.md', 'type': 'blob'}]})
+        if request.url.path.endswith('/git/blobs/' + skill_sha):
+            return httpx.Response(200, json={'encoding': 'base64',
+                'content': base64.b64encode(SKILL).decode()})
+        raise AssertionError('Unexpected GitHub request')
+
+    raw, metadata, source = import_preview(
+        catalog.db, catalog.security, 'alice', token['id'],
+        'https://github.com/pbakaus/impeccable/tree/main/.agent/skills/impeccable',
+        httpx.MockTransport(handler))
+    assert metadata['name'] == 'review-code'
+    assert source['path'] == '.agent/skills/impeccable'
+    assert len(seen) == 7
+    assert seen[0].headers['authorization'] == 'Bearer fine-grained-token'
+    assert all('authorization' not in request.headers for request in seen[1:])
+    assert pkg.inspect('skill', 'skill.zip', raw)['name'] == 'review-code'
+
+
+def test_repository_root_imports_all_distinct_skills_once(catalog):
+    from central.addon_git_import import import_skill_previews
+
+    commit = 'a' * 40
+    first_sha, second_sha = 'b' * 40, 'c' * 40
+    first = SKILL
+    second = SKILL.replace(b'review-code', b'planning-code')
+    contents = {first_sha: first, second_sha: second}
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        path = request.url.path
+        if path == '/repos/acme/skills':
+            return httpx.Response(200, json={'default_branch': 'main'})
+        if path.endswith('/branches/main'):
+            return httpx.Response(200, json={'commit': {'sha': commit}})
+        if path == '/repos/acme/skills/git/trees/' + commit and request.url.params.get('recursive') == '1':
+            return httpx.Response(200, json={'truncated': False, 'tree': [
+                {'path': 'tools/one/SKILL.md', 'type': 'blob', 'mode': '100644',
+                 'sha': first_sha, 'size': len(first)},
+                {'path': 'tools/two/SKILL.md', 'type': 'blob', 'mode': '100644',
+                 'sha': first_sha, 'size': len(first)},
+                {'path': 'tools/three/SKILL.md', 'type': 'blob', 'mode': '100644',
+                 'sha': second_sha, 'size': len(second)}]})
+        if path.endswith('/git/trees/' + commit):
+            return httpx.Response(200, json={'tree': [{'path': 'tools', 'type': 'tree', 'sha': 'd'*40}]})
+        if path.endswith('/git/trees/' + 'd'*40):
+            return httpx.Response(200, json={'tree': [
+                {'path': 'one', 'type': 'tree', 'sha': 'e'*40},
+                {'path': 'two', 'type': 'tree', 'sha': 'f'*40},
+                {'path': 'three', 'type': 'tree', 'sha': '1'*40}]})
+        for folder, tree_sha, blob_sha in [('one', 'e'*40, first_sha), ('three', '1'*40, second_sha)]:
+            if path.endswith('/git/trees/' + tree_sha) and request.url.params.get('recursive') == '1':
+                return httpx.Response(200, json={'truncated': False, 'tree': [
+                    {'path': 'SKILL.md', 'type': 'blob', 'mode': '100644',
+                     'sha': blob_sha, 'size': len(contents[blob_sha])}]})
+            if path.endswith('/git/trees/' + tree_sha):
+                return httpx.Response(200, json={'tree': [{'path': 'SKILL.md', 'type': 'blob'}]})
+        if '/git/blobs/' in path:
+            sha = path.rsplit('/', 1)[-1]
+            return httpx.Response(200, json={'encoding': 'base64',
+                'content': base64.encodebytes(contents[sha]).decode()})
+        raise AssertionError(request.url)
+
+    entries = import_skill_previews(
+        catalog.db, catalog.security, 'alice', None,
+        'https://github.com/acme/skills', httpx.MockTransport(handler))
+    assert len(entries) == 2
+    assert [item['metadata']['name'] for item in entries] == ['review-code', 'planning-code']
+    assert entries[0]['source']['skill_paths'] == ['tools/one', 'tools/two']
+    assert entries[0]['source']['identical_copies'] is True
+    batch = catalog.preview_many('alice', entries)
+    assert batch['batch'] is True and len(batch['skills']) == 2
+    assert catalog.list('alice') == []
+    with pytest.raises(HTTPException):
+        catalog.confirm('bob', batch['preview_id'], batch['confirmation'])
+    result = catalog.confirm('alice', batch['preview_id'], batch['confirmation'])
+    assert len(result['resources']) == 2
+    assert [item['state'] for item in result['resources']] == ['inactive', 'inactive']
+    assert [item['metadata']['name'] for item in result['resources']] == ['review-code', 'planning-code']
+    assert catalog.list('bob') == []
+
+
+def test_public_github_repository_root_uses_canonical_api_url(catalog):
+    from central.addon_git_import import import_preview
+    commit, blob_sha = 'a'*40, 'b'*40
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert 'authorization' not in request.headers
+        if request.url.path == '/repos/acme/skills':
+            return httpx.Response(200, json={'default_branch': 'main'})
+        if request.url.path.endswith('/branches/main'):
+            return httpx.Response(200, json={'commit': {'sha': commit}})
+        if request.url.path == '/repos/acme/skills/git/trees/' + commit:
+            return httpx.Response(200, json={'truncated': True, 'tree': [
+                {'path': 'skill/SKILL.md', 'type': 'blob', 'mode': '100644',
+                 'sha': blob_sha, 'size': len(SKILL)},
+                {'path': '.agent/skills/impeccable/SKILL.md', 'type': 'blob',
+                 'mode': '100644', 'sha': blob_sha, 'size': len(SKILL)}]})
+        if request.url.path.endswith('/git/blobs/' + blob_sha):
+            return httpx.Response(200, json={'encoding': 'base64',
+                'content': base64.b64encode(SKILL).decode()})
+        raise AssertionError(request.url)
+
+    packed, metadata, source = import_preview(catalog.db, catalog.security, 'alice', None,
+        'https://github.com/acme/skills', httpx.MockTransport(handler))
+    assert metadata['name'] == 'review-code'
+    assert source['path'] == 'skill'
+    assert source['skill_paths'] == ['.agent/skills/impeccable', 'skill']
+    assert source['scan_complete'] is False
+    assert seen[0].url.path == '/repos/acme/skills'
+    assert pkg.inspect('skill', 'skill.zip', packed)['name'] == 'review-code'
+
+
+def test_public_github_rate_limit_is_not_reported_as_missing_access(catalog):
+    from central.addon_git_import import import_preview
+
+    def handler(request):
+        return httpx.Response(403, headers={'x-ratelimit-remaining': '0'},
+                              json={'message': 'API rate limit exceeded'})
+
+    with pytest.raises(HTTPException) as error:
+        import_preview(catalog.db, catalog.security, 'alice', None,
+            'https://github.com/pbakaus/impeccable/tree/main/.agent/skills/impeccable',
+            httpx.MockTransport(handler))
+    assert error.value.status_code == 429
+    assert 'limitou temporariamente' in error.value.detail
+
+
+def test_private_or_inaccessible_public_github_requests_connection(catalog):
+    from central.addon_git_import import GitConnectionRequired, import_preview
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.url.host == 'api.github.com'
+        assert 'authorization' not in request.headers
+        return httpx.Response(404, json={'message': 'Not Found'})
+
+    with pytest.raises(GitConnectionRequired) as error:
+        import_preview(catalog.db, catalog.security, 'alice', None,
+            'https://github.com/acme/private-skills', httpx.MockTransport(handler))
+    assert error.value.service == 'github'
+    assert error.value.repository == 'acme/private-skills'
+    assert len(seen) == 1
+
+
+def test_git_preview_api_returns_connect_fallback_without_leaking_url_tokens(catalog, monkeypatch):
+    import asyncio
+    import threading
+    from starlette.requests import Request
+    from central.addon_api import router
+    from central.addon_git_import import GitConnectionRequired
+    import central.addon_api as api_module
+    thread_ids = []
+    def require_connection(*args):
+        thread_ids.append(threading.get_ident())
+        raise GitConnectionRequired('github', 'acme/private-skills')
+    monkeypatch.setattr(api_module, 'git_skill_previews',
+        require_connection)
+    route = next(r for r in router(catalog.db, catalog.security,
+        lambda request: {'id': 'alice'}).routes if r.path.endswith('/preview-git'))
+    payload = json.dumps({'repository_url': 'https://github.com/acme/private-skills'}).encode()
+    async def receive():
+        return {'type': 'http.request', 'body': payload, 'more_body': False}
+    request = Request({'type': 'http', 'method': 'POST', 'scheme': 'http',
+        'server': ('localhost', 8765), 'path': '/api/resources/preview-git',
+        'query_string': b'', 'headers': [(b'x-central-request', b'1'),
+            (b'content-type', b'application/json')]}, receive)
+    result = asyncio.run(route.endpoint(request, 'alice'))
+    assert result == {'requires_connection': True, 'provider': 'github',
+                      'repository': 'acme/private-skills'}
+    assert thread_ids[0] != threading.get_ident()
+
+
+def test_marketplace_search_runs_off_event_loop(catalog, monkeypatch):
+    import asyncio
+    import threading
+    from starlette.requests import Request
+    from central.addon_api import router
+    import central.addon_api as api_module
+    thread_ids = []
+    def search(query):
+        thread_ids.append(threading.get_ident())
+        return {'items': [], 'metadata_only': True}
+    monkeypatch.setattr(api_module, 'marketplace_search', search)
+    route = next(r for r in router(catalog.db, catalog.security,
+        lambda request: {'id': 'alice'}).routes if r.path.endswith('/marketplace/search'))
+    payload = json.dumps({'query': 'editor tools', 'consent': True}).encode()
+    async def receive():
+        return {'type': 'http.request', 'body': payload, 'more_body': False}
+    request = Request({'type': 'http', 'method': 'POST', 'scheme': 'http',
+        'server': ('localhost', 8765), 'path': '/api/resources/marketplace/search',
+        'query_string': b'', 'headers': [(b'x-central-request', b'1'),
+            (b'content-type', b'application/json')]}, receive)
+    assert asyncio.run(route.endpoint(request, 'alice')) == {
+        'items': [], 'metadata_only': True}
+    assert thread_ids[0] != threading.get_ident()
+
+def test_real_impeccable_metadata_and_private_import(catalog):
+    raw = (Path(__file__).parent / 'impeccable-real-fixture.txt').read_bytes()
+    preview = catalog.preview('alice', 'skill', 'SKILL.md', raw)
+    assert catalog.list('alice') == []
+    saved = catalog.confirm('alice', preview['preview_id'], preview['confirmation'])
+    assert saved['metadata']['name'] == 'impeccable'
+    assert saved['metadata']['license'] == 'Apache 2.0'
+    assert saved['metadata']['allowed-tools']
+    assert saved['metadata']['execution_enabled'] is False
+    assert saved['state'] == 'inactive'
+    assert catalog.list('bob') == []
+
+@pytest.mark.parametrize('extra', [
+    b'user-invocable: true\nargument-hint: "[audit] [target]"\n',
+    b'disable-model-invocation: false\n',
+])
+def test_editor_metadata_is_inert(extra):
+    result = pkg.inspect('skill', 'SKILL.md', SKILL.replace(b'version:', extra+b'version:'))
+    assert result['execution_enabled'] is False
+
+
+@pytest.mark.parametrize('extra', [b'user-invocable: yes\n', b'argument-hint: !execute\n',
+                                  b'user-invocable: true\nuser-invocable: false\n'])
+def test_invalid_editor_metadata_rejected(extra):
+    with pytest.raises(pkg.InvalidPackage):
+        pkg.inspect('skill', 'SKILL.md', SKILL.replace(b'version:', extra+b'version:'))
+
+
+def test_root_discovery_excludes_test_fixtures_but_explicit_folder_keeps_them():
+    from central.addon_git_import import _find_skill_roots
+    tree = [{'path': 'skills/real/SKILL.md', 'sha': 'a'*40},
+            {'path': 'tests/fixtures/fake/SKILL.md', 'sha': 'b'*40}]
+    assert [x[0] for x in _find_skill_roots(tree, '')] == ['skills/real']
+    assert [x[0] for x in _find_skill_roots(tree, 'tests/fixtures')] == ['tests/fixtures/fake']
+
+
+@pytest.mark.parametrize('size,count', [(1100013, 1), (20000, 60), (1, 101)])
+def test_git_oversized_attachments_import_instructions_with_disclosure(catalog, size, count):
+    from central.addon_git_import import _pack_skill
+    raw = (Path(__file__).parent / 'impeccable-real-fixture.txt').read_bytes()
+    tree = [{'path': 'skills/impeccable/SKILL.md', 'type': 'blob', 'mode': '100644',
+             'sha': 'a'*40, 'size': len(raw)}]
+    tree += [{'path': f'skills/impeccable/scripts/file{i}.json', 'type': 'blob',
+              'mode': '100644', 'sha': 'b'*40, 'size': size} for i in range(count)]
+    class Gateway:
+        def request(self, method, path):
+            assert path == '/git/blobs/' + 'a'*40  # No attachment download or execution.
+            return {'encoding': 'base64', 'content': base64.b64encode(raw).decode()}, {}
+    packed, metadata, source = _pack_skill(Gateway(), tree, 'github', 'pbakaus/impeccable',
+        'main', 'c'*40, ('skills/impeccable', ['skills/impeccable'], False), True)
+    assert metadata['files'] == ['SKILL.md']
+    assert source['import_mode'] == 'instructions_only'
+    assert source['omitted_file_count'] == count
+    preview = catalog.preview('alice', 'skill', 'skill.zip', packed, source=source)
+    saved = catalog.confirm('alice', preview['preview_id'], preview['confirmation'])
+    assert saved['state'] == 'inactive'
+    assert saved['metadata']['source']['omitted_file_count'] == count
+
+
+def test_git_oversized_markdown_still_rejected():
+    from central.addon_git_import import _pack_skill
+    tree = [{'path': 'SKILL.md', 'type': 'blob', 'mode': '100644', 'sha': 'a'*40, 'size': 65537}]
+    with pytest.raises(ValueError, match='markdown'):
+        _pack_skill(None, tree, 'github', 'acme/skills', 'main', 'c'*40,
+                    ('', [''], False), True)
+
+
+def test_impeccable_repository_variants_preview_and_confirm_atomically(catalog):
+    from central.addon_git_import import import_skill_previews
+    raw = (Path(__file__).parent / 'impeccable-real-fixture.txt').read_bytes()
+    variant = raw.replace(b'version: 4.7.1', b'version: 4.7.1\nuser-invocable: true\nargument-hint: "[audit] [target]"')
+    blobs = {'a'*40: raw, 'b'*40: variant}
+    tree = []
+    for root, sha in [('.agent/skills/impeccable', 'a'*40),
+                      ('.claude/skills/impeccable', 'b'*40)]:
+        tree.extend([
+            {'path': root+'/SKILL.md', 'type':'blob', 'mode':'100644', 'sha':sha, 'size':len(blobs[sha])},
+            {'path': root+'/scripts/data/font-index.json', 'type':'blob', 'mode':'100644', 'sha':'d'*40, 'size':1100013},
+            {'path': root+'/scripts/live-browser.js', 'type':'blob', 'mode':'100644', 'sha':'e'*40, 'size':553621},
+        ])
+    tree.append({'path':'tests/oracle/fixture/SKILL.md', 'type':'blob', 'mode':'100644', 'sha':'f'*40, 'size':46})
+    seen = []
+    def handler(request):
+        path = request.url.path
+        seen.append(path)
+        if path == '/repos/pbakaus/impeccable':
+            return httpx.Response(200,json={'default_branch':'main'})
+        if path.endswith('/branches/main'):
+            return httpx.Response(200,json={'commit':{'sha':'c'*40}})
+        if '/git/trees/' in path:
+            return httpx.Response(200,json={'tree':tree,'truncated':False})
+        content = blobs[path.rsplit('/',1)[-1]]
+        return httpx.Response(200,json={'encoding':'base64','content':base64.b64encode(content).decode()})
+    entries = import_skill_previews(catalog.db,catalog.security,'alice',None,
+        'https://github.com/pbakaus/impeccable',httpx.MockTransport(handler))
+    assert len(entries) == 2
+    assert len(seen) == 5
+    assert all(e['source']['import_mode'] == 'instructions_only' for e in entries)
+    preview = catalog.preview_many('alice',entries)
+    saved = catalog.confirm('alice',preview['preview_id'],preview['confirmation'])
+    assert len(saved['resources']) == 2
+    assert all(r['state'] == 'inactive' for r in saved['resources'])
+    assert catalog.list('bob') == []
+
+
+def test_nested_agent_skill_version_is_preserved():
+    raw = SKILL.replace(b'version: 1.2.0', b'metadata:\n  version: 4.7.1\n  author: example')
+    meta = pkg.inspect('skill', 'SKILL.md', raw)
+    assert meta['version'] == '4.7.1'
+    assert meta['metadata'] == {'version':'4.7.1', 'author':'example'}
+    assert meta['execution_enabled'] is False
+
+
+@pytest.mark.parametrize('metadata', [b'metadata:\n  version: !execute',
+    b'metadata:\n  version: 1.2.0\n  version: 1.2.1',
+    b'metadata:\n  version: 1.2.0\nmetadata:\n  version: 1.2.0',
+    b'version: 1.2.0\nmetadata:\n  version: 4.7.1',
+    b'metadata:\n  version: 1.2.0\n    nested: no'])
+def test_nested_metadata_rejects_ambiguous_or_executable_values(metadata):
+    with pytest.raises(pkg.InvalidPackage):
+        pkg.inspect('skill', 'SKILL.md', SKILL.replace(b'version: 1.2.0',metadata))

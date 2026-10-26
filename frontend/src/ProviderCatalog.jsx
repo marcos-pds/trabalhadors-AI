@@ -32,20 +32,20 @@ export default function ProviderCatalog({ api, providers, onConnected, onManual,
   return <>
     <section className="mb-6 rounded-3xl border border-lilac/20 bg-gradient-to-br from-lilac/[.08] to-transparent p-6">
       <span className="text-[10px] font-bold uppercase tracking-widest text-lilac">Conexão simplificada</span>
-      <h2 className="mt-2 text-2xl font-semibold">Sua chave. O restante é automático.</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Escolha um serviço, cole a chave e clique em Conectar. A Central consulta o catálogo oficial, seleciona um modelo de chat elegível e valida uma resposta antes de salvar.</p>
+      <h2 className="mt-2 text-2xl font-semibold">Conecte seus modelos de IA.</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Escolha um serviço e siga o fluxo de conexão. Para o plano ChatGPT, a autorização ocorre pela OpenAI e os modelos são listados conforme sua conta.</p>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <span className="rounded-xl border border-white/10 px-3 py-2 text-xs">{done}/{online.length} serviços online com conexão ativa e teste aprovado</span>
         {next && <button className={primary} onClick={() => setSelected(next)}>Próximo: {next.name}</button>}
       </div>
-      <p className="mt-3 text-[11px] leading-5 text-muted">Use contas nos planos gratuitos. Listar um modelo não confirma saldo, cota ou plano de cobrança. Créditos e avaliações aparecem separados. O Ollama continua como único serviço local sugerido.</p>
+      <p className="mt-3 text-[11px] leading-5 text-muted">Planos, cotas e permissões variam por conta. O teste de conexão pode consumir uso do serviço; confira os detalhes antes de ativar. O Ollama continua como único serviço local sugerido.</p>
     </section>
     <div className="mb-4 flex flex-wrap items-center gap-2">
       {providerFilters.map(([id, label]) =>
         <button key={id} onClick={() => onFilter(id)} aria-pressed={filter === id} className={filter === id ? primary : button}>{label} ({services.filter(p => id === 'all' || providerCategory(p) === id).length})</button>)}
       <input aria-label="Buscar serviço no catálogo" placeholder="Buscar serviço ou condição..." value={query} onChange={e => setQuery(e.target.value)} className={control + ' w-full sm:ml-auto sm:w-64'} />
     </div>
-    <p className="mb-4 text-[11px] leading-5 text-muted">O filtro também se aplica às conexões abaixo. Gratuitos reúne serviços com faixa ou modelos gratuitos; confirme o plano da conta e o modelo. Créditos promocionais e avaliações ficam separados.</p>
+    <p className="mb-4 text-[11px] leading-5 text-muted">O filtro se aplica ao catálogo e às conexões salvas. Planos, cotas e permissões variam por conta; confira as condições do serviço antes de ativar.</p>
     {error && <p role="alert" className="mb-4 text-sm text-rose-300">{error} <button className={button} onClick={() => setRetry(n => n + 1)}>Tentar novamente</button></p>}
     {!catalog && !error && <p role="status" className="py-6 text-sm text-muted">Carregando catálogo de serviços...</p>}
     <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -54,14 +54,15 @@ export default function ProviderCatalog({ api, providers, onConnected, onManual,
         <p className="mt-3 flex-1 text-xs leading-5 text-muted">{p.note}</p>
         <p className={'mt-3 text-[11px] ' + (verified(p) ? 'text-emerald-300' : 'text-muted')}>{verified(p) ? 'Conexão ativa · teste aprovado' : providers.some(c => c.kind === p.kind) ? 'Cadastro existente · validar conexão' : 'Ainda não conectado'}</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button className={primary} onClick={() => p.quick ? setSelected(p) : onManual(p.kind)}>{p.quick ? (p.kind === 'ollama' ? 'Conectar local' : 'Conectar') : 'Configurar manualmente'}</button>
-          <a className={button + ' inline-flex items-center'} href={p.keys_url} target="_blank" rel="noopener noreferrer">{p.kind === 'ollama' ? 'Ollama' : 'Obter chave'}</a>
+          <button className={primary} onClick={() => p.quick ? setSelected(p) : onManual(p.kind)}>{p.quick ? (p.kind === 'ollama' ? 'Conectar local' : p.kind === 'openai_chatgpt' ? 'Conectar ChatGPT' : 'Conectar') : 'Configurar manualmente'}</button>
+          <a className={button + ' inline-flex items-center'} href={p.keys_url} target="_blank" rel="noopener noreferrer">{p.kind === 'ollama' ? 'Ollama' : p.kind === 'openai_chatgpt' ? 'Abrir ChatGPT' : 'Obter chave'}</a>
         </div>
         <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="mt-3 text-[10px] text-muted underline">Condições oficiais · revisão {p.checked_at}</a>
       </article>)}
     </div>
     {catalog && !visible.length && <p className="mb-6 text-sm text-muted">Nenhum serviço encontrado para esta busca.</p>}
-    {selected && <ConnectDialog key={selected.kind} service={selected} api={api}
+    {selected?.kind === 'openai_chatgpt' && <ChatGPTPlanDialog key={selected.kind} api={api} onClose={() => setSelected(null)} onConnected={onConnected} />}
+    {selected && selected.kind !== 'openai_chatgpt' && <ConnectDialog key={selected.kind} service={selected} api={api}
       saved={providers.find(p => p.kind === selected.kind && p.has_key)}
       onClose={() => setSelected(null)} onConnected={onConnected} />}
   </>
@@ -227,4 +228,97 @@ function AttemptHistory({ attempts }) {
       </li>)}
     </ol>
   </section>
+}
+
+function ChatGPTPlanDialog({ api, onClose, onConnected }) {
+  const [status, setStatus] = useState(null)
+  const [models, setModels] = useState([])
+  const [model, setModel] = useState('')
+  const [consent, setConsent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [disconnectNotice, setDisconnectNotice] = useState('')
+  const popup = useRef(null)
+  async function reloadStatus() {
+    const data = await api('/chatgpt-plan/status')
+    setStatus(data)
+    if (data.connected) {
+      const catalog = await api('/chatgpt-plan/models')
+      setModels(catalog.models || [])
+      setModel(current => (catalog.models || []).some(item => item.id === current) ? current : catalog.models?.[0]?.id || '')
+    }
+  }
+  useEffect(() => { reloadStatus().catch(e => setError(e.message)) }, [])
+  useEffect(() => {
+    if (!busy || !popup.current) return
+    let closedChecks = 0
+    const timer = setInterval(() => {
+      if (!popup.current?.closed) { closedChecks = 0; return }
+      closedChecks += 1
+      if (closedChecks < 2) return
+      popup.current = null
+      setBusy(false)
+      setError('A janela de autorização foi fechada antes de concluir a conexão.')
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [busy])
+  useEffect(() => {
+    const onMessage = event => {
+      const allowedOrigin = event.origin === location.origin ||
+        (event.origin.startsWith('http://127.0.0.1:') && new URL(event.origin).port === location.port) ||
+        (event.origin.startsWith('http://localhost:') && new URL(event.origin).port === location.port)
+      if (event.source !== popup.current || !allowedOrigin || event.data?.type !== 'central-chatgpt-oauth') return
+      popup.current = null
+      setBusy(false)
+      if (!event.data.ok) { setError(event.data.message || 'A conexão não foi concluída. Confira a janela de autorização e tente novamente.'); return }
+      reloadStatus().then(onConnected).catch(e => setError(e.message))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [onConnected])
+  async function authorize() {
+    setError('')
+    const opened = window.open('about:blank', '_blank')
+    if (!opened) { setError('Permita pop-ups para a Central e tente novamente.'); return }
+    popup.current = opened
+    setBusy(true)
+    try {
+      const result = await api('/chatgpt-plan/authorize', 'POST', {})
+      opened.location = result.authorization_url
+    } catch (e) { opened.close(); popup.current = null; setBusy(false); setError(e.message) }
+  }
+  async function addModel() {
+    setBusy(true); setError('')
+    try { await api('/chatgpt-plan/providers', 'POST', { model }); await onConnected(); onClose() }
+    catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+  async function revoke() {
+    if (!window.confirm('Remover as credenciais ChatGPT salvas nesta Central? Os provedores de assinatura serão removidos e os agentes vinculados ficarão sem provedor. Para revogar a autorização na OpenAI, use os controles da conta ChatGPT.')) return
+    setBusy(true); setError('')
+    try { const result = await api('/chatgpt-plan/connection', 'DELETE'); setStatus({ connected: false }); setModels([]); setDisconnectNotice(result.remote_revoked ? 'A sessão foi removida e a OpenAI confirmou a revogação.' : 'A sessão local foi removida. A OpenAI não confirmou a revogação; confira os controles da conta ChatGPT.'); await onConnected() }
+    catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+    <section role="dialog" aria-modal="true" aria-labelledby="chatgpt-plan-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#1f1f1f] p-6 shadow-2xl">
+      <div className="flex items-center justify-between gap-4"><h2 id="chatgpt-plan-title" className="text-xl font-semibold">Conectar ChatGPT</h2><button className={button} onClick={onClose} disabled={busy} aria-label="Fechar">×</button></div>
+      <p className="mt-4 text-xs leading-5 text-muted">A conexão abre a autorização oficial da OpenAI. A Central solicita permissão para usar a cota elegível do seu plano nos pedidos de modelos. Isso não acessa conversas do ChatGPT e não é o mesmo que uma chave da API.</p>
+      {status?.connected ? <>
+        <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4"><strong className="text-emerald-300">Conta conectada</strong><p className="mt-1 text-sm">{status.connection?.email}</p><p className="mt-2 text-[11px] text-muted">Os modelos abaixo vêm da lista autorizada para essa conta. A chamada de validação e futuras execuções consomem o uso do plano de acordo com os limites da OpenAI.</p></div>
+        <label htmlFor="chatgpt-plan-model" className="mt-5 block text-xs text-muted">Modelo da sua conta</label>
+        <select id="chatgpt-plan-model" value={model} onChange={e => setModel(e.target.value)} disabled={busy || !models.length} className={control + ' mt-2 w-full'}>{models.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select>
+        <label className="mt-4 flex items-start gap-2 text-xs leading-5 text-amber-200"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-1 accent-violet-400" />Confirmo que o teste e as execuções deste provedor usarão a cota do meu plano ChatGPT, sujeita aos limites e às regras da minha conta.</label>
+        <button className={primary + ' mt-5 w-full'} onClick={addModel} disabled={!model || !consent || busy}>{busy ? 'Validando...' : 'Testar e adicionar modelo'}</button>
+        <button className={button + ' mt-3 w-full'} onClick={authorize} disabled={busy}>Reautorizar conta</button>
+        <button className={button + ' mt-3 w-full text-rose-300'} onClick={revoke} disabled={busy}>Desconectar esta Central</button>
+      </> : <>
+        <label className="mt-5 flex items-start gap-2 text-xs leading-5 text-amber-200"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-1 accent-violet-400" />Quero autorizar a Central a usar minha cota elegível do plano ChatGPT em pedidos de modelo. Sei que a disponibilidade depende da conta e dos controles configurados na OpenAI.</label>
+        <button className={primary + ' mt-5 w-full'} onClick={authorize} disabled={!consent || busy}>{busy ? 'Aguardando autorização...' : 'Continuar com ChatGPT'}</button>
+      </>}
+      {disconnectNotice && <p role="status" className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-sm text-amber-200">{disconnectNotice}</p>}
+      {error && <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/5 p-3 text-sm text-rose-300">{error}</p>}
+      {busy && <p role="status" className="mt-3 text-xs text-lilac">Conclua a autorização na janela aberta.</p>}
+    </section>
+  </div>
 }

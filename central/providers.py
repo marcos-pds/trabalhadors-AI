@@ -3,6 +3,7 @@ import asyncio
 import json
 from urllib.parse import quote
 import httpx
+from .token_usage import estimate_tokens, report_usage
 
 DEFAULT_ENDPOINTS = {
     'openai': 'https://api.openai.com/v1',
@@ -73,9 +74,52 @@ class ProviderClient:
 
     async def stream(self, provider, api_key, model, system, messages):
         kind = provider['kind']
+        if kind == 'openai_chatgpt':
+            from .chatgpt_plan import stream_response
+            async for token in stream_response(api_key, model, system, messages, timeout=self.timeout):
+                yield token
+            return
         requested = provider.get('_max_tokens', 1400)
         max_tokens = max(256, min(4096, int(requested)))
         base = provider['base_url'].rstrip('/')
+        input_tokens = output_tokens = None
+        output_chars = 0
+        usage_reported = False
+
+        def capture_usage(event):
+            nonlocal input_tokens, output_tokens
+            usage = (event.get('usage') or event.get('usageMetadata') or
+                     event.get('message', {}).get('usage') or {})
+            if kind == 'anthropic':
+                if usage.get('input_tokens') is not None:
+                    input_tokens = usage['input_tokens']
+                if usage.get('output_tokens') is not None:
+                    output_tokens = usage['output_tokens']
+            elif kind == 'gemini':
+                if usage.get('promptTokenCount') is not None:
+                    input_tokens = usage['promptTokenCount']
+                if usage.get('candidatesTokenCount') is not None:
+                    output_tokens = usage['candidatesTokenCount']
+            else:
+                if usage.get('prompt_tokens') is not None:
+                    input_tokens = usage['prompt_tokens']
+                if usage.get('completion_tokens') is not None:
+                    output_tokens = usage['completion_tokens']
+
+        def finish_usage():
+            nonlocal usage_reported
+            if usage_reported:
+                return
+            if input_tokens is not None and output_tokens is not None:
+                report_usage(input_tokens, output_tokens, 'actual')
+            else:
+                report_usage(
+                    estimate_tokens(system + ''.join(m.get('content', '') for m in messages)),
+                    (output_chars + 3) // 4,
+                    'estimated',
+                )
+            usage_reported = True
+
         if kind == 'anthropic':
             url = base + '/messages'
             headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01'}
@@ -93,7 +137,8 @@ class ProviderClient:
             headers = {'Content-Type': 'application/json'}
             if api_key: headers['Authorization'] = f'Bearer {api_key}'
             payload = {'model': model, 'messages': [{'role': 'system', 'content': system}] + messages,
-                       'stream': True, 'max_tokens': max_tokens}
+                       'stream': True, 'max_tokens': max_tokens,
+                       'stream_options': {'include_usage': True}}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=12)) as client:
                 async with client.stream('POST', url, json=payload, headers=headers) as response:
@@ -108,9 +153,12 @@ class ProviderClient:
                         if not line.strip() and buffered:
                             raw = '\n'.join(buffered)
                             buffered.clear()
-                            if raw == '[DONE]': return
+                            if raw == '[DONE]':
+                                finish_usage()
+                                return
                             try: event = json.loads(raw)
                             except json.JSONDecodeError: continue
+                            capture_usage(event)
                             if 'error' in event:
                                 raise ProviderError('response', str(event['error'])[:240], False)
                             if kind == 'anthropic':
@@ -119,17 +167,23 @@ class ProviderClient:
                                 token = ''.join(x.get('text','') for x in event.get('candidates',[{}])[0].get('content',{}).get('parts', []))
                             else:
                                 token = ''.join(str(x.get('delta', {}).get('content') or '') for x in event.get('choices', []))
-                            if token: yield token
+                            if token:
+                                output_chars += len(token)
+                                yield token
                     # Some proxies omit final newline; parse remaining complete frame.
                     if buffered:
                         try:
                             event = json.loads('\n'.join(buffered))
+                            capture_usage(event)
                             if kind == 'anthropic': token = event.get('delta',{}).get('text','')
                             elif kind == 'gemini': token = ''.join(x.get('text','') for x in event.get('candidates',[{}])[0].get('content',{}).get('parts', []))
                             else: token = ''.join(str(x.get('delta',{}).get('content') or '') for x in event.get('choices',[]))
-                            if token: yield token
+                            if token:
+                                output_chars += len(token)
+                                yield token
                         except json.JSONDecodeError:
                             pass
+            finish_usage()
         except ProviderError:
             raise
         except httpx.TimeoutException:

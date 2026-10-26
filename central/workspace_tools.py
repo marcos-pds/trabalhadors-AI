@@ -88,6 +88,10 @@ def critical_action(request):
 
 
 def needs_explicit_approval(db,user_id,run_id,request):
+    if request.get('action') == 'browser_tool':
+        return True
+    if request.get('action') == 'reference_search':
+        return True
     if critical_action(request):
         return True
     if request.get('action') != 'command':
@@ -165,6 +169,15 @@ def preview(folder, request):
     """Validate and summarize before any write or command; safe to show in UI."""
     action = request.get('action')
     relative = request.get('path', '')
+    if action == 'reference_search':
+        from .reference_search import validate_query
+        query = validate_query(request.get('query'))
+        return {
+            'action': action,
+            'query': query,
+            'description': 'Pesquisar referências públicas no DuckDuckGo: "' + query + '". '
+                           'Somente esta consulta será enviada; confira antes de aprovar.',
+        }
     if action == 'list':
         directory = target(folder, relative, directory=True)
         return {'action': action, 'path': relative, 'description': 'Listar ' + str(directory.name)}
@@ -469,12 +482,20 @@ def execute(folder, request, run_id=None):
 async def agent_action(db, user_id, run_id, step_id, request, emit, executor=None):
     requires_write = request.get('action') in ('mkdir','write','replace','command')
     folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
+    browser_tool = request.get('action') == 'browser_tool'
+    reference_search = request.get('action') == 'reference_search'
     if request.get('action') == 'command':
         enforce_host_command_policy(db,user_id,run_id)
     config = policy(db, user_id)
-    summary = preview(folder, request)
+    if browser_tool:
+        from .browser_mcp import approval_summary
+        summary = approval_summary(request)
+        summary.update({'action': 'browser_tool', 'tool': request['tool']})
+    else:
+        summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
-    approval_required = (executor.approvals.required(user_id, run_id, request) if executor
+    approval_required = (True if browser_tool else
+                         executor.approvals.required(user_id, run_id, request) if executor
                          else needs_explicit_approval(db,user_id,run_id,request))
     if config['mode'] == 'ask' or approval_required:
         token = (executor.approvals.issue(user_id, run_id, step_id, folder, request, summary)
@@ -499,11 +520,21 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
     if request.get('action') == 'command':
         enforce_host_command_policy(db,user_id,run_id)
     try:
-        result = await asyncio.to_thread(executor.execute if executor else execute, folder, request, run_id)
+        if browser_tool:
+            from .browser_mcp import execute as execute_browser
+            result = await execute_browser(db, user_id, run_id, request)
+        elif reference_search:
+            from .reference_search import search
+            result = await asyncio.to_thread(search, request.get('query'))
+        else:
+            result = await asyncio.to_thread(
+                executor.execute if executor else execute, folder, request, run_id)
     except HTTPException as exc:
         result = {'error': str(exc.detail), 'success': False}
     emit(run_id, 'workspace_action_result', {
         'step_id': step_id, 'summary': summary,
+        'tool': request.get('tool', ''),
+        'references': result.get('references', [])[:6],
         'success': result.get('success', 'error' not in result),
         'exit_code': result.get('exit_code'), 'output': str(result.get('output', ''))[-1600:]})
     return result

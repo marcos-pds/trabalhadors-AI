@@ -11,6 +11,7 @@ from central.database import Database, utcnow
 from central.computer_access import set_policy, policy
 from central.workspace_tools import preview, execute, agent_action, decide, validation_commands
 from central.agent_autonomy import autonomous_worker, parse_tool
+from central.providers import ProviderError
 
 
 @pytest.fixture
@@ -97,6 +98,82 @@ def test_full_policy_rechecks_scope_for_agent(workspace):
     assert any(e[1] == 'workspace_action_result' for e in events)
 
 
+def test_browser_tool_waits_for_explicit_approval(workspace, monkeypatch):
+    import central.browser_mcp as browser_mcp
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    called = []
+
+    async def fake_browser(db_arg, user_id, run_id, request):
+        called.append((user_id, run_id, request['tool']))
+        return {'success': True, 'output': 'snapshot local'}
+
+    monkeypatch.setattr(browser_mcp, 'execute', fake_browser)
+
+    async def scenario():
+        events = []
+        task = asyncio.create_task(agent_action(
+            db, 'user', 'run', 'step',
+            {'action': 'browser_tool', 'tool': 'take_snapshot',
+             'arguments': {'pageId': 1}},
+            lambda *event: events.append(event)))
+        for _ in range(30):
+            await asyncio.sleep(0.02)
+            approval = db.one(
+                "SELECT id FROM workspace_action_approvals "
+                "WHERE run_id=? AND status='pending'", ('run',))
+            if approval:
+                break
+        assert approval
+        assert not called
+        decide(db, 'user', 'run', approval['id'], True)
+        result = await task
+        assert result['success']
+        assert called == [('user', 'run', 'take_snapshot')]
+        assert any(event[1] == 'workspace_approval_required' for event in events)
+
+    asyncio.run(scenario())
+
+
+def test_reference_search_waits_for_approval_before_sending_query(workspace, monkeypatch):
+    import central.reference_search as reference_search
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    calls = []
+
+    def fake_search(query):
+        calls.append(query)
+        return {'success': True, 'source': 'test', 'references': [],
+                'output': 'test references'}
+
+    monkeypatch.setattr(reference_search, 'search', fake_search)
+
+    async def scenario():
+        events = []
+        task = asyncio.create_task(agent_action(
+            db, 'user', 'run', 'step',
+            {'action': 'reference_search', 'query': 'React official docs'},
+            lambda *event: events.append(event)))
+        for _ in range(30):
+            await asyncio.sleep(0.02)
+            approval = db.one(
+                "SELECT id FROM workspace_action_approvals "
+                "WHERE run_id=? AND status='pending'", ('run',))
+            if approval:
+                break
+        assert approval
+        assert calls == []
+        decide(db, 'user', 'run', approval['id'], True)
+        result = await task
+        assert result['success']
+        assert calls == ['React official docs']
+        assert any(event[1] == 'workspace_approval_required' for event in events)
+        assert any(event[1] == 'workspace_action_result' and
+                   event[2]['references'] == [] for event in events)
+
+    asyncio.run(scenario())
+
+
 def test_ask_mode_requires_user_decision_and_revocation(workspace):
     db, root=workspace
     set_policy(db,'user','ask',str(root))
@@ -150,6 +227,35 @@ def test_worker_patches_file_and_validates_actual_python(workspace):
     assert (root/'hello.py').read_text() == "print('new')\n"
     assert 'python_compile' in answer
     assert any(e[1]=='workspace_validation' and e[2]['passed'] for e in events)
+
+
+def test_worker_stops_after_repeating_the_same_failed_action(workspace, monkeypatch):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    model = FakeModel([
+        json.dumps({'action': 'read', 'path': 'missing.md'}),
+        json.dumps({'action': 'read', 'path': 'missing.md'}),
+        json.dumps({'action': 'finish', 'message': 'Não concluído'}),
+    ])
+    calls = []
+
+    async def failed_action(*args):
+        calls.append(args[4])
+        return {'success': False, 'error': 'Arquivo não encontrado'}
+
+    monkeypatch.setattr('central.agent_autonomy.agent_action', failed_action)
+
+    with pytest.raises(RuntimeError, match='falhou 2 vezes'):
+        asyncio.run(autonomous_worker(
+            model, db, 'user', 'run', 'step', {'kind': 'openai'}, 'key',
+            'mock', '', [{'role': 'user', 'content': 'Leia o arquivo'}],
+            lambda *args: None))
+
+    from central.worker_checkpoint import checkpoint_summary
+    checkpoint = checkpoint_summary(db, 'user', 'run')[0]
+    assert len(calls) == 2
+    assert checkpoint['state'] == 'blocked'
+    assert 'Arquivo não encontrado' in checkpoint['last_result']
 
 
 def test_untrusted_model_cannot_inject_raw_shell_or_unscoped_file(workspace):
@@ -217,6 +323,7 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
                     'old': "print('old')", 'new': "print('new')",
                     'expected_sha256': h("print('old')\n")}),
         json.dumps({'action': 'finish', 'message': 'Implementação pronta.'}),
+        json.dumps({'action': 'read', 'path': 'hello.py'}),
         json.dumps({'action': 'finish', 'message': 'Revisão concluída.'}),
     ])
     engine = Engine(db, FakeSecurity(), model)
@@ -236,8 +343,8 @@ def test_sequential_workers_share_persisted_outputs_and_validate(workspace):
     assert json.loads(steps[1]['deps']) == [steps[0]['id']]
     assert json.loads(steps[2]['deps']) == [steps[1]['id']]
     assert all(step['status'] == 'completed' for step in steps)
-    assert 'Planejamento definido.' in model.seen[1][1][0]['content']
-    assert 'Implementação pronta.' in model.seen[4][1][0]['content']
+    assert 'Planejamento definido.' in model.seen[1][1][-1]['content']
+    assert 'Implementação pronta.' in model.seen[4][1][-1]['content']
     assert (root / 'hello.py').read_text() == "print('new')\n"
     events = db.all("SELECT payload FROM events WHERE run_id=? AND event='workspace_validation'", (rid,))
     assert len(events) == 2
@@ -269,11 +376,17 @@ def test_programming_agent_cannot_finish_from_generic_prose_without_edits(worksp
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))
     model = FakeModel([json.dumps({'action': 'finish', 'message': 'Está pronto.'})
-                       for _ in range(12)])
-    from central.worker_checkpoint import WorkerPaused
-    with pytest.raises(WorkerPaused, match='pausado por limite'):
+                       for _ in range(2)])
+    with pytest.raises(ProviderError, match='repetiu a finalização') as error:
         asyncio.run(autonomous_worker(
             model, db, 'user', 'run', 'step', {'kind': 'openai'},
             'key', 'mock', '', [{'role':'user','content':'Desenvolva o site.'}],
             lambda *args: None, require_code_changes=True))
+    assert error.value.category == 'response'
+    assert not error.value.retryable
     assert (root / 'hello.py').read_text() == "print('old')\n"
+    from central.worker_checkpoint import checkpoint_summary
+    checkpoint = checkpoint_summary(db, 'user', 'run')[0]
+    assert checkpoint['rounds_total'] == 2
+    assert checkpoint['last_action'] == 'finish_sem_alteracoes'
+    assert 'repetiu a finalização' in checkpoint['last_result']

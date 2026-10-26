@@ -138,11 +138,50 @@ def skill(files):
         reject()
     header, body = source[4:].split('\n---\n', 1)
     meta = {}
-    # Deliberate scalar-only YAML subset: no tags, aliases, objects or hooks.
+    # Bounded metadata subset. Tool declarations are inert, never permissions.
+    tool_list = False
+    metadata_map = False
     for line in header.splitlines():
         if not line.strip():
             continue
-        match = re.fullmatch(r'(name|description|version):\s*(.+)', line)
+        if metadata_map and line.startswith('  '):
+            nested = re.fullmatch(r'  ([a-zA-Z0-9_-]{1,64}):\s*(.+)', line)
+            if not nested or nested[1] in meta['metadata'] or len(meta['metadata']) >= 32:
+                reject()
+            value = nested[2].strip()
+            if value.startswith('"'):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    reject()
+            elif value.startswith("'") and value.endswith("'"):
+                value = value[1:-1].replace("''", "'")
+            elif value[0] in '!&*[{>|':
+                reject()
+            meta['metadata'][nested[1]] = text(value, 1000)
+            continue
+        metadata_map = False
+        if line == 'metadata:':
+            if 'metadata' in meta:
+                reject()
+            meta['metadata'] = {}
+            metadata_map = True
+            tool_list = False
+            continue
+        if tool_list and line.startswith('  - '):
+            value = text(line[4:].strip(), 300)
+            if len(meta['allowed-tools']) >= 32 or value[0] in '!&*[{>|':
+                reject()
+            meta['allowed-tools'].append(value)
+            continue
+        tool_list = False
+        if line == 'allowed-tools:':
+            if 'allowed-tools' in meta:
+                reject()
+            meta['allowed-tools'] = []
+            tool_list = True
+            continue
+        match = re.fullmatch(r'(name|description|version|license|allowed-tools|user-invocable|disable-model-invocation|argument-hint):\s*(.+)', line)
         if not match or match[1] in meta:
             reject()
         value = match[2].strip()
@@ -156,13 +195,28 @@ def skill(files):
         elif value[0] in '!&*[{>|':
             reject()
         meta[match[1]] = value
-    if set(meta) - {'name', 'description', 'version'} or not {'name', 'description'} <= meta.keys():
+    if not {'name', 'description'} <= meta.keys():
         reject()
     if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', text(meta['name'], 64)):
         reject()
+    # Editor hints are metadata only; they grant no permissions in the Central.
+    for field in ('user-invocable', 'disable-model-invocation'):
+        if field in meta:
+            if meta[field] not in ('true', 'false'):
+                reject()
+            meta[field] = meta[field] == 'true'
+    if 'argument-hint' in meta:
+        text(meta['argument-hint'], 1000)
+    if 'license' in meta:
+        text(meta['license'], 300)
+    if 'allowed-tools' in meta and not isinstance(meta['allowed-tools'], list):
+        text(meta['allowed-tools'], 1000)
     text(meta['description'], 1000)
     text(body, 65536)
-    meta['version'] = version(meta.get('version', '1.0.0'))
+    nested_version = meta.get('metadata', {}).get('version')
+    if nested_version and 'version' in meta and meta['version'] != nested_version:
+        reject()
+    meta['version'] = version(meta.get('version', nested_version or '1.0.0'))
     return dict(meta, files=sorted(files), file_count=len(files), instructions=body,
                 execution_enabled=False)
 
@@ -186,6 +240,11 @@ def vsix(files):
         reject()
     if any(not re.fullmatch(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', text(x, 260)) for x in dependencies):
         reject()
+    extension_pack = package.get('extensionPack', [])
+    if not isinstance(extension_pack, list) or len(extension_pack) > 100:
+        reject()
+    if any(not re.fullmatch(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', text(x, 260)) for x in extension_pack):
+        reject()
     contributes = package.get('contributes', {})
     if not isinstance(contributes, dict):
         reject()
@@ -202,7 +261,7 @@ def vsix(files):
             'version': version(package.get('version')),
             'description': text(package.get('description', ''), 2000, empty=True),
             'vscode_range': engine, 'minimum_vscode': minimum[1] if minimum else None,
-            'dependencies': dependencies, 'commands': cleaned,
+            'dependencies': dependencies, 'extension_pack': extension_pack, 'commands': cleaned,
             'file_count': len(files), 'execution_enabled': False, 'installed': False}
 
 
@@ -210,6 +269,42 @@ def mcp(raw):
     if len(raw) > 128 * 1024:
         reject()
     data = unique_json(raw)
+    if data.get('name') == 'io.github.ChromeDevTools/chrome-devtools-mcp':
+        package_fields = {
+            'registryType', 'registryBaseUrl', 'identifier', 'version',
+            'transport',
+        }
+        if (set(data) != {'$schema', 'name', 'title', 'description',
+                          'repository', 'version', 'packages'}
+                or data.get('version') != '1.0.1'
+                or not isinstance(data.get('repository'), dict)
+                or data['repository'].get('url') !=
+                'https://github.com/ChromeDevTools/chrome-devtools-mcp'
+                or data['repository'].get('source') != 'github'
+                or not isinstance(data.get('packages'), list)
+                or len(data['packages']) != 1):
+            reject()
+        package = data['packages'][0]
+        optional_environment = {'environmentVariables'}
+        if (not isinstance(package, dict)
+                or set(package) not in (package_fields, package_fields | optional_environment)
+                or package.get('registryType') != 'npm'
+                or package.get('registryBaseUrl') != 'https://registry.npmjs.org'
+                or package.get('identifier') != 'chrome-devtools-mcp'
+                or package.get('version') != '1.0.1'
+                or package.get('transport') != {'type': 'stdio'}
+                or package.get('environmentVariables', []) != []):
+            reject()
+        return {
+            'name': 'Chrome DevTools MCP',
+            'version': '1.0.1',
+            'transport': 'stdio',
+            'tools': [],
+            'permissions': ['workspace.read'],
+            'server_id': 'chrome-devtools',
+            'execution_enabled': False,
+            'tools_verified': False,
+        }
     allowed = {'name', 'version', 'transport', 'endpoint', 'tools', 'permissions'}
     if set(data) - allowed or not {'name', 'version', 'transport', 'tools', 'permissions'} <= data.keys():
         reject()

@@ -16,12 +16,22 @@ def fake_workers(specialty='architecture'):
             for n, (name, intended, instructions, avatar) in enumerate(TEMPLATES)]
 
 
-def test_corrupted_standard_workers_still_route_to_frontend_and_reviewer():
+def test_corrupted_standard_workers_route_through_research_to_frontend_and_review():
     agents = fake_workers()
     assert len(recoverable_default_agents(agents)) == len(TEMPLATES) - 1
     selected = team_for_task(agents, 'Desenvolva a landing page NOVA STUDIO com React, testes e correções.')
-    assert [effective_specialty(a) for a in selected] == ['architecture', 'frontend', 'review']
-    assert [a['name'] for a in selected] == ['Arquiteto IA', 'Frontend IA', 'Revisor IA']
+    assert [effective_specialty(a) for a in selected] == [
+        'architecture', 'research', 'frontend', 'review']
+    assert [a['name'] for a in selected] == [
+        'Arquiteto IA', 'Pesquisador IA', 'Frontend IA', 'Revisor IA']
+
+
+def test_frontend_task_does_not_fall_back_to_an_unrelated_backend_worker():
+    agents = [agent for agent in fake_workers()
+              if agent['name'] in ('Arquiteto IA', 'Backend IA', 'Revisor IA')]
+    selected = team_for_task(
+        agents, 'Desenvolva uma landing page NOVA STUDIO com React e CSS.')
+    assert [effective_specialty(agent) for agent in selected] == ['architecture', 'review']
 
 
 def test_team_mode_no_longer_collapses_to_single_architect_when_keywords_match():
@@ -71,9 +81,49 @@ def test_engine_builds_real_team_even_when_stored_specialties_are_all_wrong(tmp_
         steps = db.all('SELECT * FROM steps WHERE run_id=? ORDER BY rowid', (rid,))
         assert run['status'] == 'queued'
         assert [step['name'] for step in steps] == [
-            'Arquiteto IA', 'Frontend IA', 'Revisor IA']
+            'Arquiteto IA', 'Pesquisador IA', 'Frontend IA', 'Revisor IA']
         assert steps[1]['deps'] == '["' + steps[0]['id'] + '"]'
         assert steps[2]['deps'] == '["' + steps[1]['id'] + '"]'
+        assert steps[3]['deps'] == '["' + steps[2]['id'] + '"]'
+    finally:
+        db.close()
+
+
+def test_autonomous_auto_implementation_routes_frontend_team_and_reviewer(tmp_path):
+    db = Database(':memory:')
+    try:
+        db.execute('INSERT INTO users VALUES(?,?,?,?)',
+                   ('user', 'test@example.com', 'hash', utcnow()))
+        db.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',
+                   ('chat', 'user', 'Nova conversa', None, utcnow(), utcnow()))
+        for agent in fake_workers():
+            db.execute(
+                'INSERT INTO agents(id,user_id,name,specialty,instructions,avatar,created_at) '
+                'VALUES(?,?,?,?,?,?,?)',
+                (agent['id'], 'user', agent['name'], agent['specialty'],
+                 agent['instructions'], agent['avatar'], utcnow()))
+        from central.computer_access import set_policy
+        folder = tmp_path / 'authorized'
+        folder.mkdir()
+        set_policy(db, 'user', 'full', str(folder))
+        engine = Engine(db, None)
+        engine.schedule = lambda rid: None
+
+        async def go():
+            return engine.create_run(
+                'user', 'chat',
+                'Pedido atual: continue o projeto. CONTINUAÇÃO DE IMPLEMENTAÇÃO. '
+                'Pedido original: Desenvolva uma landing page React, API backend, '
+                'testes e DevOps.',
+                'auto', autonomous=True)
+
+        rid = asyncio.run(go())
+        steps = db.all('SELECT * FROM steps WHERE run_id=? ORDER BY rowid', (rid,))
+        assert [step['name'] for step in steps] == [
+            'Arquiteto IA', 'Pesquisador IA', 'Frontend IA', 'Revisor IA']
+        assert steps[1]['deps'] == '["' + steps[0]['id'] + '"]'
+        assert steps[2]['deps'] == '["' + steps[1]['id'] + '"]'
+        assert steps[3]['deps'] == '["' + steps[2]['id'] + '"]'
     finally:
         db.close()
 

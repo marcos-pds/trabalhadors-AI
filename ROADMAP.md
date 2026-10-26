@@ -474,9 +474,7 @@ nos dois caminhos do motor. Contexto é efêmero por chamada, sujeito a
 revalidação de acesso e orçamento, sem copiar o pacote para checkpoints. Os estados de importação, validação, habilitação, associação e disponibilidade são exibidos separadamente; a disponibilidade por execução tem endpoint autenticado. A migração 10 registra quais Skills entraram no contexto por execução/agente, guardando apenas IDs, hash e horário, sem conteúdo.
 Scripts/anexos de Skills não são executados nem carregados pelo modelo.
 
-VSIX tem inspeção estática e gestão de pacotes, sem instalação no VS Code.
-MCP tem gestão de configurações declarativas inativas; não há transporte,
-descoberta de ferramentas, chamada remota, execução stdio ou credenciais MCP.
+VSIX tem inspeção estática e gestão de pacotes, além de instalação/desinstalação explícita em instalações estáveis do VS Code no Windows, sujeita à revisão, confirmação e recusa de pacotes com dependências. Não há download do Marketplace nem ponte com agentes. MCP mantém apenas configurações declarativas inativas; não há transporte, descoberta de ferramentas, chamada remota, execução stdio ou credenciais MCP.
 Importar não ativa, compartilhar exige confirmação e administrador. Pacotes e
 metadados são criptografados com o mecanismo existente, com validação de ZIP,
 limites de recursos e auditoria sem conteúdo. As regras de workspace,
@@ -489,6 +487,4 @@ no Python 3.15 local e foi interrompida. Os testes não foram removidos do CI.
 O novo conftest direciona o banco da aplicação para pasta temporária antes
 de importar módulos, preservando os dados locais do operador.
 
-Ficam pendentes a suíte integral nesta versão em ambiente compatível,
-homologação visual, ponte autenticada VS Code e transporte MCP com segurança
-de rede/processos e autorização por ferramenta. A Central segue um MVP local.
+Ficam pendentes a suíte integral nesta versão em ambiente compatível, homologação visual, ponte autenticada entre VS Code e agentes, e transporte MCP com segurança de rede/processos, limites do Windows, consentimento por chamada e autorização por ferramenta integrada ao workspace. A Central segue um MVP local.

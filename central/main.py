@@ -1,9 +1,15 @@
 import asyncio
+import hashlib
+import ipaddress
+import logging
 import json
 import os
+import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
@@ -15,11 +21,14 @@ from .worker_checkpoint import checkpoint_summary
 from .engine import (Engine, TEMPLATES, validate_flow,
                      suggested_default_specialty, recoverable_default_agents)
 from .providers import DEFAULT_ENDPOINTS, ProviderError
+from .agent_registry import suggested_agent_specialty
+from . import chatgpt_plan
 from .catalog import CATALOG, BY_KIND, discover_models, candidates
 from .memory import search_history, SMALL_HISTORY_COUNT, PROJECT_HISTORY_COUNT
 from .computer_access import local_only, policy as computer_policy, set_policy as set_computer_policy, request_action as computer_request_action, decide_action as computer_decide_action
 from .workspace_tools import decide as decide_workspace_action
-from .task_contract import needs_workspace_tools, delivery_evidence
+from .task_contract import (needs_workspace_tools, delivery_evidence,
+                            resolve_continuation_prompt)
 from .observability import request_context, correlation_id, log_event, duration_ms
 from .run_policy import classify_task
 from .ops import overview as ops_overview, audit as ops_audit, audit_history
@@ -31,6 +40,7 @@ from .organizations import (
     ensure_personal, membership, require_org, require_project, visible_projects,
     create_organization, set_member, remove_member, all_organizations, require_run_write)
 from .live_preview import candidates as preview_candidates, start as start_preview, stop as stop_preview, info as preview_info, stop_all as stop_all_previews
+from .token_usage import run_usage, usage_overview
 
 from .runtime_config import validate_runtime, registration_allowed
 validate_runtime()
@@ -87,11 +97,24 @@ async def lifespan(app):
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        from .browser_mcp import close_all
+        await close_all()
         ENGINE.shutting_down = False
 
 
 app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
 
+class RedactChatGPTOAuthAccessLog(logging.Filter):
+    def filter(self, record):
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str) and '/api/chatgpt-plan/callback' in args[2]:
+            safe = list(args)
+            safe[2] = '/api/chatgpt-plan/callback?[redacted]'
+            record.args = tuple(safe)
+        return True
+
+
+logging.getLogger('uvicorn.access').addFilter(RedactChatGPTOAuthAccessLog())
 
 @app.middleware('http')
 async def trace_requests(request: Request, call_next):
@@ -209,7 +232,7 @@ def public_provider(row):
     health = ENGINE.health.detail(row['id'], row['model'])
     if not row['enabled']:
         health['state'] = 'disabled'
-    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc']), 'health':health}
+    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc'] or row.get('chatgpt_connection_id')), 'auth_type':'chatgpt_plan' if row.get('chatgpt_connection_id') else 'api_key', 'health':health}
 
 
 def check_provider(data):
@@ -237,8 +260,192 @@ class QuickProviderIn(BaseModel):
 
 @app.get('/api/provider-catalog')
 def provider_catalog(user=Depends(current_user)):
-    return CATALOG
+    return CATALOG + [{
+        'kind': 'openai_chatgpt', 'name': 'ChatGPT (assinatura)',
+        'access': 'Plano ChatGPT elegível',
+        'note': 'Conecte com Sign in with ChatGPT e autorize explicitamente o uso elegível do plano. Modelos exibidos conforme sua conta. Isso não usa a API paga por chave.',
+        'keys_url': 'https://chatgpt.com/', 'source_url': 'https://developers.openai.com/siwc/token-sharing-open-source',
+        'checked_at': '2026-10-25', 'quick': True,
+    }]
 
+
+def _oauth_callback_page(success, message):
+    import html
+    safe = html.escape(message)
+    message_json = json.dumps(message, ensure_ascii=False).replace('<', '\\u003c')
+    ok = 'true' if success else 'false'
+    return HTMLResponse('<!doctype html><meta charset="utf-8"><title>ChatGPT conectado</title>'
+        '<main style="font:16px system-ui;max-width:38rem;margin:12vh auto;padding:2rem">'
+        '<h1>' + ('Conexão concluída' if success else 'Não foi possível conectar') + '</h1>'
+        '<p>' + safe + '</p><p>Você pode fechar esta janela e voltar à Central.</p></main>'
+        '<script>history.replaceState(null,"",location.pathname);if(window.opener){window.opener.postMessage({type:"central-chatgpt-oauth",ok:' + ok + ',message:' + message_json + '},String.fromCharCode(42));window.close()}</script>',
+        headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
+
+
+@app.post('/api/chatgpt-plan/authorize')
+def chatgpt_plan_authorize(request: Request, user=Depends(current_user)):
+    try:
+        local_client = ipaddress.ip_address(request.client.host).is_loopback
+    except (ValueError, AttributeError):
+        local_client = False
+    if not local_client or request.url.scheme != 'http' or request.url.hostname not in ('127.0.0.1', 'localhost', '::1') or not request.url.port:
+        raise HTTPException(400, 'A conexão com o plano ChatGPT só pode ser iniciada pela Central local.')
+    connection = DB.one('SELECT * FROM chatgpt_plan_connections WHERE user_id=?', (user['id'],))
+    setting = DB.one("SELECT value FROM app_settings WHERE key='chatgpt_plan_host_id'")
+    if setting:
+        host_id = setting['value']
+    else:
+        host_id = 'urn:uuid:' + str(__import__('uuid').uuid4())
+        DB.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('chatgpt_plan_host_id',?)", (host_id,))
+        host_id = DB.one("SELECT value FROM app_settings WHERE key='chatgpt_plan_host_id'")['value']
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    verifier, challenge = chatgpt_plan.pkce_pair()
+    redirect_uri = f'http://127.0.0.1:{request.url.port}/api/chatgpt-plan/callback'
+    client_id = connection['client_id'] if connection else 'dynamic_agent_client'
+    DB.execute('DELETE FROM chatgpt_plan_pending WHERE expires_at<=?', (utcnow(),))
+    DB.execute('INSERT INTO chatgpt_plan_pending VALUES(?,?,?,?,?,?,?)',
+        (hashlib.sha256(state.encode()).hexdigest(), user['id'], SEC.encrypt(nonce), SEC.encrypt(verifier), redirect_uri,
+         connection['client_id'] if connection else None,
+         (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()))
+    credentials = json.loads(SEC.decrypt(connection['credentials_enc'])) if connection else {}
+    url = chatgpt_plan.authorization_url(
+        client_id=client_id, host_id=host_id, app_name='Central de Trabalhadores IA',
+        redirect_uri=redirect_uri, state=state, nonce=nonce, challenge=challenge,
+        login_hint=connection['email'] if connection else None)
+    return {'authorization_url': url}
+
+
+@app.get('/api/chatgpt-plan/callback', include_in_schema=False)
+async def chatgpt_plan_callback(request: Request):
+    try:
+        if not ipaddress.ip_address(request.client.host).is_loopback or request.url.hostname not in ('127.0.0.1', 'localhost', '::1'):
+            return _oauth_callback_page(False, 'O retorno deve acontecer na Central local que iniciou a conexão.')
+    except (ValueError, AttributeError):
+        return _oauth_callback_page(False, 'O retorno deve acontecer na Central local que iniciou a conexão.')
+    state = request.query_params.get('state', '')
+    state_hash = hashlib.sha256(state.encode()).hexdigest() if state else ''
+    pending = DB.one('SELECT * FROM chatgpt_plan_pending WHERE state_hash=? AND expires_at>?', (state_hash, utcnow()))
+    if not pending:
+        return _oauth_callback_page(False, 'A tentativa expirou ou não corresponde à autorização iniciada. Volte à Central e tente novamente.')
+    DB.execute('DELETE FROM chatgpt_plan_pending WHERE state_hash=?', (state_hash,))
+    if request.query_params.get('error'):
+        return _oauth_callback_page(False, 'A autorização foi cancelada ou recusada.')
+    code = request.query_params.get('code', '')
+    issued_client_id = request.query_params.get('client_id') or pending['client_id']
+    if not code or not issued_client_id or (pending['client_id'] and issued_client_id != pending['client_id']):
+        return _oauth_callback_page(False, 'A resposta de autorização estava incompleta. Tente conectar novamente.')
+    try:
+        result = await chatgpt_plan.exchange_code(code=code, client_id=issued_client_id,
+            verifier=SEC.decrypt(pending['verifier']), redirect_uri=pending['redirect_uri'])
+        scopes = str(result.get('scope') or '').split()
+        if chatgpt_plan.REQUIRED_SCOPE not in scopes or 'resource.invoke' not in scopes:
+            raise ProviderError('authentication', 'A permissão de uso do plano ChatGPT não foi concedida.', False)
+        claims = await chatgpt_plan.validate_id_token(result['id_token'], client_id=issued_client_id, nonce=SEC.decrypt(pending['nonce']))
+        if not claims.get('email') or claims.get('email_verified') is not True:
+            raise ProviderError('authentication', 'A identidade retornada não contém um e-mail verificado.', False)
+        previous = DB.one('SELECT * FROM chatgpt_plan_connections WHERE user_id=?', (pending['user_id'],))
+        if previous and previous['subject'] != claims['sub']:
+            raise ProviderError('authentication', 'Desconecte a conta ChatGPT atual antes de conectar outra conta.', False)
+        now = utcnow()
+        credentials = {'access_token': result['access_token'], 'refresh_token': result.get('refresh_token', ''),
+            'expires_at': int(time.time()) + int(result.get('expires_in', 3600)),
+            'scopes': ' '.join(scopes), 'client_id': issued_client_id}
+        if not credentials['refresh_token']:
+            raise ProviderError('authentication', 'A OpenAI não retornou credencial renovável. Tente novamente autorizando a sessão.', False)
+        encrypted = SEC.encrypt(json.dumps(credentials, separators=(',', ':')))
+        if previous:
+            DB.execute('UPDATE chatgpt_plan_connections SET client_id=?,email=?,scopes=?,credentials_enc=?,updated_at=? WHERE id=? AND user_id=?',
+                (issued_client_id, claims['email'], ' '.join(scopes), encrypted, now, previous['id'], pending['user_id']))
+        else:
+            DB.execute('INSERT INTO chatgpt_plan_connections VALUES(?,?,?,?,?,?,?,?,?)',
+                (uid(), pending['user_id'], issued_client_id, claims['sub'], claims['email'], ' '.join(scopes), encrypted, now, now))
+        return _oauth_callback_page(True, 'Conta ChatGPT conectada. A Central exibirá somente os modelos listados para essa conta.')
+    except ProviderError as exc:
+        return _oauth_callback_page(False, str(exc))
+    except Exception:
+        return _oauth_callback_page(False, 'Não foi possível validar a autorização. Nenhum token foi exibido; tente conectar novamente.')
+
+
+async def chatgpt_plan_credentials(user_id):
+    row = DB.one('SELECT * FROM chatgpt_plan_connections WHERE user_id=?', (user_id,))
+    if not row:
+        raise HTTPException(409, 'Conecte uma conta ChatGPT antes de selecionar modelos.')
+    try:
+        credentials = await chatgpt_plan.stored_credentials(DB, SEC, row['id'])
+        return row, credentials
+    except ProviderError as exc:
+        raise HTTPException(401, str(exc))
+
+
+@app.get('/api/chatgpt-plan/status')
+def chatgpt_plan_status(user=Depends(current_user)):
+    row = DB.one('SELECT id,email,scopes,created_at,updated_at FROM chatgpt_plan_connections WHERE user_id=?', (user['id'],))
+    return {'connected': bool(row), 'connection': row}
+
+
+@app.get('/api/chatgpt-plan/models')
+async def chatgpt_plan_models(user=Depends(current_user)):
+    _, credentials = await chatgpt_plan_credentials(user['id'])
+    try:
+        return {'models': await chatgpt_plan.available_models(credentials['access_token'])}
+    except ProviderError as exc:
+        raise HTTPException(422, str(exc))
+
+
+class ChatGPTPlanProviderIn(BaseModel):
+    model: str = Field(min_length=1, max_length=120)
+
+
+@app.post('/api/chatgpt-plan/providers')
+async def add_chatgpt_plan_provider(data: ChatGPTPlanProviderIn, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    try:
+        connection, credentials = await chatgpt_plan_credentials(user['id'])
+        models = await chatgpt_plan.available_models(credentials['access_token'])
+    except ProviderError as exc:
+        raise HTTPException(422, str(exc))
+    model = next((item for item in models if item['id'] == data.model), None)
+    if not model:
+        raise HTTPException(422, 'Esse modelo não consta no catálogo autorizado para a conta ChatGPT conectada.')
+    reject_duplicate_model(user['id'], 'openai_chatgpt', data.model)
+    started = time.monotonic()
+    try:
+        answer = ''.join([part async for part in chatgpt_plan.stream_response(credentials['access_token'], data.model,
+            'Responda somente OK.', [{'role': 'user', 'content': 'Responda somente OK.'}], timeout=45)])
+        if not answer.strip():
+            raise ProviderError('response', 'O modelo não retornou texto.', True)
+    except ProviderError as exc:
+        raise HTTPException(422, str(exc))
+    provider_id = uid()
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        reject_duplicate_model(user['id'], 'openai_chatgpt', data.model)
+        DB.execute('''INSERT INTO providers(id,user_id,name,kind,base_url,model,api_key_enc,priority,enabled,
+            chatgpt_connection_id,created_at) VALUES(?,?,?,?,?,?,NULL,5,1,?,?)''',
+            (provider_id, user['id'], 'ChatGPT (assinatura)', 'openai_chatgpt', chatgpt_plan.API_BASE,
+             data.model, connection['id'], utcnow()))
+    ENGINE.health.record(provider_id, data.model, success=True, latency_ms=(time.monotonic()-started)*1000)
+    return {'provider': public_provider(require_owned(DB, 'providers', provider_id, user['id'])), 'model': model}
+
+
+@app.delete('/api/chatgpt-plan/connection')
+async def revoke_chatgpt_plan_connection(request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    connection = DB.one('SELECT * FROM chatgpt_plan_connections WHERE user_id=?', (user['id'],))
+    remote_revoked = False
+    if connection:
+        try:
+            credentials = json.loads(SEC.decrypt(connection['credentials_enc']))
+            remote_revoked = await chatgpt_plan.revoke_session(credentials)
+        except Exception:
+            remote_revoked = False
+        provider_ids = [row['id'] for row in DB.all('SELECT id FROM providers WHERE chatgpt_connection_id=? AND user_id=?', (connection['id'], user['id']))]
+        for provider_id in provider_ids:
+            DB.execute('UPDATE agents SET provider_id=NULL,model=NULL WHERE provider_id=? AND user_id=?', (provider_id, user['id']))
+            DB.execute('DELETE FROM providers WHERE id=? AND user_id=?', (provider_id, user['id']))
+        DB.execute('DELETE FROM chatgpt_plan_connections WHERE id=? AND user_id=?', (connection['id'], user['id']))
+    return {'ok': True, 'remote_revoked': remote_revoked}
 
 def quick_key(data, user):
     key = data.api_key.strip()
@@ -421,6 +628,8 @@ def add_provider(data:ProviderIn,user=Depends(current_user)):
 @app.put('/api/providers/{pid}')
 def update_provider(pid:str,data:ProviderIn,user=Depends(current_user)):
     previous = require_owned(DB,'providers',pid,user['id'])
+    if previous.get('chatgpt_connection_id'):
+        raise HTTPException(422, 'Gerencie modelos ChatGPT pela conexão da conta, não pela configuração manual de chave API.')
     url = check_provider(data)
     data.model = data.model.strip()
     if not data.model: raise HTTPException(422, 'Informe o modelo.')
@@ -458,7 +667,11 @@ async def test_provider(pid:str,user=Depends(current_user)):
     started = time.monotonic()
     try:
         chunks=[]
-        async for part in ENGINE.client.stream(p,SEC.decrypt(p['api_key_enc']),p['model'],
+        credential = SEC.decrypt(p['api_key_enc'])
+        if p['kind'] == 'openai_chatgpt':
+            stored = await chatgpt_plan.stored_credentials(DB, SEC, p.get('chatgpt_connection_id'))
+            credential = stored['access_token']
+        async for part in ENGINE.client.stream(p,credential,p['model'],
                                                'Seja conciso.',[{'role':'user','content':'Responda somente OK.'}]):
             chunks.append(part)
             if sum(map(len,chunks))>100: break
@@ -540,6 +753,10 @@ def computer_access_decision(approval_id: str, data: ComputerAccessDecisionIn,
     return outcome
 
 
+class AssignSpecialtiesIn(BaseModel):
+    apply: bool = False
+
+
 class AgentIn(BaseModel):
     name: str = Field(min_length=2,max_length=70)
     specialty: str = Field(default='custom',max_length=70)
@@ -577,9 +794,42 @@ def restore_default_specialties(request: Request, user=Depends(current_user)):
     return {'repaired_count': len(repaired), 'repaired': repaired}
 
 
+@app.post('/api/agents/assign-specialties')
+def assign_agent_specialties(data: AssignSpecialtiesIn, request: Request, user=Depends(current_user)):
+    """Preview or apply confident per-user role assignments without changing agent setup."""
+    require_csrf(request)
+    agents = DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at', (user['id'],))
+    suggestions = []
+    unresolved = 0
+    for agent in agents:
+        specialty = suggested_agent_specialty(agent)
+        if specialty is None:
+            unresolved += 1
+        elif specialty != agent['specialty']:
+            suggestions.append({
+                'id': agent['id'], 'name': agent['name'],
+                'old_specialty': agent['specialty'], 'new_specialty': specialty,
+            })
+    if data.apply:
+        applied = []
+        for item in suggestions:
+            count = DB.execute(
+                'UPDATE agents SET specialty=? WHERE id=? AND user_id=? AND specialty=?',
+                (item['new_specialty'], item['id'], user['id'], item['old_specialty']))
+            if count:
+                applied.append(item)
+        suggestions = applied
+    return {
+        'applied': data.apply, 'assigned_count': len(suggestions),
+        'unresolved_count': unresolved, 'assignments': suggestions,
+    }
+
+
 @app.post('/api/agents')
 def add_agent(data:AgentIn,user=Depends(current_user)):
-    if data.provider_id: require_owned(DB,'providers',data.provider_id,user['id'])
+    if data.provider_id:
+        selected_provider = require_owned(DB,'providers',data.provider_id,user['id'])
+        if selected_provider['kind'] == 'openai_chatgpt': data.model = selected_provider['model']
     aid=uid()
     DB.execute('''INSERT INTO agents(id,user_id,name,specialty,instructions,avatar,provider_id,model,enabled,max_concurrency,created_at)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)''', (aid,user['id'],data.name,data.specialty,data.instructions,data.avatar,
@@ -590,7 +840,9 @@ def add_agent(data:AgentIn,user=Depends(current_user)):
 @app.put('/api/agents/{aid}')
 def edit_agent(aid:str,data:AgentIn,user=Depends(current_user)):
     require_owned(DB,'agents',aid,user['id'])
-    if data.provider_id: require_owned(DB,'providers',data.provider_id,user['id'])
+    if data.provider_id:
+        selected_provider = require_owned(DB,'providers',data.provider_id,user['id'])
+        if selected_provider['kind'] == 'openai_chatgpt': data.model = selected_provider['model']
     DB.execute('''UPDATE agents SET name=?,specialty=?,instructions=?,avatar=?,provider_id=?,model=?,enabled=?,max_concurrency=? WHERE id=?''',
     (data.name,data.specialty,data.instructions,data.avatar,data.provider_id,data.model,int(data.enabled),data.max_concurrency,aid))
     return require_owned(DB,'agents',aid,user['id'])
@@ -758,6 +1010,41 @@ class ProjectMemoryIn(BaseModel):
     notes: str = Field(default='', max_length=8000)
 
 
+class ProjectBrowserSessionIn(BaseModel):
+    mode: Literal['run_isolated', 'project_persistent']
+
+
+@app.get('/api/projects/{pid}/browser-session')
+def project_browser_session(pid: str, user=Depends(current_user)):
+    project = require_project(DB, pid, user['id'])
+    setting = DB.one(
+        'SELECT mode FROM project_browser_settings WHERE project_id=?', (pid,))
+    return {'project_id': project['id'],
+            'mode': setting['mode'] if setting else 'run_isolated'}
+
+
+@app.put('/api/projects/{pid}/browser-session')
+def save_project_browser_session(pid: str, data: ProjectBrowserSessionIn,
+                                 request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    require_project(DB, pid, user['id'], write=True)
+    DB.execute(
+        'INSERT INTO project_browser_settings(project_id,mode,updated_at) '
+        'VALUES(?,?,?) ON CONFLICT(project_id) DO UPDATE SET '
+        'mode=excluded.mode,updated_at=excluded.updated_at',
+        (pid, data.mode, utcnow()))
+    return {'project_id': pid, 'mode': data.mode}
+
+
+@app.delete('/api/projects/{pid}/browser-session')
+def clear_project_browser_session(pid: str, request: Request,
+                                  user=Depends(current_user)):
+    require_csrf(request)
+    require_project(DB, pid, user['id'], write=True)
+    from .browser_mcp import clear_project_profile
+    return clear_project_profile(DB, user['id'], pid)
+
+
 @app.put('/api/projects/{pid}/memory')
 def save_project_memory(pid: str, data: ProjectMemoryIn, request: Request, user=Depends(current_user)):
     require_csrf(request)
@@ -869,7 +1156,14 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     if convo['project_id']:
         require_project(DB,convo['project_id'],user['id'],write=True)
     if data.mode not in ('auto','manual','team'): raise HTTPException(422,'Modo inválido.')
-    if needs_workspace_tools(data.prompt) and not data.autonomous:
+    effective_prompt = resolve_continuation_prompt(DB, convo['id'], data.prompt)
+    if needs_workspace_tools(effective_prompt) and not data.autonomous:
+        if effective_prompt != data.prompt:
+            raise HTTPException(
+                409, 'Reconheci que você quer continuar uma implementação desta conversa, '
+                     'mas Autonomia está desligada. Abra Computador, confira a pasta '
+                     'autorizada e ative Autonomia para eu inspecionar o estado atual '
+                     'e continuar o trabalho. Nenhuma execução ou alteração foi iniciada.')
         raise HTTPException(
             409, 'Este pedido exige consultar ou alterar arquivos reais, mas Autonomia '
                  'está desligada. Abra Computador, confira a pasta correta e '
@@ -893,7 +1187,7 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     # Validate the worker plan BEFORE persisting the user's request. A rejected
     # plan must not create a ghost chat message or appear as a completed task.
     try:
-        run_id=ENGINE.create_run(user['id'],data.conversation_id,data.prompt,data.mode,data.agent_ids,
+        run_id=ENGINE.create_run(user['id'],data.conversation_id,effective_prompt,data.mode,data.agent_ids,
                                  flow,data.budget_limit,idempotency,autonomous=data.autonomous)
     except ValueError as exc: raise HTTPException(429 if isinstance(exc, QuotaExceeded) else 422,str(exc))
     now=utcnow()
@@ -931,10 +1225,36 @@ def get_run(rid:str,user=Depends(current_user)):
     run['checkpoints']=checkpoint_summary(DB,user['id'],rid)
     run['workspace_binding']=binding_summary(DB,user['id'],rid)
     run['job']=ENGINE.queue.details(rid)
+    run['token_usage']=run_usage(DB,user['id'],rid)
     proof=delivery_evidence(DB,rid) if run['status']=='completed' else None
     run['delivery_verified']=bool(proof and proof['changed_files'] and proof['tests_passed']
                                    and proof['validation_after_last_change'])
     return run
+
+
+@app.post('/api/runs/{rid}/feedback-summary')
+def ensure_run_feedback_summary(rid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request)
+    run=require_owned(DB,'runs',rid,user['id'])
+    if run['status'] not in ('paused_limit','failed','cancelled'):
+        raise HTTPException(409,'A execução não precisa de um resumo de interrupção.')
+    if run.get('autonomous'):
+        local_only(request)
+    message=ENGINE._record_run_feedback(run,run['status'],run.get('error') or '')
+    return {'message':message}
+
+
+@app.get('/api/runs/{rid}/token-usage')
+def get_run_token_usage(rid:str,user=Depends(current_user)):
+    require_owned(DB,'runs',rid,user['id'])
+    return run_usage(DB,user['id'],rid)
+
+
+@app.get('/api/token-usage')
+def get_token_usage(days:int=30,user=Depends(current_user)):
+    if days not in (7,30,90):
+        raise HTTPException(422,'O período deve ser de 7, 30 ou 90 dias.')
+    return usage_overview(DB,user['id'],days)
 
 
 @app.post('/api/runs/{rid}/resume')
@@ -1001,12 +1321,17 @@ def pending_workspace_approvals(rid: str, request: Request, user=Depends(current
                   (rid, user['id']))
     from .workspace_tools import preview
     import json as _json
+    from .browser_mcp import approval_summary
     folder = computer_policy(DB, user['id'])['folder']
     result = []
     for row in rows:
         try:
+            requested = _json.loads(row['request_json'])
+            summary = (approval_summary(requested)
+                       if requested.get('action') == 'browser_tool'
+                       else preview(folder, requested))
             result.append({'approval_id': row['id'], 'step_id': row['step_id'],
-                           'summary': preview(folder, _json.loads(row['request_json']))})
+                           'summary': summary})
         except (HTTPException, ValueError):
             continue
     return result
@@ -1085,7 +1410,7 @@ def run_activity(rid: str, user=Depends(current_user)):
     allowed = {'run_created','run_status','run_resumed','run_paused_limit',
                'step_status','model_selected','worker_checkpoint_restored',
                'workspace_action_requested','workspace_action_result',
-               'worker_message','worker_phase','worker_heartbeat',
+               'worker_message','worker_phase','worker_heartbeat','skill_context_selected',
                'worker_budget_warning',
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
@@ -1116,10 +1441,14 @@ def run_activity(rid: str, user=Depends(current_user)):
             'success': data.get('success', data.get('ok')),
             'model': data.get('model'),
             'status': data.get('status'),
-            'error': data.get('error'),
+            'error': safe_log(data.get('error') or data.get('message')),
             'detail': safe_log(data.get('output')) if data.get('success') is False else '',
             'count': data.get('count'),
             'remaining_rounds': data.get('remaining_rounds'),
+            'available_count': data.get('available_count'),
+            'available_skills': data.get('available_skills'),
+            'inventory_truncated': data.get('inventory_truncated'),
+            'selected_skills': data.get('selected_skills'),
         })
     last_event = DB.one('SELECT created_at FROM events WHERE run_id=? '
                         'ORDER BY seq DESC LIMIT 1', (rid,))
@@ -1339,7 +1668,7 @@ def export_run(rid: str, format: str = 'json', user=Depends(current_user)):
 
 class GitConnectionIn(BaseModel):
     service: str = Field(max_length=20)
-    repository: str = Field(min_length=3, max_length=250)
+    repository: str = Field(default='', max_length=250)
     token: str = Field(min_length=1, max_length=4096)
 
 
@@ -1357,6 +1686,12 @@ def add_git_connection(data: GitConnectionIn, user=Depends(current_user)):
     return result
 
 
+@app.get('/api/git/connections/{connection_id}/repositories')
+def git_connection_repositories(connection_id: str, user=Depends(current_user)):
+    from .git_integrations import repositories
+    return repositories(DB, SEC, user['id'], connection_id)
+
+
 @app.delete('/api/git/connections/{connection_id}')
 def delete_git_connection(connection_id: str, user=Depends(current_user)):
     changed = DB.execute('DELETE FROM git_connections WHERE id=? AND user_id=?',
@@ -1368,9 +1703,10 @@ def delete_git_connection(connection_id: str, user=Depends(current_user)):
 
 
 @app.get('/api/git/connections/{connection_id}/reviews')
-def git_reviews(connection_id: str, number: int | None = None, page: int = 1, user=Depends(current_user)):
+def git_reviews(connection_id: str, number: int | None = None, page: int = 1,
+               repository: str | None = None, user=Depends(current_user)):
     from .git_integrations import reviews
-    return reviews(DB, SEC, user['id'], connection_id, number, page=page)
+    return reviews(DB, SEC, user['id'], connection_id, number, page=page, repository=repository)
 
 
 class KnowledgeIn(BaseModel):
@@ -1403,6 +1739,7 @@ def delete_knowledge(pid: str, document_id: str, user=Depends(current_user)):
 
 
 class GitDraftPlanIn(BaseModel):
+    repository: str | None = Field(default=None, max_length=250)
     head: str = Field(min_length=1, max_length=200)
     base: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=200)
@@ -1416,7 +1753,7 @@ class GitPlanApprovalIn(BaseModel):
 @app.post('/api/git/connections/{connection_id}/draft-plans')
 def create_git_plan(connection_id: str, data: GitDraftPlanIn, user=Depends(current_user)):
     from .git_change_plans import create
-    result = create(DB, SEC, user['id'], connection_id, data.head, data.base, data.title, data.body)
+    result = create(DB, SEC, user['id'], connection_id, data.head, data.base, data.title, data.body, repository=data.repository)
     ops_audit(DB, user['id'], 'git_draft_planned', 'git_plan', result['id'])
     return result
 

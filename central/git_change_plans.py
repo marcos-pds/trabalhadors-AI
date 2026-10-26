@@ -31,21 +31,23 @@ def fingerprint(row):
     return hashlib.sha256((row['service'] + '\0' + row['repository'] + '\0' + row['token_enc']).encode()).hexdigest()
 
 
-def create(db, security, user_id, connection_id, head, base, title, body='', transport=None):
+def create(db, security, user_id, connection_id, head, base, title, body='', transport=None, repository=None):
     validate_branch(head); validate_branch(base)
     if head == base or not isinstance(title, str) or not 1 <= len(title.strip()) <= 200:
         raise HTTPException(422, 'Informe branches diferentes e um título de até 200 caracteres.')
     if not isinstance(body, str) or len(body) > 10000:
         raise HTTPException(422, 'Descrição deve ter até 10000 caracteres.')
     row = connection(db, user_id, connection_id)
-    gateway = Gateway(row, security, transport)
+    gateway = Gateway(row, security, transport, repository=repository)
+    if gateway.repository == '*':
+        raise HTTPException(422, 'Selecione um repositório antes de preparar o rascunho.')
     try:
         head_sha, base_sha = gateway.branch_sha(head), gateway.branch_sha(base)
     except (httpx.HTTPError, RemoteRejected, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(502, 'Não foi possível validar as branches no serviço Git.') from exc
     identifier = uid()
     plan = {'id': identifier, 'operation': 'create_draft_review', 'service': row['service'],
-            'repository': row['repository'], 'head': head, 'base': base,
+            'repository': gateway.repository, 'head': head, 'base': base,
             'head_sha': head_sha, 'base_sha': base_sha, 'title': title.strip(), 'body': body,
             'connection_fingerprint': fingerprint(row)}
     encoded = json.dumps(plan, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -113,9 +115,9 @@ def reconcile(db, security, user_id, plan_id, transport=None):
         raise HTTPException(409, 'Somente planos com resultado incerto podem ser reconciliados.')
     plan = json.loads(row['plan_json'])
     current = connection(db, user_id, row['connection_id'])
-    if current['service'] != plan['service'] or current['repository'] != plan['repository']:
+    if current['service'] != plan['service'] or (current['repository'] != '*' and current['repository'] != plan['repository']):
         raise HTTPException(409, 'A conexão não corresponde ao repositório original.')
-    gateway = Gateway(current, security, transport)
+    gateway = Gateway(current, security, transport, repository=plan['repository'])
     suffix = '/pulls' if gateway.github else '/merge_requests'
     needle = '<!-- central-plan:' + plan_id + ' -->'
     matches = []
@@ -220,7 +222,7 @@ def execute(db, security, user_id, plan_id, confirmation, transport=None):
         raise HTTPException(409, 'Plano expirado ou já utilizado; consulte o estado antes de criar outro.')
     posted = False
     try:
-        gateway = Gateway(current, security, transport)
+        gateway = Gateway(current, security, transport, repository=plan['repository'])
         if gateway.branch_sha(plan['head']) != plan['head_sha'] or gateway.branch_sha(plan['base']) != plan['base_sha']:
             raise HTTPException(409, 'Branches mudaram; revise um novo plano antes de publicar.')
         description = plan['body'] + '\n\n<!-- central-plan:' + plan_id + ' -->'
