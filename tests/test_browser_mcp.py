@@ -184,3 +184,20 @@ def test_browser_mcp_accepts_only_supported_before_unload_values():
     base['arguments']['handleBeforeUnload'] = 'dismiss'
     with pytest.raises(ValueError, match='navega'):
         validate_request(base)
+
+def test_browser_mcp_navigation_patterns_construct_in_node():
+    import shutil
+    import subprocess
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js unavailable')
+    patterns = browser_mcp.NAVIGATION_ALLOWLIST.split(',')
+    script = ('for (const pattern of process.argv.slice(1)) {'
+              ' const parsed = new URLPattern(pattern);'
+              ' if (!parsed.test(pattern.startsWith("https")'
+              ' ? "https://[::1]:8765/" : "http://[::1]:8765/")'
+              ' && pattern.includes(":1")) process.exit(2);'
+              '}')
+    result = subprocess.run([node, '-e', script, *patterns],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr

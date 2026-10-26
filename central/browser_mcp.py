@@ -13,8 +13,9 @@ from fastapi import HTTPException
 
 SERVER_PACKAGE = 'chrome-devtools-mcp@1.0.1'
 NAVIGATION_ALLOWLIST = (
-    'http://localhost:*/*,http://127.0.0.1:*/*,http://[::1]:*/*,'
-    'https://localhost:*/*,https://127.0.0.1:*/*,https://[::1]:*/*')
+    'http://localhost:*/*,http://127.0.0.1:*/*,'
+    'https://localhost:*/*,https://127.0.0.1:*/*,'
+    'http://[\\:\\:1]:*/*,https://[\\:\\:1]:*/*')
 ALLOWED_TOOLS = frozenset({
     'list_pages', 'new_page', 'navigate_page', 'take_snapshot',
     'list_console_messages', 'lighthouse_audit', 'get_css_styles',
