@@ -42,10 +42,21 @@ def save_checkpoint(db, user_id, run_id, step_id, folder, transcript, *,
     # not the original instructions or the latest read hashes/validation messages.
     preserved = [dict(role=m.get('role', 'user'), content=str(m.get('content', ''))[:16000])
                  for m in transcript if isinstance(m, dict)]
-    if len(preserved) > 13:
-        preserved = [preserved[0]] + preserved[-12:]
+    def priority(message):
+        return message['role'] == 'user' and message['content'].startswith((
+            'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO',
+            'Novos ajustes chegaram antes de concluir.',
+        ))
+
+    # User corrections may precede many tool calls. Keep their latest bounded
+    # history across failover instead of silently dropping already-consumed notes.
+    important = [i for i, message in enumerate(preserved) if priority(message)][-6:]
+    keep = {0, *important, *range(max(0, len(preserved) - 12), len(preserved))}
+    preserved = [message for i, message in enumerate(preserved) if i in keep]
     while len(json.dumps(preserved, ensure_ascii=False)) > MAX_TRANSCRIPT_CHARS and len(preserved) > 2:
-        preserved.pop(1)
+        expendable = next((i for i in range(1, len(preserved) - 1)
+                           if not priority(preserved[i])), 1)
+        preserved.pop(expendable)
     db.execute(
         """INSERT INTO worker_checkpoints
            (step_id,run_id,user_id,folder,transcript_json,changed_files_json,

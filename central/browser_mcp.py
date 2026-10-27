@@ -309,11 +309,13 @@ async def _call(session, tool, arguments):
                  for page in pages if _page_is_local(page)]
         return {'success': True, 'pages': local}
     before_ids = {_page_id(page) for page in pages}
+    target_page_id = None
     if tool in ('new_page', 'navigate_page'):
         arguments = dict(arguments)
         arguments['allowList'] = NAVIGATION_ALLOWLIST
         if tool == 'navigate_page':
             page_id = arguments.get('pageId')
+            target_page_id = page_id
             if not any(_page_id(page) == page_id and _page_is_local(page)
                        for page in pages):
                 raise ValueError('A página selecionada não é um endereço local autorizado.')
@@ -330,10 +332,24 @@ async def _call(session, tool, arguments):
                 arguments['pageId'] = page_id
         if not _page_is_local(page):
             raise ValueError('A página selecionada não é um endereço local autorizado.')
+        target_page_id = _page_id(page)
 
     available_tools = await session.list_tools()
     if tool not in {item.name for item in available_tools.tools}:
         raise RuntimeError('A ferramenta não está disponível nesta versão do servidor.')
+    if target_page_id is not None:
+        # The pinned server uses the selected page for these tools; pageId is
+        # part of our scoped API, not their wire arguments.
+        selected = await asyncio.wait_for(session.call_tool(
+            'select_page', {'pageId': target_page_id}), timeout=30)
+        if getattr(selected, 'isError', False):
+            raise RuntimeError('Não foi possível selecionar a página local no Chrome DevTools.')
+        checked = _pages(await session.call_tool('list_pages', {}))
+        if not any(_page_id(page) == target_page_id and page.get('selected')
+                   and _page_is_local(page) for page in checked):
+            raise ValueError('A página selecionada não é um endereço local autorizado.')
+        arguments = dict(arguments)
+        arguments.pop('pageId', None)
     result = await asyncio.wait_for(
         session.call_tool(tool, arguments), timeout=120)
     if getattr(result, 'isError', False):
@@ -345,7 +361,7 @@ async def _call(session, tool, arguments):
         raise RuntimeError('O servidor Chrome DevTools retornou erro' + suffix)
     if tool in ('new_page', 'navigate_page'):
         after = _pages(result)
-        page_id = arguments.get('pageId')
+        page_id = target_page_id
         target = (next((page for page in after if _page_id(page) == page_id), None)
                   if tool == 'navigate_page' else
                   next((page for page in after if _page_id(page) not in before_ids), None))

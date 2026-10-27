@@ -280,6 +280,38 @@ def test_invalid_model_json_is_rejected():
         parse_tool(json.dumps({'action':'delete','path':'notes.md'}))
 
 
+def test_repeated_invalid_responses_trigger_provider_failover(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    model = FakeModel(['```json\nNo actions provided.\n```'] * 3)
+    with pytest.raises(ProviderError, match='três respostas consecutivas') as error:
+        asyncio.run(autonomous_worker(
+            model, db, 'user', 'run', 'step', {'kind': 'ollama'},
+            '', 'local', '', [{'role': 'user', 'content': 'Planeje o projeto.'}],
+            lambda *args: None, planning_only=True))
+    assert error.value.category == 'response'
+    assert not error.value.retryable
+    row = db.one('SELECT rounds_total,actions_total,last_action FROM worker_checkpoints WHERE step_id=?', ('step',))
+    assert row['rounds_total'] == 3
+    assert row['actions_total'] == 0
+    assert row['last_action'] == 'resposta_invalida'
+    assert (root / 'hello.py').read_text() == "print('old')\n"
+
+
+def test_valid_action_resets_invalid_response_streak(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    model = FakeModel([
+        'invalid', 'invalid', json.dumps({'action': 'list', 'path': ''}),
+        'invalid', json.dumps({'action': 'finish', 'message': 'Plano pronto.'}),
+    ])
+    result = asyncio.run(autonomous_worker(
+        model, db, 'user', 'run', 'step', {'kind': 'ollama'},
+        '', 'local', '', [{'role': 'user', 'content': 'Planeje o projeto.'}],
+        lambda *args: None, planning_only=True, validate_at_finish=False))
+    assert 'Plano pronto.' in result
+
+
 
 def test_can_create_nested_folders_but_cannot_leave_workspace(workspace):
     db, root = workspace

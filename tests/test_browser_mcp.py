@@ -71,7 +71,12 @@ class FakeSession:
         if name == 'list_pages':
             return SimpleNamespace(structuredContent={'pages': self.pages},
                                    content=[], isError=False)
+        if name == 'select_page':
+            for page in self.pages:
+                page['selected'] = page['id'] == arguments['pageId']
+            return SimpleNamespace(content=[], isError=False)
         if name == 'take_snapshot':
+            assert 'pageId' not in arguments
             return SimpleNamespace(
                 structuredContent={'snapshot': 'heading local'},
                 content=[SimpleNamespace(type='text', text='heading local')],
@@ -98,6 +103,57 @@ def test_browser_mcp_filters_nonlocal_tabs_and_checks_page_scope():
         with pytest.raises(ValueError, match='local'):
             await _call(session, 'take_snapshot', {'pageId': 2})
         assert [name for name, _ in session.calls].count('take_snapshot') == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('tool', [
+    'take_snapshot', 'list_console_messages', 'lighthouse_audit', 'get_css_styles',
+    'navigate_page',
+])
+def test_scoped_page_id_selects_local_tab_without_forwarding_unsupported_argument(tool):
+    class PinnedSession(FakeSession):
+        async def list_tools(self):
+            return SimpleNamespace(tools=[SimpleNamespace(name=tool)])
+
+        async def call_tool(self, name, arguments):
+            if name in ('list_pages', 'select_page'):
+                return await super().call_tool(name, arguments)
+            assert name == tool
+            assert 'pageId' not in arguments
+            assert self.pages[1]['selected']
+            self.calls.append((name, arguments))
+            return SimpleNamespace(content=[], isError=False, structuredContent=None)
+
+    async def scenario():
+        session = PinnedSession([
+            {'id': 1, 'url': 'https://example.com/', 'selected': True},
+            {'id': 2, 'url': 'http://127.0.0.1:8770/', 'selected': False},
+        ])
+        arguments = {'pageId': 2}
+        if tool == 'navigate_page':
+            arguments['url'] = 'http://127.0.0.1:8770/'
+        result = await _call(session, tool, arguments)
+        assert result['success']
+        assert ('select_page', {'pageId': 2}) in session.calls
+        assert arguments['pageId'] == 2
+    asyncio.run(scenario())
+
+
+def test_scope_is_rechecked_after_selecting_a_page():
+    class RedirectingSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            result = await super().call_tool(name, arguments)
+            if name == 'select_page':
+                self.pages[0]['url'] = 'https://example.com/'
+            return result
+
+    async def scenario():
+        session = RedirectingSession([
+            {'id': 1, 'url': 'http://127.0.0.1:8770/', 'selected': True},
+        ])
+        with pytest.raises(ValueError, match='local'):
+            await _call(session, 'take_snapshot', {'pageId': 1})
+        assert not any(name == 'take_snapshot' for name, _ in session.calls)
     asyncio.run(scenario())
 
 

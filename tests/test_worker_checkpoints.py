@@ -35,6 +35,42 @@ def h(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
+def test_checkpoint_keeps_user_design_correction_after_many_tool_calls(workspace):
+    from central.worker_checkpoint import save_checkpoint, MAX_TRANSCRIPT_CHARS
+    db, folder = workspace
+    note = {'role': 'user', 'content':
+            'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO: corrija o menu mobile.'}
+    transcript = [{'role': 'user', 'content': 'Crie a página.'}, note]
+    transcript += [{'role': 'assistant' if i % 2 else 'user',
+                    'content': 'tool output ' + str(i) + 'x' * 14000}
+                   for i in range(30)]
+    save_checkpoint(db, 'user', 'run', 'step', str(folder), transcript,
+                    changed_files=[], observed_actions=[], validation_failures=0,
+                    rounds_total=15, actions_total=12)
+    saved = load_checkpoint(db, 'user', 'run', 'step', str(folder))['transcript']
+    assert saved[0] == transcript[0]
+    assert note in saved
+    assert saved[-1] == transcript[-1]
+    assert len(json.dumps(saved, ensure_ascii=False)) <= MAX_TRANSCRIPT_CHARS
+
+
+def test_checkpoint_keeps_latest_bounded_corrections_in_order(workspace):
+    from central.worker_checkpoint import save_checkpoint
+    db, folder = workspace
+    notes = [{'role': 'user', 'content':
+              'Novos ajustes chegaram antes de concluir. Revisão ' + str(i)}
+             for i in range(10)]
+    transcript = [{'role': 'user', 'content': 'Original'}] + notes
+    transcript += [{'role': 'user', 'content': 'RESULTADO DA FERRAMENTA ' + str(i)}
+                   for i in range(20)]
+    save_checkpoint(db, 'user', 'run', 'step', str(folder), transcript,
+                    changed_files=[], observed_actions=[], validation_failures=0,
+                    rounds_total=15, actions_total=12)
+    saved = load_checkpoint(db, 'user', 'run', 'step', str(folder))['transcript']
+    assert [m for m in saved if m in notes] == notes[-6:]
+    assert saved[-1] == transcript[-1]
+
+
 class FakeModel:
     def __init__(self, answers):
         self.answers = list(answers)

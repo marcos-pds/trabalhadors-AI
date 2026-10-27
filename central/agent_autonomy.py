@@ -135,6 +135,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     last_validation = saved['last_validation'] if saved else ''
     last_failed_action = ''
     consecutive_failed_actions = 0
+    consecutive_invalid_responses = 0
     last_rejected_finish = ''
     consecutive_rejected_finishes = 0
     if not saved:
@@ -226,6 +227,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
         try:
             command = parse_tool(raw)
         except ValueError as exc:
+            consecutive_invalid_responses += 1
             transcript.extend([
                 {'role': 'assistant', 'content': raw[:1000]},
                 {'role': 'user', 'content': 'Resposta inválida: ' + str(exc) +
@@ -234,8 +236,14 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             last_action = 'resposta_invalida'
             last_result = str(exc)
             checkpoint()
+            if consecutive_invalid_responses >= 3:
+                raise ProviderError(
+                    'response',
+                    'O modelo retornou três respostas consecutivas sem uma ação JSON válida. '
+                    'Tentando outro provedor.', retryable=False)
             continue
 
+        consecutive_invalid_responses = 0
         if command['action'] == 'finish':
             # A note received while the model was thinking still takes precedence.
             last_feedback = consume_run_feedback(db, user_id, run_id)
