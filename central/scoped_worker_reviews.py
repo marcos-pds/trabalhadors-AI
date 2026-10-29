@@ -3,6 +3,8 @@
 All mutations are initiated by an authenticated operator after the run is no
 longer active. This does NOT route AI tools or auto-merge project files.
 """
+import hashlib
+import hmac
 import os
 from pathlib import Path
 
@@ -171,6 +173,10 @@ def approve_review(db, user_id, run_id, plan_id, confirmation):
     row, record = _plan_scope(db, user_id, run_id, plan_id)
     if row['state'] != 'pending' or record['state'] != 'prepared':
         raise HTTPException(409, 'Este plano já foi utilizado ou precisa de inspeção.')
+    if (not isinstance(confirmation, str) or
+            not hmac.compare_digest(record.get('token_hash', ''),
+                                    hashlib.sha256(confirmation.encode('utf-8')).hexdigest())):
+        raise HTTPException(403, 'Confirmação incorreta; nenhum arquivo foi alterado.')
     # Claim exactly once in SQLite before any filesystem mutation; on crash,
     # "applying" is never automatically replayed by the API.
     claimed = db.execute("UPDATE scoped_worktree_reviews SET state='applying',updated_at=? "
