@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import WorktreeReviewPanel from './WorktreeReviewPanel'
 
 const btn = 'rounded-xl border border-white/15 px-3 py-2 text-xs text-copy transition hover:bg-white/[.08] disabled:opacity-40'
 const input = 'w-full rounded-xl border border-white/15 bg-[#151519] px-3 py-2.5 text-xs text-copy outline-none focus:border-violet-400/60'
@@ -196,6 +197,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
           <p className="mt-2 whitespace-pre-wrap break-words text-muted">{message.content}</p>
         </details>)}
       </section>
+      <WorktreeReviewPanel api={api} runId={runId} steps={activity?.steps || []} active={isRunning} />
       {log.length ? log.map(item => <div key={item.seq} className="rounded-xl border border-white/[.08] bg-white/[.025] p-3">
         <div className="flex items-start justify-between gap-2">
           <span className="break-words text-xs text-copy">{eventLabel(item)}</span>
