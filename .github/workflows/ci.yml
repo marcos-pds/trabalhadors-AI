@@ -70,6 +70,12 @@ jobs:
             })
       - name: Test frontend streams and resource import controls
         run: npm test
+      - name: Use Node 24 for the native URLPattern compatibility check
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify Chrome DevTools URL allowlist with real URLPattern
+        run: python -m pytest tests/test_browser_mcp.py -k navigation_patterns_construct_in_node -q
 
 
   docker-isolation:

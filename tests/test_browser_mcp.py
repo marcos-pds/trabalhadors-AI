@@ -247,6 +247,12 @@ def test_browser_mcp_navigation_patterns_construct_in_node():
     node = shutil.which('node')
     if not node:
         pytest.skip('Node.js unavailable')
+    # Node.js 22 (supported by the application) has no URLPattern global.
+    # CI additionally runs this real URLPattern check on Node.js 24.
+    feature = subprocess.run([node, '-p', 'typeof URLPattern'],
+                             capture_output=True, text=True, timeout=10)
+    if feature.returncode or feature.stdout.strip() != 'function':
+        pytest.skip('URLPattern indisponível neste Node; CI valida com Node 24')
     patterns = browser_mcp.NAVIGATION_ALLOWLIST.split(',')
     script = ('for (const pattern of process.argv.slice(1)) {'
               ' const parsed = new URLPattern(pattern);'
