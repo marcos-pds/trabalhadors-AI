@@ -42,8 +42,8 @@ def assess(tool, result):
         if errors:
             return {'qa_pass': False, 'qa_issue': f'Console contém {errors} mensagem(ns) de erro.'}
         page = re.search(r'Showing\s+(\d+)\s*-\s*(\d+)\s+of\s+(\d+)', report)
-        if page and int(page.group(2)) < int(page.group(3)):
-            return {'qa_pass': False, 'qa_issue': 'Console paginado: ainda há mensagens não inspecionadas.'}
+        if page and (int(page.group(1)) != 1 or int(page.group(2)) < int(page.group(3))):
+            return {'qa_pass': False, 'qa_issue': 'Console paginado: não há cobertura de todas as mensagens.'}
         if '<no console messages found>' not in report and not re.search(
                 r'\bmsgid=\d+\b', report):
             return {'qa_pass': False, 'qa_issue': 'Console sem lista ou indicação de ausência de mensagens.'}
