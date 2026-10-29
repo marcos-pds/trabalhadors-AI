@@ -15,6 +15,7 @@ MAX_READ_BYTES = 65536
 MAX_LIST_ITEMS = 150
 RESTRICTED_NAMES = {
     '.git', '.ssh', '.aws', '.azure', '.gnupg', '.env', '.venv', 'node_modules',
+    '.central-worker-worktrees',
     'secret.key', 'id_rsa', 'id_ed25519', 'credentials', 'credentials.json',
     'central.sqlite3', 'central.sqlite3-wal', 'central.sqlite3-shm'
 }
