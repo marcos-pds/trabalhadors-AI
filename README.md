@@ -1,5 +1,11 @@
 # Central de Trabalhadores IA
 
+> **Projeto criado e mantido por Marcos Paulo — [@marcos-pds](https://github.com/marcos-pds).**  
+> Repositório oficial: [Central de Trabalhadores IA](https://github.com/marcos-pds/trabalhadors-AI).  
+> © 2026 Marcos Paulo. Autoria do código original, respeitadas as licenças de terceiros.
+
+**Primeira instalação?** Consulte [GUIA-INSTALACAO-WINDOWS.md](GUIA-INSTALACAO-WINDOWS.md). Para informações sobre autoria e créditos, consulte [AUTORIA.md](AUTORIA.md).
+
 **Versão 0.2.0 - MVP funcional, local e extensível.**
 
 A área **Skills e integrações** importa Skills como contexto selecionado de agentes. VSIX são inspecionados e podem ser instalados/desinstalados no VS Code local após confirmação separada. O Chrome DevTools MCP oficial pode ser ativado separadamente; ferramentas de navegador são restritas a páginas locais e exigem aprovação por chamada. Consulte [RESOURCES.md](RESOURCES.md) para formatos, confirmações, limites e permissões.
