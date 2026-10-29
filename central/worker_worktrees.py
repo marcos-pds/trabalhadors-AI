@@ -39,7 +39,8 @@ def _git(cwd, *args):
     if result.returncode:
         raise WorktreeError(
             'Git recusou a operação: ' + (result.stderr or result.stdout).strip()[-600:])
-    return result.stdout.strip()
+    # Preserve leading whitespace in Git porcelain status (e.g. ' M file').
+    return result.stdout.rstrip('\r\n')
 
 
 def _not_link(path):
