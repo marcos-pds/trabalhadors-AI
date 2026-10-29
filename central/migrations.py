@@ -15,6 +15,7 @@ from .token_usage import token_usage_schema
 from .agent_messages import SCHEMA as AGENT_MESSAGE_SCHEMA
 from .codex_bridge import SCHEMA as CODEX_SESSION_SCHEMA
 from .dynamic_delegation import SCHEMA as DYNAMIC_STEP_SCHEMA
+from .scoped_worker_reviews import SCHEMA as SCOPED_WORKTREE_REVIEW_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -94,6 +95,7 @@ MIGRATIONS = (
         'AND f.user_id=run_workspace_bindings.user_id)',
     )),
     (18, 'bounded_dynamic_agent_steps', DYNAMIC_STEP_SCHEMA),
+    (19, 'scoped_worker_worktree_reviews', SCOPED_WORKTREE_REVIEW_SCHEMA),
 )
 
 

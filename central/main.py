@@ -1268,6 +1268,60 @@ def get_token_usage(days:int=30,user=Depends(current_user)):
     return usage_overview(DB,user['id'],days)
 
 
+class WorktreeApproveIn(BaseModel):
+    confirmation: str = Field(min_length=20, max_length=128)
+
+
+@app.get('/api/runs/{rid}/worktrees')
+def list_run_worktrees(rid: str, request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .scoped_worker_reviews import list_worktrees
+    return list_worktrees(DB, user['id'], rid)
+
+
+@app.post('/api/runs/{rid}/steps/{sid}/worktree')
+async def prepare_run_worktree(rid: str, sid: str, request: Request,
+                               user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .scoped_worker_reviews import register_worktree
+    result = await asyncio.to_thread(register_worktree, DB, user['id'], rid, sid)
+    ops_audit(DB, user['id'], 'worktree_prepared', 'run', rid)
+    return result
+
+
+@app.post('/api/runs/{rid}/steps/{sid}/worktree-review')
+async def create_run_worktree_review(rid: str, sid: str, request: Request,
+                                     user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .scoped_worker_reviews import create_review
+    result = await asyncio.to_thread(create_review, DB, user['id'], rid, sid)
+    ops_audit(DB, user['id'], 'worktree_review_created', 'run', rid)
+    return result
+
+
+@app.get('/api/runs/{rid}/worktree-reviews/{plan_id}')
+def get_run_worktree_review(rid: str, plan_id: str, request: Request,
+                            user=Depends(current_user)):
+    local_only(request)
+    from .scoped_worker_reviews import get_review
+    return get_review(DB, user['id'], rid, plan_id)
+
+
+@app.post('/api/runs/{rid}/worktree-reviews/{plan_id}/apply')
+async def approve_run_worktree_review(rid: str, plan_id: str,
+                                      data: WorktreeApproveIn, request: Request,
+                                      user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .scoped_worker_reviews import approve_review
+    result = await asyncio.to_thread(approve_review, DB, user['id'], rid,
+                                     plan_id, data.confirmation)
+    ops_audit(DB, user['id'], 'worktree_files_promoted', 'run', rid)
+    return result
+
+
 @app.post('/api/runs/{rid}/resume')
 async def resume_run(rid:str,request:Request,user=Depends(current_user)):
     require_csrf(request)
