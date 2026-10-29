@@ -18,7 +18,20 @@ def team_instruction(db, run_id):
                           'JOIN agents a ON a.id=s.agent_id WHERE s.run_id=?', (run_id,))
     if len(participants) < 2:
         return ''
-    return ('\nEQUIPE DESTA EXECUÇÃO (IDs reais): ' + json.dumps(participants, ensure_ascii=False) +
+    owner = db.one('SELECT user_id FROM runs WHERE id=?', (run_id,))
+    available = (db.all('SELECT id,name,specialty FROM agents WHERE user_id=? AND enabled=1 '
+                        'ORDER BY name LIMIT 24', (owner['user_id'],)) if owner else [])
+    delegation = ('\nDELEGAÇÃO DINÂMICA: use somente IDs da lista de trabalhadores habilitados: ' +
+                  json.dumps(available, ensure_ascii=False) +
+                  '. Para criar uma nova etapa real e persistente, responda ' +
+                  '{"action":"delegate_task","recipient_agent_id":"ID_EXISTENTE",' +
+                  '"title":"Nome curto da etapa","instructions":"Tarefa concreta com resultado verificável",' +
+                  '"request_id":"identificador-estavel-0001"}. ' +
+                  'Uma ação por resposta. O sistema verifica papel do solicitante, escopo, ' +
+                  'dependências, orçamento e limite de delegações; não cria agentes novos. ' +
+                  'O Revisor sempre executa depois das subtarefas e nunca é delegado. ' +
+                  'Use o mesmo request_id ao repetir uma solicitação interrompida. ')
+    return (delegation + '\nEQUIPE DESTA EXECUÇÃO (IDs reais): ' + json.dumps(participants, ensure_ascii=False) +
             '\nPode enviar uma mensagem com '
             '{"action":"agent_message","recipient_agent_id":"ID",'
             '"message_type":"result","content":"Descoberta verificável",'

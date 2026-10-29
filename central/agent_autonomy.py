@@ -80,7 +80,8 @@ def parse_tool(raw):
         data = {'action':'browser_tool', 'tool':tool, 'arguments':arguments}
     if not isinstance(data, dict) or data.get('action') not in (
             'list', 'read', 'mkdir', 'write', 'replace', 'command',
-            'browser_tool', 'reference_search', 'agent_message', 'agent_message_read', 'finish'):
+            'browser_tool', 'reference_search', 'agent_message', 'agent_message_read',
+            'delegate_task', 'finish'):
         raise ValueError('O modelo retornou uma ferramenta não permitida.')
     if any(not isinstance(k, str) for k in data):
         raise ValueError('Formato inválido.')
@@ -90,6 +91,9 @@ def parse_tool(raw):
             validate_request(data)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+    if data.get('action') == 'delegate_task':
+        from .dynamic_delegation import validate_command
+        validate_command(data)
     if data.get('action') == 'reference_search':
         if set(data) != {'action', 'query'}:
             raise ValueError('A pesquisa aceita somente uma consulta textual.')
@@ -464,7 +468,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
         action_count += 1
         actions_total += 1
         if planning_only and command['action'] not in (
-                'list', 'read', 'reference_search', 'agent_message', 'agent_message_read'):
+                'list', 'read', 'reference_search', 'agent_message',
+                'agent_message_read', 'delegate_task'):
             transcript.extend([
                 {'role': 'assistant', 'content': raw[:1000]},
                 {'role': 'user', 'content':
@@ -480,7 +485,13 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             raise WorkerPaused('Limite de ações por execução atingido; '
                                'progresso salvo. Use Continuar execução.')
         try:
-            if command['action'] in ('agent_message', 'agent_message_read'):
+            if command['action'] == 'delegate_task':
+                from .dynamic_delegation import delegate
+                try:
+                    result = delegate(db, user_id, run_id, step_id, command, emit)
+                except ValueError as exc:
+                    result = {'error': str(exc), 'success': False}
+            elif command['action'] in ('agent_message', 'agent_message_read'):
                 try:
                     result = (send(db, user_id, run_id, step_id, command, emit)
                               if command['action'] == 'agent_message' else

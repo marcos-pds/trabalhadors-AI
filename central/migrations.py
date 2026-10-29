@@ -14,6 +14,7 @@ from .addon_schema import SCHEMA as ADDON_SCHEMA
 from .token_usage import token_usage_schema
 from .agent_messages import SCHEMA as AGENT_MESSAGE_SCHEMA
 from .codex_bridge import SCHEMA as CODEX_SESSION_SCHEMA
+from .dynamic_delegation import SCHEMA as DYNAMIC_STEP_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -92,6 +93,7 @@ MIGRATIONS = (
         'SELECT 1 FROM workspace_tenant_backfills f WHERE f.run_id=run_workspace_bindings.run_id '
         'AND f.user_id=run_workspace_bindings.user_id)',
     )),
+    (18, 'bounded_dynamic_agent_steps', DYNAMIC_STEP_SCHEMA),
 )
 
 
