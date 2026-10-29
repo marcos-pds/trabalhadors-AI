@@ -534,6 +534,8 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
         'step_id': step_id, 'summary': summary,
         'tool': request.get('tool', ''),
         'browser_arguments': (request.get('arguments', {}) if browser_tool else {}),
+        'qa_pass': (result.get('qa_pass') if browser_tool else None),
+        'qa_issue': (str(result.get('qa_issue', ''))[:220] if browser_tool else ''),
         'references': result.get('references', [])[:6],
         'success': result.get('success', 'error' not in result),
         'exit_code': result.get('exit_code'), 'output': str(result.get('output', ''))[-1600:]})

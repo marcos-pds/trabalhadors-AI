@@ -412,7 +412,9 @@ class RunOrchestrator:
                 try:
                     evidence = assert_implementation_delivered(
                         self.db, run,
-                        require_browser=requires_browser_validation(run['prompt']),
+                        require_browser=(requires_browser_validation(run['prompt']) or
+                                         (requires_visual_qa(run['prompt']) and
+                                          browser_mcp_available(self.db, run['user_id']))),
                         require_review_step_id=review_step['id'] if review_step else None)
                 except RuntimeError as error:
                     from .delivery_recovery import queue_delivery_repair

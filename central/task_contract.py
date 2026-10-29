@@ -316,7 +316,9 @@ def delivery_evidence(db, run_id):
                     device = arguments.get('device') if tool == 'lighthouse_audit' else None
                     check = tool + (':' + device if device in ('desktop', 'mobile') else '')
                     browser_checks.add(check)
-                    browser_events.append((row['seq'], check))
+                    browser_events.append((row['seq'], check,
+                                           payload.get('qa_pass') is True,
+                                           str(payload.get('qa_issue', ''))[:220]))
                     last_browser_seq = row['seq']
                 if payload.get('success') is True:
                     references.extend(payload.get('references', []))
@@ -339,10 +341,19 @@ def delivery_evidence(db, run_id):
         'changed_count': len(changes),
         'references': unique_references[:24],
         'browser_tools': sorted(browser_tools),
-        'browser_tools_after_last_change': sorted({tool.split(':', 1)[0] for seq, tool in browser_events
+        'browser_tools_after_last_change': sorted({tool.split(':', 1)[0]
+                                                   for seq, tool, passed, issue in browser_events
                                                    if seq > last_change_seq}),
-        'browser_checks_after_last_change': sorted({tool for seq, tool in browser_events
+        'browser_checks_after_last_change': sorted({tool for seq, tool, passed, issue in browser_events
                                                     if seq > last_change_seq}),
+        'verified_browser_checks_after_last_change': sorted({tool for tool, status in {
+            tool: (passed, issue) for seq, tool, passed, issue in browser_events
+            if seq > last_change_seq}.items() if status[0]}),
+        'browser_quality_issues_after_last_change': [
+            {'tool': tool, 'issue': status[1] or 'Resultado não verificado'}
+            for tool, status in {
+                tool: (passed, issue) for seq, tool, passed, issue in browser_events
+                if seq > last_change_seq}.items() if not status[0]][:12],
         'last_change_seq': last_change_seq,
         'last_browser_seq': last_browser_seq,
         'tests_passed': bool(validations and validations[-1]['passed']),
@@ -377,12 +388,15 @@ def assert_implementation_delivered(db, run, require_browser=False,
     if require_browser:
         required = {'take_snapshot', 'list_console_messages',
                     'lighthouse_audit:desktop', 'lighthouse_audit:mobile'}
-        browser = set(evidence['browser_checks_after_last_change'])
+        browser = set(evidence['verified_browser_checks_after_last_change'])
         if not required.issubset(browser):
             missing = ', '.join(sorted(required - browser))
+            issues = '; '.join(item['tool'] + ': ' + item['issue']
+                               for item in evidence['browser_quality_issues_after_last_change'])
             raise RuntimeError(
                 'Entrega não validada no Chrome DevTools MCP após a última alteração. '
                 + ('Ferramentas pendentes: ' + missing + '. ' if missing else '')
+                + ('QA detectou problemas: ' + issues[:800] + '. ' if issues else '')
                 + 'Execute snapshot, inspeção do console e Lighthouse na página local; '
                   'resolva os problemas encontrados ou explique o bloqueio.')
     return evidence

@@ -502,7 +502,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 stalled_rounds = 0
         if command['action'] in ('read', 'list') and action_succeeded:
             observed_actions.add(command['action'])
-        if command['action'] == 'browser_tool' and action_succeeded:
+        if (command['action'] == 'browser_tool' and action_succeeded
+                and result.get('qa_pass') is not False):
             browser_action = 'browser:' + command.get('tool', '')
             observed_actions.add(browser_action)
             if command.get('tool') == 'lighthouse_audit':

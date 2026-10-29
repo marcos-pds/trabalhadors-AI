@@ -221,14 +221,14 @@ def test_browser_requested_delivery_requires_snapshot_console_and_lighthouse_aft
     db = FakeEvents()
     db.add('workspace_action_result', success=True,
            summary={'action': 'replace', 'path': 'src/App.jsx'})
-    db.add('workspace_action_result', success=True,
+    db.add('workspace_action_result', success=True, qa_pass=True,
            summary={'action': 'browser_tool', 'tool': 'take_snapshot'})
-    db.add('workspace_action_result', success=True,
+    db.add('workspace_action_result', success=True, qa_pass=True,
            summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
-    db.add('workspace_action_result', success=True,
+    db.add('workspace_action_result', success=True, qa_pass=True,
            summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'},
            browser_arguments={'device': 'desktop'})
-    db.add('workspace_action_result', success=True,
+    db.add('workspace_action_result', success=True, qa_pass=True,
            summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'},
            browser_arguments={'device': 'mobile'})
     db.add('workspace_validation', passed=True, results=[
@@ -298,3 +298,27 @@ def test_every_required_browser_check_must_follow_last_edit():
     db.add('workspace_validation', passed=True, results=[])
     with pytest.raises(RuntimeError, match='Ferramentas pendentes'):
         assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+
+def test_latest_browser_quality_verdict_is_required_even_if_tool_succeeded():
+    db = FakeEvents()
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'replace', 'path': 'src/App.jsx'})
+    for tool, device in [
+        ('take_snapshot', None),
+        ('list_console_messages', None),
+        ('lighthouse_audit', 'desktop'),
+        ('lighthouse_audit', 'mobile'),
+    ]:
+        db.add('workspace_action_result', success=True, qa_pass=True,
+               summary={'action': 'browser_tool', 'tool': tool},
+               browser_arguments={'device': device} if device else {})
+    db.add('workspace_validation', passed=True, results=[{'command': 'npm_test', 'success': True}])
+    assert assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+    db.add('workspace_action_result', success=True, qa_pass=False,
+           qa_issue='Console contém 1 mensagem de erro.',
+           summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
+    with pytest.raises(RuntimeError, match='QA detectou problemas'):
+        assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+    db.add('workspace_action_result', success=True, qa_pass=True,
+           summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
+    assert assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)

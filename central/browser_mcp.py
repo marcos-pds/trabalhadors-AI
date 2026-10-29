@@ -376,7 +376,10 @@ async def _call(session, tool, arguments):
     output = {'text': '\n'.join(content)[:8000]}
     if isinstance(structured, dict):
         output['data'] = structured
-    return {'success': True, 'output': json.dumps(output, ensure_ascii=False)[:10000]}
+    response = {'success': True, 'output': json.dumps(output, ensure_ascii=False)[:10000]}
+    from .browser_quality import assess
+    response.update(assess(tool, response))
+    return response
 
 
 async def execute(db, user_id, run_id, request):
