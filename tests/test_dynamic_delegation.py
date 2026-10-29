@@ -150,3 +150,148 @@ def test_model_schema_rejects_untrusted_fields_before_execution():
                     request(instructions='x')):
         with pytest.raises(ValueError):
             parse_tool(json.dumps(invalid))
+
+
+def test_replay_after_requester_completed_preserves_scope(setup):
+    first = dispatch(setup)
+    setup.execute("UPDATE steps SET status='completed' WHERE id='architect'")
+    assert dispatch(setup)['step_id'] == first['step_id']
+    with pytest.raises(ValueError, match='request_id reutilizado'):
+        dispatch(setup, request(title='Different task'))
+    with pytest.raises(ValueError, match='ativo'):
+        dispatch(setup, request(request_id='new-request'))
+    set_policy(setup, 'u', 'blocked', '')
+    with pytest.raises(Exception):
+        dispatch(setup)
+    assert setup.one('SELECT COUNT(*) n FROM dynamic_step_requests')['n'] == 1
+
+
+@pytest.mark.parametrize('deps', ['["coder"]', '["missing"]', '{}', '[3]', 'invalid'])
+def test_reject_corrupt_prerequisites_without_partial_mutation(setup, deps):
+    # coder -> architect -> architect/coder is a cycle below the review root.
+    setup.execute("UPDATE steps SET deps=? WHERE id='architect'", (deps,))
+    before = setup.one("SELECT plan FROM runs WHERE id='r'")['plan']
+    with pytest.raises(ValueError):
+        dispatch(setup)
+    assert setup.one('SELECT COUNT(*) n FROM steps')['n'] == 3
+    assert setup.one('SELECT COUNT(*) n FROM agent_messages')['n'] == 0
+    assert setup.one("SELECT plan FROM runs WHERE id='r'")['plan'] == before
+    assert not setup.conn.in_transaction
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'duplicate', 'deps', 'kind', 'agent', 'scalar'])
+def test_reject_inconsistent_plan_without_partial_mutation(setup, mutation):
+    plan = json.loads(setup.one("SELECT plan FROM runs WHERE id='r'")['plan'])
+    if mutation == 'missing':
+        plan.pop()
+    elif mutation == 'duplicate':
+        plan[-1] = plan[0]
+    elif mutation == 'scalar':
+        plan[-1] = None
+    else:
+        plan[-1][{'deps': 'deps', 'kind': 'kind', 'agent': 'agent_id'}[mutation]] = 'wrong'
+    setup.execute("UPDATE runs SET plan=? WHERE id='r'", (json.dumps(plan),))
+    with pytest.raises(ValueError, match='Plano persistido'):
+        dispatch(setup)
+    assert setup.one('SELECT COUNT(*) n FROM steps')['n'] == 3
+    assert setup.one('SELECT COUNT(*) n FROM agent_messages')['n'] == 0
+    assert not setup.conn.in_transaction
+
+
+def test_independent_connections_serialize_idempotent_requests(setup):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    # Match create_run: assign a personal organization before binding.
+    now = utcnow()
+    setup.execute('INSERT INTO organizations(id,name,created_by,is_personal,created_at) '
+                  'VALUES(?,?,?,?,?)', ('org-u', 'Personal', 'u', 1, now))
+    setup.execute('INSERT INTO organization_members VALUES(?,?,?,?)',
+                  ('org-u', 'u', 'admin', now))
+    setup.execute('INSERT INTO organization_runs VALUES(?,?)', ('r', 'org-u'))
+    setup.execute("UPDATE run_workspace_bindings SET organization_id='org-u' WHERE run_id='r'")
+    path = setup.one('PRAGMA database_list')['file']
+    other = Database(path)
+    barrier = Barrier(2)
+
+    def submit(db):
+        barrier.wait(timeout=5)
+        return dispatch(db)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(submit, db) for db in (setup, other)]
+            results = [future.result(timeout=10) for future in futures]
+        assert {result['created'] for result in results} == {True, False}
+        assert len({result['step_id'] for result in results}) == 1
+    finally:
+        other.close()
+    reopened = Database(path)
+    try:
+        assert dispatch(reopened)['step_id'] == results[0]['step_id']
+        assert reopened.one('SELECT COUNT(*) n FROM agent_messages')['n'] == 1
+        assert reopened.one("SELECT COUNT(*) n FROM events WHERE event='dynamic_step_registered'")['n'] == 1
+    finally:
+        reopened.close()
+
+
+def test_scheduler_reloads_nested_delegation_before_review(setup):
+    import asyncio
+    from central.engine import RunOrchestrator
+
+    setup.execute("UPDATE runs SET prompt='Organize tarefas' WHERE id='r'")
+    setup.execute("UPDATE steps SET status='queued' WHERE id='architect'")
+    engine = RunOrchestrator.__new__(RunOrchestrator)
+    engine.db = setup
+    engine.emit = lambda *args: None
+    order = []
+
+    async def execute(run, step):
+        setup.execute("UPDATE steps SET status='running' WHERE id=?", (step['id'],))
+        order.append(step['agent_id'])
+        if step['agent_id'] == 'architect':
+            dispatch(setup)
+        elif step['agent_id'] == 'backend':
+            dispatch(setup, request(recipient_agent_id='frontend', request_id='nested-frontend'),
+                     source=step['id'])
+        if step['agent_id'] == 'reviewer':
+            assert setup.one("SELECT COUNT(*) n FROM steps WHERE status!='completed' AND id!='reviewer'")['n'] == 0
+        setup.execute("UPDATE steps SET status='completed',output='done' WHERE id=?", (step['id'],))
+
+    engine.execute_step = execute
+    asyncio.run(engine.process('r'))
+    assert order == ['architect', 'coder', 'backend', 'frontend', 'reviewer']
+    assert setup.one("SELECT status FROM runs WHERE id='r'")['status'] == 'completed'
+    assert setup.one('SELECT MAX(depth) n FROM dynamic_step_requests')['n'] == 2
+
+
+def test_shared_prerequisites_are_not_mistaken_for_cycles():
+    from central.dynamic_delegation import _ancestors
+
+    steps = {name: {'deps': json.dumps(deps)} for name, deps in {
+        'root': [], 'left': ['root'], 'right': ['root'],
+        'join': ['left', 'right'],
+    }.items()}
+    assert _ancestors('join', steps) == {'root', 'left', 'right'}
+
+
+def test_scope_revocation_between_precheck_and_transaction_rolls_back(setup, monkeypatch):
+    from central import dynamic_delegation
+
+    original = dynamic_delegation.enforce_run_scope
+    checks = []
+
+    def revoke_after_precheck(*args, **kwargs):
+        result = original(*args, **kwargs)
+        checks.append(True)
+        if len(checks) == 1:
+            set_policy(setup, 'u', 'blocked', '')
+        return result
+
+    monkeypatch.setattr(dynamic_delegation, 'enforce_run_scope', revoke_after_precheck)
+    with pytest.raises(Exception) as error:
+        dispatch(setup)
+    assert error.value.status_code == 403
+    assert setup.one('SELECT COUNT(*) n FROM steps')['n'] == 3
+    assert setup.one('SELECT COUNT(*) n FROM agent_messages')['n'] == 0
+    assert not setup.conn.in_transaction

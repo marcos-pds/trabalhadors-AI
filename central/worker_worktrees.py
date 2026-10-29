@@ -28,7 +28,10 @@ def _git(cwd, *args):
     git = shutil.which('git.exe' if os.name == 'nt' else 'git') or shutil.which('git')
     if not git:
         raise WorktreeError('Instale o Git no PATH antes de preparar worktrees.')
-    env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0')
+    # Repository-selection variables must not override the authorized cwd.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('GIT_')}
+    env.update(GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0')
     try:
         result = subprocess.run(
             [git, *args], cwd=str(cwd), env=env,
@@ -83,11 +86,32 @@ def _paths(root, run_id, step_id):
 
 
 def _registered(root, target):
-    listing = _git(root, 'worktree', 'list', '--porcelain')
-    roots = [line[len('worktree '):] for line in listing.splitlines()
+    listing = _git(root, 'worktree', 'list', '--porcelain', '-z')
+    roots = [line[len('worktree '):] for line in listing.split('\0')
              if line.startswith('worktree ')]
-    return any(os.path.normcase(str(Path(item).resolve())) ==
-               os.path.normcase(str(target.resolve())) for item in roots)
+    registered = any(os.path.normcase(str(Path(item).resolve())) ==
+                     os.path.normcase(str(target.resolve())) for item in roots)
+    if not registered:
+        return False
+    # A registered directory can have its .git file replaced independently.
+    metadata = target / '.git'
+    if metadata.is_symlink() or not metadata.is_file():
+        raise WorktreeError('Metadados do worktree invalidos.')
+    common = Path(_git(target, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+    top = Path(_git(target, 'rev-parse', '--show-toplevel'))
+    git_dir = Path(_git(target, 'rev-parse', '--absolute-git-dir'))
+    registry = root / '.git' / 'worktrees'
+    _not_link(registry)
+    _not_link(git_dir)
+    backlink = git_dir / 'gitdir'
+    if (git_dir.parent.resolve() != registry.resolve()
+            or backlink.is_symlink() or not backlink.is_file()
+            or Path(backlink.read_text(encoding='utf-8').rstrip('\r\n')).resolve()
+            != metadata.resolve()):
+        raise WorktreeError('Metadados do worktree nao correspondem ao registro.')
+    if common.resolve() != (root / '.git').resolve() or top.resolve() != target.resolve():
+        raise WorktreeError('Metadados do worktree apontam para outro repositorio.')
+    return True
 
 
 def _ignore_container(root, base):
@@ -113,8 +137,9 @@ def _ignore_container(root, base):
 
 
 def _status(root, target):
-    # Includes untracked files: these cannot be silently lost by cleanup.
-    return _git(target, 'status', '--porcelain', '--untracked-files=all')
+    # Git worktree remove also discards ignored files unless we guard them.
+    return _git(target, 'status', '--porcelain', '--untracked-files=all',
+                '--ignored=matching')
 
 
 def prepare(folder, run_id, step_id):

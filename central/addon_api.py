@@ -63,6 +63,34 @@ def router(db, security, current_user):
     def listing(user=Depends(actor)):
         return catalog.list(user)
 
+    @api.get('/{resource_id}/versions')
+    def versions(resource_id: str, user=Depends(actor)):
+        from .resource_versions import list_versions
+        return list_versions(db, security, user, resource_id)
+
+    @api.post('/{resource_id}/versions/preview')
+    async def preview_version(resource_id: str, request: Request, user=Depends(actor)):
+        from .resource_versions import preview_update
+        raw = await raw_body(request, packages.MAX_UPLOAD)
+        filename = unquote(request.headers.get('x-resource-filename', ''))
+        return preview_update(db, security, user, resource_id, filename, raw)
+
+    @api.post('/{resource_id}/versions/apply')
+    async def apply_version(resource_id: str, request: Request, user=Depends(actor)):
+        from .resource_versions import apply_update
+        raw = await raw_body(request, packages.MAX_UPLOAD)
+        filename = unquote(request.headers.get('x-resource-filename', ''))
+        return apply_update(db, security, user, resource_id, filename, raw,
+                            request.headers.get('x-resource-current-sha256', ''),
+                            request.headers.get('x-resource-confirm-sha256', ''))
+
+    @api.post('/{resource_id}/versions/{revision_id}/rollback')
+    async def rollback_version(resource_id: str, revision_id: str, request: Request, user=Depends(actor)):
+        from .resource_versions import rollback
+        data = await body(request, ['expected_current_sha256', 'confirmed_target_sha256'])
+        return rollback(db, security, user, resource_id, revision_id,
+                        data['expected_current_sha256'], data['confirmed_target_sha256'])
+
     @api.post('/preview/{kind}')
     async def preview(kind: str, request: Request, user=Depends(actor)):
         raw = await raw_body(request, packages.MAX_UPLOAD)

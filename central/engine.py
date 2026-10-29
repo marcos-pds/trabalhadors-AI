@@ -212,8 +212,14 @@ class RunOrchestrator:
             except Exception as exc:
                 self.emit(rid, 'browser_mcp_cleanup_failed',
                           {'error': str(exc)[:500]})
+            from .worker_preview import close_run as close_preview
+            try:
+                await close_preview(rid)
+            except Exception as exc:
+                self.emit(rid, 'worker_preview_cleanup_failed', {'error': str(exc)[:500]})
             row = self.db.one('SELECT status,error FROM runs WHERE id=?', (rid,))
             mapping = {'completed':'completed','paused_limit':'paused',
+                       'paused_operator':'paused','awaiting_integration':'paused',
                        'failed':'failed','cancelled':'cancelled'}
             state = mapping.get(row['status'] if row else None, 'queued')
             self.queue.finish(rid, owner, state, row.get('error') if row else None,
@@ -253,7 +259,10 @@ class RunOrchestrator:
             self.dispatch_ready()
 
     def create_run(self, user_id, conversation_id, prompt, mode, agent_ids=None,
-                   flow=None, budget=None, idempotency_key=None, autonomous=False):
+                   flow=None, budget=None, idempotency_key=None, autonomous=False,
+                   isolate_workers=False):
+        if isolate_workers and not autonomous:
+            raise ValueError('Worktrees por trabalhador exigem Autonomia e uma pasta Git autorizada.')
         if idempotency_key:
             existing = self.db.one('SELECT id FROM runs WHERE user_id=? AND idempotency_key=?', (user_id,idempotency_key))
             if existing: return existing['id']
@@ -360,6 +369,9 @@ class RunOrchestrator:
                         (run_id,organization_id))
                 if autonomous:
                     bind_run(self.db, user_id, run_id, organization_id)
+                if isolate_workers:
+                    from .isolated_workspaces import configure_run
+                    configure_run(self.db, user_id, run_id, True)
                 for p in plan:
                     self.db.conn.execute(
                         '''INSERT INTO steps(id,run_id,agent_id,kind,name,deps,
@@ -394,9 +406,25 @@ class RunOrchestrator:
                 steps = self.db.all('SELECT * FROM steps WHERE run_id=?', (run_id,))
                 done = {s['id'] for s in steps if s['status']=='completed'}
                 pending = [s for s in steps if s['status']=='queued']
-                if not pending: break
+                waiting = [s for s in steps if s['status'] in (
+                    'paused_operator', 'awaiting_integration', 'cancelled', 'blocked')]
+                if not pending:
+                    if waiting:
+                        self._park_workers(run_id, waiting)
+                        return
+                    break
                 ready = [s for s in pending if set(json.loads(s['deps'])).issubset(done)]
-                if not ready: raise RuntimeError('Nenhuma etapa executável. Verifique dependências e etapas falhas.')
+                if not ready:
+                    if waiting:
+                        self._park_workers(run_id, waiting)
+                        return
+                    raise RuntimeError('Nenhuma etapa executável. Verifique dependências e etapas falhas.')
+                if run.get('autonomous') and self.db.one(
+                        'SELECT run_id FROM run_workspace_bindings WHERE run_id=?', (run_id,)):
+                    # Bound workers share one workspace until execution routes
+                    # them to isolated worktrees. Run one stage, then reload the
+                    # DAG: delegation may have changed another ready stage's deps.
+                    ready = ready[:1]
                 outcomes = await asyncio.gather(*(self.execute_step(run, s) for s in ready), return_exceptions=True)
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
@@ -497,8 +525,31 @@ class RunOrchestrator:
             self.emit(run_id,'run_failed',{'error':error, 'message':message})
             self.emit(run_id,'run_status',{'status':'failed'})
 
+    def _park_workers(self, run_id, waiting):
+        state = ('awaiting_integration' if any(s['status'] == 'awaiting_integration'
+                                              for s in waiting) else 'paused_operator')
+        self.db.execute('UPDATE runs SET status=?,updated_at=? WHERE id=?', (state, utcnow(), run_id))
+        self.emit(run_id, 'run_workers_waiting', {'status': state,
+                  'steps': [{'id': s['id'], 'status': s['status']} for s in waiting]})
+        self.emit(run_id, 'run_status', {'status': state})
+
+    def _park_step_control(self, run, step, error):
+        from .worker_controls import WorkerControlCancelled
+        state = 'cancelled' if isinstance(error, WorkerControlCancelled) else 'paused_operator'
+        self.db.execute('UPDATE steps SET status=?,error=?,updated_at=? WHERE id=? AND run_id=?',
+                        (state, str(error)[:320], utcnow(), step['id'], run['id']))
+        self.emit(run['id'], 'step_status', {'id': step['id'], 'status': state,
+                                           'error': str(error)[:320]})
+
     async def execute_step(self, run, step):
         sid = step['id']
+        from .worker_controls import check_control, WorkerControlPaused, WorkerControlCancelled
+        if step['kind'] == 'agent':
+            try:
+                check_control(self.db, run['user_id'], run['id'], sid)
+            except (WorkerControlPaused, WorkerControlCancelled) as error:
+                self._park_step_control(run, step, error)
+                return
         self.db.execute("UPDATE steps SET status='running',updated_at=? WHERE id=?", (utcnow(),sid))
         self.emit(run['id'],'step_status',{'id':sid,'name':step['name'],'status':'running'})
         if step['kind']=='approval':
@@ -533,6 +584,9 @@ class RunOrchestrator:
                     } for item in docs],
                 }))
         specialty = effective_specialty(agent)
+        if run.get('autonomous') and specialty in ('code', 'frontend', 'backend'):
+            from .isolated_workspaces import prepare_step
+            await asyncio.to_thread(prepare_step, self.db, user, run['id'], sid)
         prev = self.db.all('SELECT name,output FROM steps WHERE run_id=? AND status=? AND output IS NOT NULL', (run['id'],'completed'))
         context = '\n\n'.join(f"{p['name']}:\n{p['output'][:2500]}" for p in prev)[:5500]
         memory = await asyncio.to_thread(build_memory, self.db, user, run['conversation_id'], run['prompt'])
@@ -713,6 +767,11 @@ class RunOrchestrator:
                             price = ((len(messages[0]['content']) + skill_client.context_chars)/4/1_000_000*provider['input_price']
                                 + len(output)/4/1_000_000*provider['output_price'])
                         from .worker_collaboration import publish_handoff
+                        from .isolated_workspaces import finish_step
+                        isolated_result = (await asyncio.to_thread(finish_step, self.db, user, run['id'], sid)
+                                           if run.get('autonomous') else None)
+                        integration_pending = bool(isolated_result and
+                                                   isolated_result.get('state') == 'pending_review')
                         handoff_events = []
                         with self.db.lock:
                             self.db.conn.execute('BEGIN IMMEDIATE')
@@ -721,11 +780,13 @@ class RunOrchestrator:
                                 if not current or current['status'] not in ('running', 'queued'):
                                     self.db.conn.execute('ROLLBACK')
                                     return
-                                self.db.execute("UPDATE steps SET status='completed',output=?,error=NULL,updated_at=? WHERE id=?",(output,utcnow(),sid))
+                                step_state = 'awaiting_integration' if integration_pending else 'completed'
+                                self.db.execute("UPDATE steps SET status=?,output=?,error=NULL,updated_at=? WHERE id=?",(step_state,output,utcnow(),sid))
                                 if incoming and not run.get('autonomous'):
                                     acknowledge(self.db, user, run['id'], sid, incoming)
-                                publish_handoff(self.db, run, step, output,
-                                                lambda *args: handoff_events.append(args))
+                                if not integration_pending:
+                                    publish_handoff(self.db, run, step, output,
+                                                    lambda *args: handoff_events.append(args))
                                 self.db.execute('UPDATE runs SET total_cost=total_cost+?,updated_at=? WHERE id=?', (price,utcnow(),run['id']))
                                 self.db.conn.execute('COMMIT')
                             except BaseException as persistence_error:
@@ -735,7 +796,11 @@ class RunOrchestrator:
                                 raise
                         for event in handoff_events:
                             self.emit(*event)
-                        self.emit(run['id'],'step_status',{'id':sid,'name':agent['name'],'status':'completed','provider':provider['name'],'model':model})
+                        self.emit(run['id'],'step_status',{'id':sid,'name':agent['name'],'status':step_state,'provider':provider['name'],'model':model})
+                        return
+                    except (WorkerControlPaused, WorkerControlCancelled) as error:
+                        if half_open: self.health.release_probe(provider['id'], model)
+                        self._park_step_control(run, step, error)
                         return
                     except ProviderError as e:
                         health_event = self.health.record(provider['id'], model, success=False, error=e,
@@ -790,7 +855,7 @@ class RunOrchestrator:
         from .workspace_tools import reset_run_commands
         from .computer_access import policy
         run = self.db.one('SELECT * FROM runs WHERE id=?', (run_id,))
-        if not run or run['status'] not in ('failed', 'cancelled', 'paused_limit'):
+        if not run or run['status'] not in ('failed', 'cancelled', 'paused_limit', 'paused_operator', 'awaiting_integration'):
             raise ValueError('Somente tarefas pausadas, falhas ou canceladas podem ser retomadas.')
         if self.running.get(run_id) and not self.running[run_id].done():
             raise ValueError('A tarefa anterior ainda está encerrando. Tente novamente após a parada.')
@@ -811,7 +876,9 @@ class RunOrchestrator:
             grant = policy(self.db, run['user_id'])
             if grant['mode'] == 'blocked' or not grant['folder']:
                 raise ValueError('Autorize a pasta original no botão Computador para continuar.')
-            if any(item['folder'] != grant['folder'] for item in checkpoints):
+            from .isolated_workspaces import checkpoint_folder
+            if any(item['folder'] != checkpoint_folder(self.db, run['user_id'], run_id, item['step_id'])
+                   for item in checkpoints):
                 raise ValueError('A pasta autorizada mudou. Restaure a pasta original para continuar.')
         if any(item['resumes'] >= MAX_RESUMES for item in checkpoints):
             raise ValueError('Limite de continuações alcançado. Inicie nova tarefa com escopo menor.')

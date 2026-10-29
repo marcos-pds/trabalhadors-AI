@@ -1159,6 +1159,7 @@ class RunIn(BaseModel):
     workflow_id: str | None = None
     budget_limit: float | None = Field(default=None,ge=0)
     autonomous: bool = False
+    isolate_workers: bool = False
 
 
 @app.post('/api/runs')
@@ -1199,7 +1200,8 @@ async def start_run(data:RunIn, request:Request,user=Depends(current_user)):
     # plan must not create a ghost chat message or appear as a completed task.
     try:
         run_id=ENGINE.create_run(user['id'],data.conversation_id,effective_prompt,data.mode,data.agent_ids,
-                                 flow,data.budget_limit,idempotency,autonomous=data.autonomous)
+                                 flow,data.budget_limit,idempotency,autonomous=data.autonomous,
+                                 isolate_workers=data.isolate_workers)
     except ValueError as exc: raise HTTPException(429 if isinstance(exc, QuotaExceeded) else 422,str(exc))
     now=utcnow()
     DB.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',(uid(),convo['id'],user['id'],'user',None,data.prompt,now))
@@ -1270,6 +1272,60 @@ def get_token_usage(days:int=30,user=Depends(current_user)):
 
 class WorktreeApproveIn(BaseModel):
     confirmation: str = Field(min_length=20, max_length=128)
+
+
+class WorkerControlIn(BaseModel):
+    operation: Literal['pause', 'resume', 'cancel']
+
+
+@app.get('/api/runs/{rid}/worker-controls')
+def worker_control_status(rid: str, request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .worker_controls import list_controls
+    return list_controls(DB, user['id'], rid)
+
+
+@app.post('/api/runs/{rid}/steps/{sid}/control')
+async def change_worker_control(rid: str, sid: str, data: WorkerControlIn,
+                                request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .worker_controls import request_control
+    result = request_control(DB, user['id'], rid, sid, data.operation)
+    ENGINE.emit(rid, 'worker_control_requested', {'step_id': sid, 'operation': data.operation})
+    run = DB.one('SELECT status FROM runs WHERE id=?', (rid,))
+    if data.operation == 'resume' and run and run['status'] == 'paused_operator':
+        ENGINE.resume_run(rid)
+    ops_audit(DB, user['id'], 'worker_' + data.operation, 'step', sid)
+    return result
+
+
+@app.get('/api/runs/{rid}/isolated-workspaces')
+def isolated_workspace_status(rid: str, request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .isolated_workspaces import status
+    return status(DB, user['id'], rid)
+
+
+@app.post('/api/runs/{rid}/steps/{sid}/isolated-review')
+async def inspect_isolated_worker(rid: str, sid: str, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .isolated_workspaces import review
+    return await asyncio.to_thread(review, DB, user['id'], rid, sid)
+
+
+@app.post('/api/runs/{rid}/steps/{sid}/isolated-approve')
+async def promote_isolated_worker(rid: str, sid: str, data: WorktreeApproveIn,
+                                  request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .isolated_workspaces import approve
+    result = await asyncio.to_thread(approve, DB, user['id'], rid, sid, data.confirmation)
+    ENGINE.finish_promoted_step(rid, sid)
+    ENGINE.resume_run(rid)
+    ops_audit(DB, user['id'], 'isolated_worker_promoted', 'step', sid)
+    return result
 
 
 @app.get('/api/runs/{rid}/worktrees')
@@ -1473,6 +1529,7 @@ def run_activity(rid: str, user=Depends(current_user)):
     events = DB.all('SELECT seq,event,payload,created_at FROM events WHERE run_id=? '
                     'ORDER BY seq DESC LIMIT 70', (rid,))
     allowed = {'run_created','run_status','run_resumed','run_paused_limit',
+               'run_workers_waiting','worker_control_requested',
                'step_status','model_selected','worker_checkpoint_restored',
                'workspace_action_requested','workspace_action_result',
                'worker_message','worker_phase','worker_heartbeat','skill_context_selected',
@@ -1558,6 +1615,28 @@ def local_runtimes(request: Request, user=Depends(current_user)):
     local_only(request)
     from .codex_runtime import inventory
     return inventory()
+
+
+@app.get('/api/runtimes/external')
+def external_runtime_inventory(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .external_runtimes import inventory
+    return inventory()
+
+
+@app.post('/api/runtimes/external/{runtime}/probe')
+def probe_external_runtime(runtime: str, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .external_runtimes import probe
+    return probe(runtime)
+
+
+@app.get('/api/motion/capabilities')
+def motion_capabilities(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .motion_contracts import capability_inventory
+    return capability_inventory()
 
 
 @app.post('/api/runtimes/codex/probe')
@@ -1658,7 +1737,7 @@ async def events(rid:str, request:Request, after:int=0, user=Depends(current_use
                 payload={'seq':e['seq'],'event':e['event'],'data':json.loads(e['payload'])}
                 yield 'id: '+str(cursor)+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
             run=DB.one('SELECT status FROM runs WHERE id=?',(rid,))
-            if run and run['status'] in ('completed','failed','cancelled','paused_limit') and not items: break
+            if run and run['status'] in ('completed','failed','cancelled','paused_limit','paused_operator','awaiting_integration') and not items: break
             await asyncio.sleep(0.4)
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 

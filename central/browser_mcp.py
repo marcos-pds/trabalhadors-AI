@@ -19,6 +19,7 @@ NAVIGATION_ALLOWLIST = (
 ALLOWED_TOOLS = frozenset({
     'list_pages', 'new_page', 'navigate_page', 'take_snapshot',
     'list_console_messages', 'lighthouse_audit', 'get_css_styles',
+    'click', 'fill',
 })
 TOOL_ARGUMENTS = {
     'list_pages': set(),
@@ -30,12 +31,14 @@ TOOL_ARGUMENTS = {
                               'includePreservedMessages'},
     'lighthouse_audit': {'pageId', 'mode', 'device'},
     'get_css_styles': {'pageId', 'uid'},
+    'click': {'pageId', 'uid', 'dblClick', 'includeSnapshot'},
+    'fill': {'pageId', 'uid', 'value', 'includeSnapshot'},
 }
 PAGE_TOOLS = frozenset({
     'take_snapshot', 'list_console_messages', 'lighthouse_audit', 'get_css_styles',
+    'click', 'fill',
 })
 _sessions = {}
-_session_locks = {}
 
 
 def _data_root():
@@ -117,7 +120,8 @@ def validate_request(request):
             not isinstance(arguments['timeout'], int) or isinstance(arguments['timeout'], bool) or
             not 1 <= arguments['timeout'] <= 30000):
         raise ValueError('Tempo limite fora do intervalo permitido.')
-    for key in ('background', 'verbose', 'ignoreCache', 'includePreservedMessages'):
+    for key in ('background', 'verbose', 'ignoreCache', 'includePreservedMessages',
+                'dblClick', 'includeSnapshot'):
         if key in arguments and not isinstance(arguments[key], bool):
             raise ValueError('Argumento booleano DevTools inválido.')
     if 'pageSize' in arguments and (
@@ -141,8 +145,14 @@ def validate_request(request):
             'accept', 'decline'):
         raise ValueError('Tratamento de navegação inválido.')
     if 'uid' in arguments and (
-            not isinstance(arguments['uid'], str) or len(arguments['uid']) > 80):
+            not isinstance(arguments['uid'], str) or
+            not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', arguments['uid'])):
         raise ValueError('UID DevTools inválido.')
+    if tool in ('click', 'fill') and ('uid' not in arguments or 'pageId' not in arguments):
+        raise ValueError('Informe pageId e uid obtidos no snapshot local.')
+    if tool == 'fill' and (not isinstance(arguments.get('value'), str)
+                           or len(arguments['value']) > 2000):
+        raise ValueError('O valor do campo deve ter até 2000 caracteres.')
     return tool, arguments
 
 
@@ -171,6 +181,11 @@ def worker_instruction(db, user_id, *, required=False):
         'take_snapshot com {"pageId":N}; list_console_messages com {"pageId":N}; '
         'lighthouse_audit com {"pageId":N,"mode":"navigation","device":"desktop"}; '
         'get_css_styles com {"pageId":N,"uid":"UID"}. Somente HTTP(S) em '
+        'páginas locais. Para testar interações, primeiro leia take_snapshot; use '
+        'click com {"pageId":N,"uid":"UID","includeSnapshot":true} ou fill com '
+        '{"pageId":N,"uid":"UID","value":"texto de teste","includeSnapshot":true}. '
+        'Confira o estado resultante; sucesso do clique não comprova funcionamento. '
+        'Não use credenciais reais nos campos de teste. Somente HTTP(S) em '
         'localhost/127.0.0.1/::1; cada chamada aguarda aprovação explícita. '
         'Não alegue resultados sem ler a saída.'
     )
@@ -202,7 +217,7 @@ async def _open_session(db, user_id, run_id):
         (project_id,)) if project_id else None
     mode = setting['mode'] if setting else 'run_isolated'
 
-    args = ['--yes', SERVER_PACKAGE, '--headless']
+    args = ['--yes', SERVER_PACKAGE, '--headless', '--no-performance-crux']
     project_profile = None
     if mode == 'project_persistent' and project_id:
         other_run = db.one(
@@ -238,7 +253,7 @@ async def _open_session(db, user_id, run_id):
         session = await stack.enter_async_context(
             ClientSession(read_stream, write_stream))
         await asyncio.wait_for(session.initialize(), timeout=90)
-        return {'stack': stack, 'session': session, 'lock': asyncio.Lock()}
+        return {'stack': stack, 'session': session}
     except BaseException:
         await stack.aclose()
         raise
@@ -368,18 +383,86 @@ async def _call(session, tool, arguments):
         if target and not _page_is_local(target):
             await session.call_tool('close_page', {'pageId': _page_id(target)})
             raise RuntimeError('A navegação saiu do endereço local permitido; a aba foi fechada.')
+    if tool in ('click', 'fill'):
+        after = _pages(await session.call_tool('list_pages', {}))
+        target = next((page for page in after if _page_id(page) == target_page_id), None)
+        escaped = [page for page in after if not _page_is_local(page)
+                   and (_page_id(page) == target_page_id or _page_id(page) not in before_ids)]
+        for page in escaped:
+            await session.call_tool('close_page', {'pageId': _page_id(page)})
+        if escaped or not _page_is_local(target):
+            raise RuntimeError('A interação saiu da página local autorizada; repita o teste localmente.')
     content = []
     for block in getattr(result, 'content', []) or []:
         if getattr(block, 'type', '') == 'text':
             content.append(getattr(block, 'text', ''))
     structured = getattr(result, 'structuredContent', None)
-    output = {'text': '\n'.join(content)[:8000]}
+    full_text = '\n'.join(content)
+    output = {'text': full_text[:8000]}
     if isinstance(structured, dict):
         output['data'] = structured
-    response = {'success': True, 'output': json.dumps(output, ensure_ascii=False)[:10000]}
+    # Bound individual fields, never slice serialized JSON into invalid JSON.
+    if len(json.dumps(output, ensure_ascii=False)) > 30000:
+        output.pop('data', None)
+    response = {'success': True, 'output': json.dumps(output, ensure_ascii=False)}
     from .browser_quality import assess
-    response.update(assess(tool, response))
+    response.update(assess(tool, {'success': True, 'output': full_text}))
+    if tool in ('take_snapshot', 'list_console_messages', 'lighthouse_audit') and len(full_text) > 120000:
+        response.update(qa_pass=False, qa_issue='Evidência excede o limite de análise; reduza a saída e repita.')
     return response
+
+
+async def _session_owner(key, actor, db, user_id, run_id):
+    """Enter, use and exit the AnyIO session contexts in this task only."""
+    runtime = None
+    current = None
+    failure = RuntimeError('A sessao Chrome DevTools foi encerrada.')
+    cleanup_error = None
+    actor['started'] = True
+    try:
+        if actor['closing']:
+            return
+        runtime = await _open_session(db, user_id, run_id)
+        while True:
+            tool, arguments, current = await actor['queue'].get()
+            if current.cancelled():
+                current = None
+                continue
+            try:
+                # Queued requests must not bypass a later deactivation.
+                if not available(db, user_id):
+                    raise RuntimeError('O Chrome DevTools MCP foi desativado para este usuario.')
+                result = await _call(runtime['session'], tool, arguments)
+            except Exception as exc:
+                if not current.done():
+                    current.set_exception(exc)
+            else:
+                if not current.done():
+                    current.set_result(result)
+            current = None
+    except (Exception, asyncio.CancelledError) as exc:
+        if not isinstance(exc, asyncio.CancelledError):
+            failure = exc
+    finally:
+        actor['closing'] = True
+        try:
+            if runtime:
+                # Do not shield by spawning a task: AnyIO cancel scopes must
+                # unwind in the exact task that entered the stdio stack.
+                await runtime['stack'].aclose()
+        except (Exception, asyncio.CancelledError) as exc:
+            cleanup_error = exc
+            failure = exc
+        finally:
+            if current is not None and not current.done():
+                current.set_exception(failure)
+            while not actor['queue'].empty():
+                _, _, future = actor['queue'].get_nowait()
+                if not future.done():
+                    future.set_exception(failure)
+            if _sessions.get(key) is actor:
+                _sessions.pop(key)
+    return cleanup_error
 
 
 async def execute(db, user_id, run_id, request):
@@ -387,30 +470,47 @@ async def execute(db, user_id, run_id, request):
     if not available(db, user_id):
         raise RuntimeError('O Chrome DevTools MCP foi desativado para este usuário.')
     key = _loop_key(run_id)
-    creation_lock = _session_locks.setdefault(key, asyncio.Lock())
-    async with creation_lock:
-        runtime = _sessions.get(key)
-        if runtime is None:
-            runtime = await _open_session(db, user_id, run_id)
-            _sessions[key] = runtime
-        async with runtime['lock']:
-            return await _call(runtime['session'], tool, arguments)
+    actor = _sessions.get(key)
+    if actor is None:
+        actor = {'queue': asyncio.Queue(), 'user_id': user_id,
+                 'started': False, 'closing': False}
+        _sessions[key] = actor
+        actor['task'] = asyncio.create_task(
+            _session_owner(key, actor, db, user_id, run_id),
+            name='browser-mcp:' + run_id)
+    if actor['closing'] or actor['user_id'] != user_id:
+        raise RuntimeError('A sessao Chrome DevTools esta encerrando ou pertence a outra conta.')
+    future = asyncio.get_running_loop().create_future()
+    actor['queue'].put_nowait((tool, dict(arguments), future))
+    try:
+        return await future
+    except asyncio.CancelledError:
+        # The caller may disappear during initialization or a tool call. Stop
+        # its owner too, so no subprocess/session survives the cancelled run.
+        await close_run(run_id)
+        raise
 
 
 async def close_run(run_id):
-    loop_id = id(asyncio.get_running_loop())
-    key = (loop_id, run_id)
-    runtime = _sessions.pop(key, None)
-    _session_locks.pop(key, None)
-    if runtime:
-        await runtime['stack'].aclose()
+    actor = _sessions.get(_loop_key(run_id))
+    if actor is None:
+        return
+    if not actor['closing']:
+        actor['closing'] = True
+        # A task cancelled before its first instruction never runs finally.
+        # An unstarted owner observes closing and drains its queue itself.
+        if actor['started']:
+            actor['task'].cancel()
+    cleanup_error = await asyncio.shield(actor['task'])
+    if cleanup_error is not None:
+        raise cleanup_error
 
 
 async def close_all():
     loop_id = id(asyncio.get_running_loop())
-    entries = [(key, value) for key, value in list(_sessions.items())
-               if key[0] == loop_id]
-    for key, runtime in entries:
-        _sessions.pop(key, None)
-        _session_locks.pop(key, None)
-        await runtime['stack'].aclose()
+    run_ids = [key[1] for key in list(_sessions) if key[0] == loop_id]
+    outcomes = await asyncio.gather(*(close_run(run_id) for run_id in run_ids),
+                                    return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome

@@ -216,10 +216,23 @@ def resolve_continuation_prompt(db, conversation_id, prompt):
     previous_runs = db.all(
         'SELECT id,prompt,status,output FROM runs WHERE conversation_id=? '
         'ORDER BY created_at DESC,rowid DESC LIMIT 20', (conversation_id,))
-    previous = next((run for run in previous_runs
-                     if is_implementation_request(run['prompt'])), None)
+    implementations = [run for run in previous_runs
+                       if is_implementation_request(run['prompt'])]
+    previous = next(iter(implementations), None)
     if not previous:
         return prompt
+
+    # Recency alone cannot disambiguate different implementation requests.
+    # Expanded continuations contain their original request; those are one
+    # scope, as are exact retries. Distinct briefs require user clarification.
+    if any(run['prompt'] not in previous['prompt'] and
+           previous['prompt'] not in run['prompt'] for run in implementations[1:]):
+        return (
+            'Pedido atual do usuário: ' + prompt.strip() + '\n'
+            'REFERÊNCIA AMBÍGUA: há pedidos de implementação diferentes nesta conversa. '
+            'Peça esclarecimento sobre qual pedido e alvo o usuário quer retomar ou ajustar. '
+            'Não escolha pelo pedido mais recente, não invente um alvo e não altere arquivos '
+            'até receber esclarecimento.')
 
     evidence = delivery_evidence(db, previous['id'])
     if contextual_adjustment:
@@ -299,8 +312,19 @@ def delivery_evidence(db, run_id):
             payload = json.loads(row['payload'])
         except (ValueError, TypeError):
             continue
+        if payload.get('workspace') == 'isolated':
+            continue
         if row['event'] == 'workspace_action_result':
             summary = payload.get('summary') or {}
+            # A later failed check invalidates an earlier passing check too.
+            # Otherwise a disconnected browser could leave stale green QA.
+            if summary.get('action') == 'browser_tool' and payload.get('success') is not True:
+                tool = summary.get('tool', '')
+                arguments = payload.get('browser_arguments') or {}
+                device = arguments.get('device') if tool == 'lighthouse_audit' else None
+                check = tool + (':' + device if device in ('desktop', 'mobile') else '')
+                browser_events.append((row['seq'], check, False,
+                                       str(payload.get('qa_issue') or 'A chamada DevTools falhou.')[:220]))
             if payload.get('success') is True:
                 if summary.get('action') in ('write', 'replace'):
                     changes.append({'seq': row['seq'], 'path': summary.get('path', '')})

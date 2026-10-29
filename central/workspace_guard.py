@@ -65,7 +65,7 @@ def enforce_run_scope(db, user_id, run_id, *, write=False):
                  (run_id,))
     if not run or run['user_id'] != user_id:
         raise HTTPException(404,'Tarefa não encontrada para esta conta.')
-    if run['status'] in ('cancelled','failed','completed','paused_limit'):
+    if run['status'] in ('cancelled','failed','completed','paused_limit', 'paused_operator', 'awaiting_integration'):
         raise HTTPException(409,'Esta tarefa não está ativa; nenhuma nova ferramenta será executada.')
     org = current_organization(db, run_id)
     if org:

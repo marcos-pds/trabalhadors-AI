@@ -163,7 +163,8 @@ class JobQueue:
         with self.db.lock, self.db.conn:
             for status, queue_state in (
                 ('completed','completed'), ('failed','failed'),
-                ('paused_limit','paused'), ('cancelled','cancelled')):
+                ('paused_limit','paused'), ('paused_operator','paused'),
+                ('awaiting_integration','paused'), ('cancelled','cancelled')):
                 self.db.conn.execute(
                     """UPDATE job_queue SET state=?,lease_owner=NULL,
                        lease_until=NULL,lease_token=NULL,updated_at=?

@@ -124,3 +124,51 @@ def test_git_checkout_hooks_are_disabled(repo):
     result = prepare(repo, 'run99', 'agent77')
     assert result['clean']
     assert not marker.exists()
+
+
+def test_git_environment_cannot_redirect_repository(repo, tmp_path, monkeypatch):
+    other = tmp_path / 'other'
+    other.mkdir()
+    git(other, 'init', '-q')
+    monkeypatch.setenv('GIT_DIR', str(other / '.git'))
+    monkeypatch.setenv('GIT_WORK_TREE', str(other))
+    result = prepare(repo, 'envrun', 'worker1')
+    assert result['head'] == git(repo, '--git-dir=' + str(repo / '.git'), 'rev-parse', 'HEAD')
+    assert Path(result['path'], 'app.txt').is_file()
+
+
+def test_registered_worktree_with_redirected_metadata_is_rejected(repo, tmp_path):
+    worker = Path(prepare(repo, 'metarun', 'worker1')['path'])
+    other = tmp_path / 'other'
+    other.mkdir()
+    git(other, 'init', '-q')
+    (worker / '.git').unlink()
+    (worker / '.git').write_text('gitdir: ' + str(other / '.git') + '\n', encoding='utf-8')
+    with pytest.raises(WorktreeError, match='Metadados'):
+        inspect(repo, 'metarun', 'worker1')
+    with pytest.raises(WorktreeError, match='Metadados'):
+        remove_clean(repo, 'metarun', 'worker1')
+    assert worker.is_dir()
+
+
+def test_remove_preserves_ignored_files(repo):
+    (repo / '.gitignore').write_text('ignored.txt\n', encoding='utf-8')
+    git(repo, 'add', '.gitignore')
+    git(repo, 'commit', '-qm', 'ignore test file')
+    worker = Path(prepare(repo, 'ignoredrun', 'worker1')['path'])
+    (worker / 'ignored.txt').write_text('preserve me', encoding='utf-8')
+    assert inspect(repo, 'ignoredrun', 'worker1')['clean'] is False
+    with pytest.raises(WorktreeError):
+        remove_clean(repo, 'ignoredrun', 'worker1')
+    assert (worker / 'ignored.txt').read_text(encoding='utf-8') == 'preserve me'
+
+
+def test_worktree_cannot_borrow_another_workers_git_metadata(repo):
+    first = Path(prepare(repo, 'metarun', 'worker1')['path'])
+    second = Path(prepare(repo, 'metarun', 'worker2')['path'])
+    metadata = (second / '.git').read_bytes()
+    (first / '.git').unlink()
+    (first / '.git').write_bytes(metadata)
+    with pytest.raises(WorktreeError, match='Metadados'):
+        inspect(repo, 'metarun', 'worker1')
+    assert inspect(repo, 'metarun', 'worker2')['clean']

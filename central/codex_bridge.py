@@ -202,7 +202,17 @@ def _run_turn(provider, model, system, messages, context, cancel_event, timeout)
                               and previous['model'] == model and previous['provider_id'] == provider['id']
                               and previous['system_hash'] == system_hash and previous['context_hash'] == context_hash
                               and delta is not None)
-                native_system = system
+                native_system = (
+                    'CONTRATO DE TRANSPORTE DA CENTRAL: você gera propostas de ações JSON; '
+                    'não executa ferramentas nativas nesta sessão. O sandbox read-only '
+                    'refere-se ao processo nativo em uma pasta temporária neutra, não à '
+                    'pasta do projeto operada pelo gateway da Central. Escrever uma '
+                    'proposta JSON write/replace não altera arquivos nem pede elevação '
+                    'do sandbox nativo. A Central verifica separadamente a autorização '
+                    'atual do projeto, solicita aprovação quando necessária e retorna '
+                    'o resultado real. Proponha somente as ações permitidas abaixo; '
+                    'se o gateway negar, respeite a negativa. Nunca use o shell ou '
+                    'ferramentas nativas para contornar o gateway.\n\n' + system)
                 if provider.get('_structured_actions'):
                     native_system += ('\nO transporte nativo exige um envelope JSON com apenas action_json: '
                                       'uma string contendo o objeto JSON completo da próxima ação da Central. '

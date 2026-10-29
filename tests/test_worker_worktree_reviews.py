@@ -114,3 +114,74 @@ def test_review_files_persist_without_storing_raw_confirmation(repo):
     path = repo / '.git' / 'central-merge-plans' / (plan['plan_id'] + '.json')
     assert path.is_file()
     assert plan['confirmation'] not in path.read_text(encoding='utf-8')
+
+
+def test_repeated_directory_and_filename_components(repo):
+    worker = Path(prepare(repo, 'job6', 'coder1')['path'])
+    (worker / 'same.txt').mkdir()
+    (worker / 'same.txt' / 'same.txt').write_text('nested text', encoding='utf-8')
+    plan = prepare_review(repo, 'job6', 'coder1')
+    apply_review(repo, plan['plan_id'], plan['confirmation'])
+    assert (repo / 'same.txt' / 'same.txt').read_text(encoding='utf-8') == 'nested text'
+
+
+def test_nul_bytes_are_rejected_even_with_text_extension(repo):
+    worker = Path(prepare(repo, 'job6', 'coder2')['path'])
+    (worker / 'app.txt').write_bytes(b'text\x00binary')
+    with pytest.raises(WorktreeError, match='binario'):
+        prepare_review(repo, 'job6', 'coder2')
+    assert (repo / 'app.txt').read_text(encoding='utf-8') == 'base\n'
+
+
+def test_rollback_preserves_concurrent_operator_edit(repo, monkeypatch):
+    import central.worker_worktree_reviews as reviews
+    worker = Path(prepare(repo, 'job6', 'coder3')['path'])
+    (worker / 'app.txt').write_text('worker edit', encoding='utf-8')
+    (worker / 'z.txt').write_text('second file', encoding='utf-8')
+    plan = prepare_review(repo, 'job6', 'coder3')
+    original = reviews._safe_path
+
+    def concurrent_edit(root, relative, **kwargs):
+        if root == worker and relative == 'z.txt' and (repo / 'app.txt').read_bytes() == b'worker edit':
+            (repo / 'app.txt').write_text('operator edit', encoding='utf-8')
+            raise WorktreeError('injected failure')
+        return original(root, relative, **kwargs)
+
+    monkeypatch.setattr(reviews, '_safe_path', concurrent_edit)
+    with pytest.raises(WorktreeError, match='injected'):
+        apply_review(repo, plan['plan_id'], plan['confirmation'])
+    assert (repo / 'app.txt').read_text(encoding='utf-8') == 'operator edit'
+    assert not (repo / 'z.txt').exists()
+    assert inspect_review(repo, plan['plan_id'])['state'] == 'manual_recovery'
+
+
+def test_corrupt_plan_non_object_is_rejected(repo):
+    worker = Path(prepare(repo, 'job6', 'coder4')['path'])
+    (worker / 'app.txt').write_text('change', encoding='utf-8')
+    plan = prepare_review(repo, 'job6', 'coder4')
+    path = repo / '.git' / 'central-merge-plans' / (plan['plan_id'] + '.json')
+    path.write_text('[]', encoding='utf-8')
+    with pytest.raises(WorktreeError, match='corrompido'):
+        inspect_review(repo, plan['plan_id'])
+
+
+@pytest.mark.parametrize('relative', ['.git./config.txt', 'src./app.txt', 'NUL.txt', 'com1/app.txt'])
+def test_windows_path_aliases_are_rejected(repo, relative):
+    from central.worker_worktree_reviews import _safe_path
+    with pytest.raises(WorktreeError):
+        _safe_path(repo, relative, parent_may_be_missing=True)
+
+
+def test_apply_preserves_existing_file_permissions(repo):
+    import os
+    import stat
+    if os.name == 'nt':
+        pytest.skip('POSIX permission bits unavailable on Windows')
+    (repo / 'app.txt').chmod(0o755)
+    git(repo, 'add', 'app.txt')
+    git(repo, 'commit', '-qm', 'make executable')
+    worker = Path(prepare(repo, 'modesrun', 'worker1')['path'])
+    (worker / 'app.txt').write_text('updated', encoding='utf-8')
+    plan = prepare_review(repo, 'modesrun', 'worker1')
+    apply_review(repo, plan['plan_id'], plan['confirmation'])
+    assert stat.S_IMODE((repo / 'app.txt').stat().st_mode) == 0o755

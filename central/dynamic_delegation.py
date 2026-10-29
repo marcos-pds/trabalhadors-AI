@@ -51,18 +51,30 @@ def validate_command(command):
 
 def _ancestors(step_id, steps):
     """Reachable prerequisite steps; rejects corrupt cycles or missing IDs."""
-    seen, pending = set(), list(json.loads(steps[step_id]['deps']))
+    seen, active = set(), set()
+    pending = [(step_id, False)]
     while pending:
-        item = pending.pop()
-        if item == step_id or item in seen:
-            if item == step_id:
-                raise ValueError('Dependência cíclica no fluxo existente.')
+        item, leaving = pending.pop()
+        if leaving:
+            active.remove(item)
+            seen.add(item)
+            continue
+        if item in active:
+            raise ValueError('Dependência cíclica no fluxo existente.')
+        if item in seen:
             continue
         if item not in steps:
             raise ValueError('Dependência ausente no fluxo existente.')
-        seen.add(item)
-        pending.extend(json.loads(steps[item]['deps']))
-    return seen
+        try:
+            deps = json.loads(steps[item]['deps'])
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Dependências inválidas no fluxo existente.') from exc
+        if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
+            raise ValueError('Dependências inválidas no fluxo existente.')
+        active.add(item)
+        pending.append((item, True))
+        pending.extend((dep, False) for dep in deps)
+    return seen - {step_id}
 
 
 def delegate(db, user_id, run_id, step_id, command, emit):
@@ -85,12 +97,8 @@ def delegate(db, user_id, run_id, step_id, command, emit):
                 (user_id, step_id, run_id))
             if not run or run['status'] != 'running' or not run['autonomous']:
                 raise ValueError('Delegação exige execução autônoma ativa e pertencente à conta.')
-            if not sender or sender['status'] != 'running':
-                raise ValueError('Somente o trabalhador ativo pode criar subtarefas.')
-            source_agent = db.one('SELECT * FROM agents WHERE id=? AND user_id=? AND enabled=1',
-                                  (sender['agent_id'], user_id))
-            if not source_agent or effective_specialty(source_agent) not in CAN_DELEGATE:
-                raise ValueError('Este papel não está autorizado a delegar etapas.')
+            if not sender:
+                raise ValueError('Etapa solicitante não pertence à execução.')
             previous = db.one(
                 'SELECT step_id,request_hash FROM dynamic_step_requests '
                 'WHERE run_id=? AND requester_step_id=? AND request_id=?',
@@ -101,7 +109,12 @@ def delegate(db, user_id, run_id, step_id, command, emit):
                 db.conn.execute('COMMIT')
                 return {'success': True, 'step_id': previous['step_id'],
                         'created': False, 'idempotent': True}
-
+            if sender['status'] != 'running':
+                raise ValueError('Somente o trabalhador ativo pode criar subtarefas.')
+            source_agent = db.one('SELECT * FROM agents WHERE id=? AND user_id=? AND enabled=1',
+                                  (sender['agent_id'], user_id))
+            if not source_agent or effective_specialty(source_agent) not in CAN_DELEGATE:
+                raise ValueError('Este papel não está autorizado a delegar etapas.')
             target = db.one('SELECT * FROM agents WHERE id=? AND user_id=? AND enabled=1',
                             (command['recipient_agent_id'], user_id))
             if not target or target['id'] == sender['agent_id']:
@@ -136,6 +149,9 @@ def delegate(db, user_id, run_id, step_id, command, emit):
                 raise ValueError('Limite de subtarefas desta execução atingido.')
             if step_id not in steps:
                 raise ValueError('Etapa solicitante não pertence à execução.')
+            # Validate the whole existing graph, including disconnected branches.
+            for existing_id in steps:
+                _ancestors(existing_id, steps)
             reviews = []
             for stage in steps.values():
                 agent = (db.one('SELECT * FROM agents WHERE id=? AND user_id=?',
@@ -163,7 +179,15 @@ def delegate(db, user_id, run_id, step_id, command, emit):
                     raise ValueError('O fluxo atual exige uma etapa depois do Revisor; '
                                      'não é seguro inserir subtarefa nesta posição.')
             plan = json.loads(run['plan'])
-            if not isinstance(plan, list):
+            if (not isinstance(plan, list) or
+                    any(not isinstance(stage, dict) or not isinstance(stage.get('id'), str)
+                        for stage in plan) or
+                    len(plan) != len(steps) or
+                    {stage['id'] for stage in plan} != set(steps) or
+                    any(stage.get('deps') != json.loads(steps[stage['id']]['deps'])
+                        or stage.get('agent_id') != steps[stage['id']]['agent_id']
+                        or stage.get('kind') != steps[stage['id']]['kind']
+                        for stage in plan)):
                 raise ValueError('Plano persistido incompatível com delegação.')
             new_id, now = uid(), utcnow()
             title, instructions = command['title'].strip(), command['instructions'].strip()

@@ -87,6 +87,8 @@ def critical_action(request):
 
 
 def needs_explicit_approval(db,user_id,run_id,request):
+    if request.get('action') == 'preview':
+        return request.get('operation') == 'start'
     if request.get('action') == 'browser_tool':
         return True
     if request.get('action') == 'reference_search':
@@ -479,8 +481,14 @@ def execute(folder, request, run_id=None):
         _command_slots.release()
 
 async def agent_action(db, user_id, run_id, step_id, request, emit, executor=None):
-    requires_write = request.get('action') in ('mkdir','write','replace','command')
-    folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
+    preview_tool = request.get('action') == 'preview'
+    requires_write = (request.get('action') in ('mkdir','write','replace','command')
+                      or (preview_tool and request.get('operation') == 'start'))
+    original_folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
+    from .step_scope import execution_folder
+    from .worker_controls import check_control
+    check_control(db, user_id, run_id, step_id)
+    folder = execution_folder(db, user_id, run_id, step_id, write=requires_write)
     browser_tool = request.get('action') == 'browser_tool'
     reference_search = request.get('action') == 'reference_search'
     if request.get('action') == 'command':
@@ -490,6 +498,13 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
         from .browser_mcp import approval_summary
         summary = approval_summary(request)
         summary.update({'action': 'browser_tool', 'tool': request['tool']})
+    elif preview_tool:
+        from .worker_preview import validate_request
+        validate_request(request)
+        summary = {'action': 'preview', 'operation': request['operation'],
+                   'cwd': request.get('cwd', ''),
+                   'description': 'Prévia local — ' + request['operation'] +
+                   (' (executa npm run dev no projeto autorizado).' if request['operation'] == 'start' else '.')}
     else:
         summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})
@@ -515,13 +530,18 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
             return {'error': 'Aprovação expirou após 10 minutos.', 'approved': False}
     if policy(db, user_id) != config:
         return {'error': 'Permissão revogada ou alterada.', 'approved': False}
-    enforce_run_scope(db,user_id,run_id,write=requires_write)
+    check_control(db, user_id, run_id, step_id)
+    if execution_folder(db, user_id, run_id, step_id, write=requires_write) != folder:
+        raise HTTPException(409, 'O workspace da etapa mudou durante a aprovação.')
     if request.get('action') == 'command':
         enforce_host_command_policy(db,user_id,run_id)
     try:
         if browser_tool:
             from .browser_mcp import execute as execute_browser
             result = await execute_browser(db, user_id, run_id, request)
+        elif preview_tool:
+            from .worker_preview import execute as execute_preview
+            result = await execute_preview(db, user_id, run_id, request, step_id=step_id)
         elif reference_search:
             from .reference_search import search
             result = await asyncio.to_thread(search, request.get('query'))
@@ -530,8 +550,16 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
                 executor.execute if executor else execute, folder, request, run_id)
     except HTTPException as exc:
         result = {'error': str(exc.detail), 'success': False}
+    except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as exc:
+        if not (browser_tool or preview_tool):
+            raise
+        # Return an observable tool failure to the worker so it can diagnose
+        # and retry; do not abort the whole run on a refused connection/UID.
+        result = {'error': str(exc)[:1200], 'success': False,
+                  'qa_pass': False, 'qa_issue': 'A ferramenta local falhou; repita a validação.'}
     emit(run_id, 'workspace_action_result', {
         'step_id': step_id, 'summary': summary,
+        'workspace': 'isolated' if folder != original_folder else 'main',
         'tool': request.get('tool', ''),
         'browser_arguments': (request.get('arguments', {}) if browser_tool else {}),
         'qa_pass': (result.get('qa_pass') if browser_tool else None),

@@ -322,3 +322,25 @@ def test_latest_browser_quality_verdict_is_required_even_if_tool_succeeded():
     db.add('workspace_action_result', success=True, qa_pass=True,
            summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
     assert assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+
+
+def test_browser_transport_failure_invalidates_previous_clean_console():
+    db = FakeEvents()
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'write', 'path': 'index.html'})
+    db.add('workspace_validation', passed=True, results=[])
+    for tool, arguments in [
+        ('take_snapshot', {}), ('list_console_messages', {}),
+        ('lighthouse_audit', {'device': 'desktop'}),
+        ('lighthouse_audit', {'device': 'mobile'}),
+    ]:
+        db.add('workspace_action_result', success=True, qa_pass=True,
+               summary={'action': 'browser_tool', 'tool': tool}, browser_arguments=arguments)
+    assert assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+    db.add('workspace_action_result', success=False, qa_issue='Connection refused',
+           summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
+    with pytest.raises(RuntimeError, match='Connection refused'):
+        assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)
+    db.add('workspace_action_result', success=True, qa_pass=True,
+           summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
+    assert assert_implementation_delivered(db, {'id': 'run'}, require_browser=True)

@@ -76,16 +76,21 @@ def _safe_path(root, relative, *, parent_may_be_missing=False):
     if not isinstance(relative, str) or not _SAFE_FILE.fullmatch(relative):
         raise WorktreeError('Nome de arquivo Git fora do conjunto seguro.')
     parts = relative.split('/')
-    if any(part in ('.', '..') or part.lower() in RESTRICTED_NAMES
+    # Windows normalizes trailing dots and device names, even inside a repo.
+    devices = {'con', 'prn', 'aux', 'nul',
+               *(f'com{i}' for i in range(1, 10)),
+               *(f'lpt{i}' for i in range(1, 10))}
+    if any(part.endswith('.') or part.split('.')[0].lower() in devices
+           or part in ('.', '..') or part.lower() in RESTRICTED_NAMES
            or part.lower().startswith('.env') or part.lower() == '.central-worker-worktrees'
            for part in parts):
         raise WorktreeError('Arquivo reservado ou credencial fora do escopo.')
     result = root
-    for part in parts:
+    for index, part in enumerate(parts):
         result = result / part
         if result.is_symlink() or (hasattr(result, 'is_junction') and result.is_junction()):
             raise WorktreeError('Symlink/junção não pode ser integrado.')
-        if result.exists() and not (result.is_dir() if part != parts[-1] else result.is_file()):
+        if result.exists() and not (result.is_dir() if index < len(parts) - 1 else result.is_file()):
             raise WorktreeError('Conflito: objeto existente tem tipo inesperado.')
         if not result.exists() and not parent_may_be_missing:
             raise WorktreeError('Caminho de origem inexistente.')
@@ -125,6 +130,8 @@ def _snapshot(root, worktree):
         source = _safe_path(worktree, relative)
         destination = _safe_path(root, relative, parent_may_be_missing=True)
         raw = source.read_bytes()
+        if b'\x00' in raw:
+            raise WorktreeError('Conteudo binario nao pode ser integrado.')
         if len(raw) > _MAX_FILE_BYTES:
             raise WorktreeError('Arquivo editado ultrapassa 32 KB.')
         try:
@@ -136,6 +143,8 @@ def _snapshot(root, worktree):
             raise WorktreeError('Limite total de bytes excedido.')
         if destination.exists():
             before = destination.read_bytes()
+            if b'\x00' in before:
+                raise WorktreeError('Conteudo base binario nao pode ser integrado.')
             try:
                 old_text = before.decode('utf-8')
             except UnicodeDecodeError as exc:
@@ -203,6 +212,8 @@ def inspect_review(folder, plan_id):
         record = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError) as exc:
         raise WorktreeError('Plano de revisão corrompido.') from exc
+    if not isinstance(record, dict):
+        raise WorktreeError('Plano de revisao corrompido.')
     if record.get('root') != str(root) or record.get('id') != plan_id:
         raise WorktreeError('Plano pertence a outro repositório.')
     return record
@@ -280,9 +291,11 @@ def apply_review(folder, plan_id, confirmation):
                     raise WorktreeError('Conflito concorrente no arquivo principal.')
                 if not dest.exists() and before is not None:
                     raise WorktreeError('Arquivo principal removido durante integração.')
+                if before is not None:
+                    os.chmod(tmp, dest.stat().st_mode & 0o777)
                 os.replace(tmp, dest)
                 temporary.remove(tmp)
-                backups.append((dest, before))
+                backups.append((dest, before, entry['after_sha256']))
             record['state'] = 'applied'
             record['applied_at'] = time.time()
             _write_record(plan_path, record)
@@ -291,13 +304,18 @@ def apply_review(folder, plan_id, confirmation):
                     'git_commit_created': False, 'worker_preserved': True}
         except BaseException:
             rollback_failed = False
-            for path, previous in reversed(backups):
+            for path, previous, applied_sha in reversed(backups):
                 try:
+                    # Never discard an operator edit made after our replacement.
+                    _safe_path(root, path.relative_to(root).as_posix())
+                    if _sha(path.read_bytes()) != applied_sha:
+                        rollback_failed = True
+                        continue
                     if previous is None:
                         path.unlink()
                     else:
                         path.write_bytes(previous)
-                except OSError:
+                except (OSError, WorktreeError):
                     rollback_failed = True
             for directory in reversed(created_dirs):
                 try:

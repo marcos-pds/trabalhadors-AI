@@ -135,6 +135,80 @@ def test_browser_tool_waits_for_explicit_approval(workspace, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize('failure', [RuntimeError('Connection refused'), ValueError('UID expired'), TimeoutError()])
+def test_approved_browser_failure_returns_feedback_and_audit(workspace, monkeypatch, failure):
+    import central.browser_mcp as browser_mcp
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+
+    async def fail(*args):
+        raise failure
+
+    monkeypatch.setattr(browser_mcp, 'execute', fail)
+
+    async def scenario():
+        events = []
+        task = asyncio.create_task(agent_action(
+            db, 'user', 'run', 'step',
+            {'action': 'browser_tool', 'tool': 'take_snapshot', 'arguments': {'pageId': 1}},
+            lambda *event: events.append(event)))
+        approval = None
+        for _ in range(30):
+            await asyncio.sleep(.02)
+            approval = db.one("SELECT id FROM workspace_action_approvals WHERE status='pending'")
+            if approval:
+                break
+        assert approval
+        decide(db, 'user', 'run', approval['id'], True)
+        result = await task
+        assert result['success'] is False
+        assert result['qa_pass'] is False
+        recorded = next(event[2] for event in events if event[1] == 'workspace_action_result')
+        assert recorded['success'] is False
+        assert recorded['qa_pass'] is False
+    asyncio.run(scenario())
+
+
+def test_preview_start_requires_operator_approval_before_launch(workspace, monkeypatch):
+    import central.worker_preview as worker_preview
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    launched = []
+
+    async def start(*args):
+        launched.append(True)
+        return {'success': True, 'output': '{"status":"running","url":"http://127.0.0.1:12345/"}'}
+
+    monkeypatch.setattr(worker_preview, 'execute', start)
+
+    async def scenario():
+        events = []
+        task = asyncio.create_task(agent_action(
+            db, 'user', 'run', 'step', {'action': 'preview', 'operation': 'start', 'cwd': ''},
+            lambda *event: events.append(event)))
+        approval = None
+        for _ in range(30):
+            await asyncio.sleep(.02)
+            approval = db.one("SELECT id FROM workspace_action_approvals WHERE status='pending'")
+            if approval:
+                break
+        assert approval and not launched
+        decide(db, 'user', 'run', approval['id'], True)
+        assert (await task)['success'] is True
+        assert launched == [True]
+        assert any(event[1] == 'workspace_action_result' for event in events)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('raw', [
+    '{"action":"preview","operation":"start","cwd":"../other"}',
+    '{"action":"preview","operation":"start","command":"powershell"}',
+])
+def test_preview_parser_rejects_escape_or_shell_arguments(raw):
+    with pytest.raises(ValueError):
+        parse_tool(raw)
+
+
 def test_reference_search_waits_for_approval_before_sending_query(workspace, monkeypatch):
     import central.reference_search as reference_search
     db, root = workspace

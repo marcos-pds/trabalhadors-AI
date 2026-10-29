@@ -40,11 +40,14 @@ def decide(db, user_id, run_id, approval_id, approved):
         raise HTTPException(409, 'Autorização indisponível ou já respondida.')
     current = policy(db, user_id)
     requested = json.loads(row['request_json'])
-    if (current['mode'] not in ('full','ask') or current['folder'] != row['folder']
+    from .step_scope import execution_folder
+    expected_folder = execution_folder(db, user_id, run_id, row['step_id'])
+    if (current['mode'] not in ('full','ask') or expected_folder != row['folder']
             or (current['mode'] == 'full' and
                 not needs_explicit_approval(db,user_id,run_id,requested))):
         raise HTTPException(409, 'Permissão alterada ou revogada.')
-    enforce_run_scope(db,user_id,run_id,write=requested.get('action') in ('mkdir','write','replace','command'))
+    enforce_run_scope(db,user_id,run_id,write=(requested.get('action') in ('mkdir','write','replace','command')
+                      or (requested.get('action') == 'preview' and requested.get('operation') == 'start')))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Autorização expirada.')
     changed = db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",

@@ -1,5 +1,8 @@
 # Codex integrado e etapas restantes — 28/10/2026
 
+> Registro histórico. Consulte [a revisão de 29/10/2026](REVISAO-AUTOMACAO-20261029.md)
+> para delegação dinâmica, worktrees, interações DevTools e validações mais recentes.
+
 ## Estado atual
 
 A Central executa trabalhadores usando o Codex App Server local. O CLI gerencia

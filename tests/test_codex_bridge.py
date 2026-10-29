@@ -130,6 +130,17 @@ def session(db):
     return db.one("SELECT * FROM codex_step_sessions WHERE step_id='alice'")
 
 
+def test_action_planning_contract_keeps_native_sandbox_and_central_authority_separate(owned, native):
+    run(owned)
+    request = next(item for item in requests(native) if item['method'] == 'thread/start')
+    params = request['params']
+    assert params['sandbox'] == 'read-only'
+    assert params['approvalPolicy'] == 'never'
+    assert 'gera propostas de ações JSON' in params['baseInstructions']
+    assert 'se o gateway negar, respeite a negativa' in params['baseInstructions']
+    assert params['config']['features.shell_tool'] is False
+
+
 def test_start_resume_delta_and_claims_persist(owned, native):
     db, _, _ = owned
     text = run(owned)
