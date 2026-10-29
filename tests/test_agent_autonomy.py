@@ -209,6 +209,59 @@ class FakeModel:
         yield reply
 
 
+def test_repeated_successful_reads_without_new_information_trigger_failover(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    model = FakeModel([json.dumps({'action':'read','path':'hello.py'})] * 9)
+    with pytest.raises(ProviderError, match='seis ciclos sem'):
+        asyncio.run(autonomous_worker(
+            model, db, 'user', 'run', 'step', {'kind':'openai'}, 'key', 'mock', '',
+            [{'role':'user','content':'Corrija o arquivo'}], lambda *args: None))
+    assert len(model.seen) == 7
+
+
+def test_large_source_read_preserves_ending_and_sha_in_model_feedback(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    content = '/* ' + 'x' * 21000 + ' */\nexport const ending = "LAST_REQUIREMENT";'
+    (root / 'App.tsx').write_bytes(content.encode('utf-8'))
+    model = FakeModel([json.dumps({'action':'read','path':'App.tsx'}),
+                       json.dumps({'action':'finish','message':'Inspecionado'})])
+    asyncio.run(autonomous_worker(
+        model, db, 'user', 'run', 'step', {'kind':'openai'}, 'key', 'mock', '',
+        [{'role':'user','content':'Leia'}], lambda *args: None, validate_at_finish=False))
+    assert any('LAST_REQUIREMENT' in m['content'] and h(content) in m['content']
+               for m in model.seen[-1][1] if m['role'] == 'user')
+
+
+def test_new_project_can_bootstrap_from_an_empty_authorized_folder(workspace):
+    db, root = workspace
+    empty = root / 'new-project'
+    empty.mkdir()
+    set_policy(db, 'user', 'full', str(empty))
+    model = FakeModel([
+        json.dumps({'action':'list','path':''}),
+        json.dumps({'action':'write','path':'hello.py','content':'print("ready")\n','expected_sha256':None}),
+        json.dumps({'action':'finish','message':'Projeto inicializado'}),
+    ])
+    answer = asyncio.run(autonomous_worker(
+        model, db, 'user', 'run', 'step', {'kind':'openai'}, 'key', 'mock', '',
+        [{'role':'user','content':'Crie os arquivos do projeto'}],
+        lambda rid, kind, payload: db.event(rid, kind, payload),
+        require_code_changes=True, require_observation=True))
+    assert 'Projeto inicializado' in answer
+    assert (empty / 'hello.py').is_file()
+
+
+def test_mcp_action_alias_uses_same_local_validation_and_canonical_envelope():
+    assert parse_tool('{"action":"new_page","url":"http://127.0.0.1:5173/"}') == {
+        'action':'browser_tool','tool':'new_page','arguments':{'url':'http://127.0.0.1:5173/'}}
+    with pytest.raises(ValueError):
+        parse_tool('{"action":"new_page","url":"https://example.com"}')
+    with pytest.raises(ValueError):
+        parse_tool('{"action":"new_page","url":"http://127.0.0.1:5173/","initScript":"bad"}')
+
+
 def test_worker_patches_file_and_validates_actual_python(workspace):
     db, root = workspace
     set_policy(db,'user','full',str(root))
@@ -229,13 +282,40 @@ def test_worker_patches_file_and_validates_actual_python(workspace):
     assert any(e[1]=='workspace_validation' and e[2]['passed'] for e in events)
 
 
+def test_worker_rejects_unrelated_edit_until_requested_title_is_saved(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    prompt = 'altere esse titulo para, essa pagina foi feita por mim app central'
+    db.execute('UPDATE runs SET prompt=? WHERE id=?', (prompt, 'run'))
+    (root / 'App.tsx').write_text('<h1>Antigo</h1>', encoding='utf-8')
+    model = FakeModel([
+        json.dumps({'action': 'read', 'path': 'hello.py'}),
+        json.dumps({'action': 'replace', 'path': 'hello.py', 'old': "print('old')",
+                    'new': "print('new')", 'expected_sha256': h("print('old')\n")}),
+        json.dumps({'action': 'finish', 'message': 'Título alterado.'}),
+        json.dumps({'action': 'read', 'path': 'App.tsx'}),
+        json.dumps({'action': 'replace', 'path': 'App.tsx', 'old': '<h1>Antigo</h1>',
+                    'new': '<h1>essa pagina foi feita por mim app central</h1>',
+                    'expected_sha256': h('<h1>Antigo</h1>')}),
+        json.dumps({'action': 'finish', 'message': 'Título salvo.'}),
+    ])
+    answer = asyncio.run(autonomous_worker(
+        model, db, 'user', 'run', 'step', {'kind': 'openai'}, 'key', 'mock', '',
+        [{'role': 'user', 'content': prompt}],
+        lambda rid, kind, payload: db.event(rid, kind, payload), require_code_changes=True))
+    assert 'Título salvo.' in answer
+    assert 'essa pagina foi feita por mim app central' in (root / 'App.tsx').read_text()
+    assert any('texto solicitado não foi encontrado' in str(messages)
+               for _, messages in model.seen)
+
+
 def test_worker_stops_after_repeating_the_same_failed_action(workspace, monkeypatch):
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))
     model = FakeModel([
         json.dumps({'action': 'read', 'path': 'missing.md'}),
         json.dumps({'action': 'read', 'path': 'missing.md'}),
-        json.dumps({'action': 'finish', 'message': 'Não concluído'}),
+        json.dumps({'action': 'read', 'path': 'missing.md'}),
     ])
     calls = []
 
@@ -245,7 +325,7 @@ def test_worker_stops_after_repeating_the_same_failed_action(workspace, monkeypa
 
     monkeypatch.setattr('central.agent_autonomy.agent_action', failed_action)
 
-    with pytest.raises(RuntimeError, match='falhou 2 vezes'):
+    with pytest.raises(RuntimeError, match='falhou 3 vezes'):
         asyncio.run(autonomous_worker(
             model, db, 'user', 'run', 'step', {'kind': 'openai'}, 'key',
             'mock', '', [{'role': 'user', 'content': 'Leia o arquivo'}],
@@ -253,7 +333,7 @@ def test_worker_stops_after_repeating_the_same_failed_action(workspace, monkeypa
 
     from central.worker_checkpoint import checkpoint_summary
     checkpoint = checkpoint_summary(db, 'user', 'run')[0]
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert checkpoint['state'] == 'blocked'
     assert 'Arquivo não encontrado' in checkpoint['last_result']
 

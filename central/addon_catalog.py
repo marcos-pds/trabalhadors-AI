@@ -371,14 +371,23 @@ class Catalog:
 
     @staticmethod
     def _inventory(candidates):
+        # Different resource ids can carry the same named Skill. Present each
+        # capability once in the execution UI instead of repeating its name.
+        unique = []
+        seen = set()
+        for item in candidates:
+            key = item['name'].strip().casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
         return {
-            'total': len(candidates),
-            'truncated': len(candidates) > 20,
+            'total': len(unique),
+            'truncated': len(unique) > 20,
             'skills': [{
                 'name': item['name'][:80],
                 'description': item['description'][:100],
                 'scope': item['scope'],
-            } for item in candidates[:20]],
+            } for item in unique[:20]],
         }
 
     @staticmethod

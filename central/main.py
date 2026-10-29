@@ -232,7 +232,7 @@ def public_provider(row):
     health = ENGINE.health.detail(row['id'], row['model'])
     if not row['enabled']:
         health['state'] = 'disabled'
-    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc'] or row.get('chatgpt_connection_id')), 'auth_type':'chatgpt_plan' if row.get('chatgpt_connection_id') else 'api_key', 'health':health}
+    return {k:row[k] for k in ('id','name','kind','base_url','model','priority','enabled','input_price','output_price','last_error','created_at')} | {'has_key':bool(row['api_key_enc'] or row.get('chatgpt_connection_id')), 'auth_type':'codex_cli' if row['kind'] == 'codex_cli' else 'chatgpt_plan' if row.get('chatgpt_connection_id') else 'api_key', 'health':health}
 
 
 def check_provider(data):
@@ -628,6 +628,8 @@ def add_provider(data:ProviderIn,user=Depends(current_user)):
 @app.put('/api/providers/{pid}')
 def update_provider(pid:str,data:ProviderIn,user=Depends(current_user)):
     previous = require_owned(DB,'providers',pid,user['id'])
+    if previous['kind'] == 'codex_cli':
+        raise HTTPException(422, 'Gerencie o Codex pelo painel de runtime local.')
     if previous.get('chatgpt_connection_id'):
         raise HTTPException(422, 'Gerencie modelos ChatGPT pela conexão da conta, não pela configuração manual de chave API.')
     url = check_provider(data)
@@ -657,8 +659,17 @@ def provider_attempts(pid: str, user=Depends(current_user)):
 
 
 @app.post('/api/providers/{pid}/test')
-async def test_provider(pid:str,user=Depends(current_user)):
+async def test_provider(pid:str,request:Request,user=Depends(current_user)):
     p = require_owned(DB,'providers',pid,user['id'])
+    if p['kind'] == 'codex_cli':
+        require_csrf(request)
+        local_only(request)
+        from .codex_runtime import probe
+        result = await asyncio.to_thread(probe)
+        connected = result['status'] == 'ok' and result['auth_type'] == 'chatgpt'
+        return {'ok': connected, 'generation_tested': False,
+                'response': 'CLI conectado. Acesso ao modelo é confirmado na execução da tarefa.' if connected else '',
+                'error': '' if connected else 'Codex local indisponível: ' + result['status']}
     allowed, half_open = ENGINE.health.acquire(pid, p['model'])
     if not allowed:
         detail = ENGINE.health.detail(pid, p['model'])
@@ -1411,7 +1422,8 @@ def run_activity(rid: str, user=Depends(current_user)):
                'step_status','model_selected','worker_checkpoint_restored',
                'workspace_action_requested','workspace_action_result',
                'worker_message','worker_phase','worker_heartbeat','skill_context_selected',
-               'worker_budget_warning',
+               'worker_budget_warning','delivery_repair_queued','agent_message_sent','agent_messages_delivered',
+               'native_session_started','native_session_resumed','native_turn_completed',
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
                'run_failed','run_completed','provider_error','failover'}
@@ -1438,13 +1450,17 @@ def run_activity(rid: str, user=Depends(current_user)):
             'path': data.get('path') or summary.get('path'),
             'description': summary.get('description'),
             'command': data.get('command'),
-            'success': data.get('success', data.get('ok')),
+            'success': data.get('success', data.get('ok', data.get('passed'))),
             'model': data.get('model'),
             'status': data.get('status'),
             'error': safe_log(data.get('error') or data.get('message')),
             'detail': safe_log(data.get('output')) if data.get('success') is False else '',
             'count': data.get('count'),
             'remaining_rounds': data.get('remaining_rounds'),
+            'sender_agent_id': data.get('sender_agent_id'),
+            'recipient_agent_id': data.get('recipient_agent_id'),
+            'message_type': data.get('message_type'),
+            'attempt': data.get('attempt'),
             'available_count': data.get('available_count'),
             'available_skills': data.get('available_skills'),
             'inventory_truncated': data.get('inventory_truncated'),
@@ -1460,11 +1476,119 @@ def run_activity(rid: str, user=Depends(current_user)):
             'updated_at': run['updated_at'],
             'checkpoints': checkpoint_summary(DB,user['id'],rid),
             'workspace_binding': binding_summary(DB,user['id'],rid),
+            'native_sessions': DB.all('SELECT step_id,model,state,updated_at FROM codex_step_sessions WHERE run_id=? AND user_id=?',
+                                      (rid, user['id'])),
+            'agent_messages': DB.all(
+                'SELECT m.id,m.message_type,m.state,substr(m.content,1,800) content,'
+                'a.name sender_name,b.name recipient_name FROM agent_messages m '
+                'JOIN agents a ON a.id=m.sender_agent_id JOIN agents b ON b.id=m.recipient_agent_id '
+                'WHERE m.run_id=? AND m.user_id=? ORDER BY m.created_at DESC,m.id DESC LIMIT 8',
+                (rid, user['id'])),
             'steps': [{'id':step['id'],'name':step['name'],'status':step['status'],
                        'error':step['error']} for step in DB.all(
                            'SELECT id,name,status,error FROM steps WHERE run_id=?', (rid,))],
             'last_activity_at': last_event['created_at'] if last_event else run['created_at'],
             'events': entries[-55:]}
+
+
+@app.get('/api/runs/{rid}/agent-messages')
+def run_agent_messages(rid: str, user=Depends(current_user)):
+    run = require_owned(DB, 'runs', rid, user['id'])
+    conversation = DB.one('SELECT project_id FROM conversations WHERE id=?', (run['conversation_id'],))
+    from .agent_messages import list_messages
+    return {'messages': list_messages(DB, user['id'], rid, conversation['project_id'])}
+
+
+@app.get('/api/runtimes')
+def local_runtimes(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .codex_runtime import inventory
+    return inventory()
+
+
+@app.post('/api/runtimes/codex/probe')
+def probe_codex_runtime(request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    from .codex_runtime import probe
+    return probe()
+
+
+class CodexConnectIn(BaseModel):
+    model: str = Field(min_length=1, max_length=120, pattern=r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+    create_worker: bool = True
+
+
+@app.post('/api/runtimes/codex/connect')
+def connect_codex_runtime(data: CodexConnectIn, request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') != 'local':
+        raise HTTPException(403, 'O login local do Codex não pode ser compartilhado no modo servidor.')
+    from .codex_runtime import probe
+    from .codex_bridge import CERTIFIED_VERSION
+    result = probe()
+    if result['status'] != 'ok' or result['auth_type'] != 'chatgpt':
+        raise HTTPException(409, 'Conecte o Codex CLI com sua conta ChatGPT antes de continuar.')
+    if result['version'] != CERTIFIED_VERSION:
+        raise HTTPException(409, 'Esta versão do Codex ainda não foi validada com o gateway da Central.')
+    if data.model not in {item['id'] for item in result['models']}:
+        raise HTTPException(422, 'Selecione um modelo retornado pelo catálogo do Codex.')
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        provider = DB.one("SELECT * FROM providers WHERE user_id=? AND kind='codex_cli' AND model=?",
+                          (user['id'], data.model))
+        if not provider:
+            provider_id = uid()
+            DB.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,priority,enabled,created_at) '
+                       "VALUES(?,?,?,'codex_cli','codex://local',?,50,1,?)",
+                       (provider_id, user['id'], 'Codex local · ' + data.model[:45], data.model, utcnow()))
+            provider = DB.one('SELECT * FROM providers WHERE id=?', (provider_id,))
+        else:
+            DB.execute('UPDATE providers SET enabled=1 WHERE id=?', (provider['id'],))
+        worker = DB.one("SELECT id FROM agents WHERE user_id=? AND provider_id=? AND specialty='code' ORDER BY created_at LIMIT 1",
+                        (user['id'], provider['id']))
+        if data.create_worker and not worker:
+            worker_id = uid()
+            DB.execute('INSERT INTO agents(id,user_id,name,specialty,instructions,provider_id,model,avatar,max_concurrency,created_at) '
+                       "VALUES(?,?,?,'code',?,?,?,'⌘',1,?)",
+                       (worker_id, user['id'], 'Codex · ' + data.model[:45],
+                        'Implemente soluções completas e verificáveis usando as ferramentas da Central. '
+                        'Inspecione arquivos reais, corrija erros, execute testes e relate somente evidências. '
+                        'Respeite o workspace, as aprovações e as instruções atuais do usuário.',
+                        provider['id'], data.model, utcnow()))
+            worker = {'id': worker_id}
+        reviewer = DB.one("SELECT id FROM agents WHERE user_id=? AND provider_id=? AND specialty='review' ORDER BY created_at LIMIT 1",
+                          (user['id'], provider['id']))
+        if data.create_worker and not reviewer:
+            reviewer_id = uid()
+            DB.execute('INSERT INTO agents(id,user_id,name,specialty,instructions,provider_id,model,avatar,max_concurrency,created_at) '
+                       "VALUES(?,?,?,'review',?,?,?,'✓',1,?)",
+                       (reviewer_id, user['id'], 'Revisor Codex · ' + data.model[:40],
+                        'Revise os arquivos reais do implementador, verifique critérios de aceite e execute testes. '
+                        'Corrija defeitos encontrados usando as ferramentas autorizadas da Central e valide novamente. '
+                        'Não considere relatos ou build isolado como comprovação de funcionamento visual.',
+                        provider['id'], data.model, utcnow()))
+            reviewer = {'id': reviewer_id}
+    ops_audit(DB, user['id'], 'codex_runtime_connected', 'provider', provider['id'])
+    return {'provider': public_provider(require_owned(DB, 'providers', provider['id'], user['id'])),
+            'agent_id': worker['id'] if worker else None,
+            'reviewer_id': reviewer['id'] if reviewer else None, 'generation_tested': False}
+
+
+@app.get('/api/agents/specialist-pack')
+def missing_specialist_profiles(user=Depends(current_user)):
+    from .specialist_profiles import list_missing_profiles
+    return {'profiles': list_missing_profiles(DB, user['id'])}
+
+
+@app.post('/api/agents/specialist-pack')
+def add_specialist_profiles(request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    from .specialist_profiles import install_missing_profiles
+    result = install_missing_profiles(DB, user['id'])
+    ops_audit(DB, user['id'], 'specialist_profiles_added', 'agents', user['id'])
+    return result
 
 
 @app.get('/api/runs/{rid}/events')

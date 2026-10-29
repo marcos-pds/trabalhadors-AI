@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ProviderCatalog from './ProviderCatalog'
+import LocalRuntimesPanel from './LocalRuntimesPanel'
+import SpecialistProfilesPanel from './SpecialistProfilesPanel'
 import ConversationMemoryPanel from './ConversationMemoryPanel'
 import ComputerAccessPanel from './ComputerAccessPanel'
 import ExecutionPanel from './ExecutionPanel'
@@ -7,11 +9,17 @@ import OperationalOverview from './OperationalOverview'
 import OrganizationPanel from './OrganizationPanel'
 import GitIntegrationsPanel from './GitIntegrationsPanel'
 import ResourcesPanel from './ResourcesPanel'
+import ChatResourcesPanel from './ChatResourcesPanel'
+import ConversationActivity from './ConversationActivity.jsx'
+import PauseLimitPrompt from './PauseLimitPrompt.jsx'
+import { parseResourceCommand, matchingResources, setChatResourceState } from './chatResources.mjs'
 import TokenUsagePanel from './TokenUsagePanel'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
 const chatCommands = [
+  { command: '/skills', label: 'Ativar skills no chat', description: 'Listar skills ou usar /skill ativar nome' },
+  { command: '/plugins', label: 'Ativar plugins no chat', description: 'Listar integrações ou usar /plugin ativar nome' },
   { command: '/ajuda', label: 'Ver comandos', description: 'Mostrar os comandos disponíveis' },
   { command: '/novo', label: 'Nova conversa', description: 'Começar uma conversa limpa' },
   { command: '/menu', label: 'Abrir menu', description: 'Acessar as áreas da Central IA' },
@@ -172,7 +180,7 @@ function RichText({ text }) {
   }))}</div>
 }
 
-function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, autonomous, setAutonomous, workspaceApprovals, onWorkspaceApproval, onOpenExecution, onMenu, onCommand }) {
+function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, autonomous, setAutonomous, workspaceApprovals, onWorkspaceApproval, onOpenExecution, onMenu, onCommand, activityRunId }) {
   const fileRef = useRef(null)
   const transcriptRef = useRef(null)
   const sendLockRef = useRef(false)
@@ -200,7 +208,8 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     sendLockRef.current = true
     setSending(true)
     try {
-      await onSend()
+      if (prompt.trim().startsWith('/')) await onCommand(prompt.trim())
+      else await onSend()
     } finally {
       sendLockRef.current = false
       setSending(false)
@@ -224,7 +233,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     <header className="flex min-h-[62px] shrink-0 items-center justify-between gap-3 border-b border-white/[.07] px-5 py-2 max-sm:px-3">
       <div className="min-w-0"><strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong><small className="mt-1 block text-[11px] text-muted">{activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}</small></div>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={onOpenExecution} title="Ver logs e prévia do projeto" className="rounded-xl border border-emerald-300/25 px-3 py-2 text-[11px] text-emerald-200 hover:bg-emerald-400/10">◫ Atividade / Prévia</button>
+        <button type="button" onClick={onOpenExecution} title="Abrir prévia do projeto" className="rounded-xl border border-emerald-300/25 px-3 py-2 text-[11px] text-emerald-200 hover:bg-emerald-400/10">◫ Prévia</button>
         {running && <button type="button" onClick={onCancel} className="rounded-xl border border-rose-300/40 px-3 py-2 text-[11px] font-bold text-rose-200 hover:bg-rose-400/10">■ Parar</button>}
         <button type="button" onClick={onOpenMemory} title="Buscar conversas e configurar memória" className="rounded-xl border border-lilac/30 px-3 py-2 text-[11px] text-lilac hover:bg-lilac/10">⌕ Memória</button>
         <select value={mode} onChange={e => {setMode(e.target.value);if(e.target.value!=='manual')setSelectedAgent('')}} aria-label="Modo de trabalho" className="max-w-[150px] rounded-xl border border-white/10 bg-card px-3 py-2 text-[11px] text-copy outline-none focus:border-lilac/50"><option value="auto">✦ Automático</option><option value="manual">◇ Um trabalhador</option><option value="team">▣ Equipe</option></select>
@@ -233,6 +242,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     </header>
     <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
       {!messages.length ? <ChatWelcome onSuggest={onSuggest} /> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
+      {activityRunId && <ConversationActivity key={activityRunId} api={api} runId={activityRunId} active={running}/>}
       {steps.length > 0 && <section aria-live="polite" className="mx-auto mb-5 max-w-3xl rounded-2xl border border-white/10 bg-white/[.035] p-4">
         <div className="mb-3 flex items-center justify-between"><strong className="text-xs font-semibold">Etapas da execução</strong><span className="text-[10px] text-muted">{steps.filter(step => step.status === 'completed').length}/{steps.length} concluídas</span></div>
         <div className="space-y-2">{steps.map(step => <div key={step.id} className="rounded-xl border border-white/[.07] bg-black/10 p-3">
@@ -263,7 +273,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             </div>
           </div>)}
         </div>}
-        {matchingCommands.length > 0 && <div role="listbox" aria-label="Comandos" className="absolute bottom-[calc(100%+9px)] left-0 right-0 z-30 overflow-hidden rounded-2xl border border-white/10 bg-[#202024] p-1.5 shadow-2xl shadow-black/50">
+        {matchingCommands.length > 0 && <div role="listbox" aria-label="Comandos" className="absolute bottom-[calc(100%+9px)] left-0 right-0 z-30 max-h-72 overflow-y-auto rounded-2xl border border-white/10 bg-[#202024] p-1.5 shadow-2xl shadow-black/50">
           {matchingCommands.map(item => <button key={item.command} type="button" role="option" onClick={() => onCommand(item.command)} className={'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ' + (matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)]?.command === item.command ? 'bg-white/[.07]' : 'hover:bg-white/[.07]')}><code className="min-w-28 text-xs font-semibold text-lilac">{item.command}</code><span className="min-w-0"><strong className="block text-xs font-medium text-copy">{item.label}</strong><small className="text-[10px] text-muted">{item.description}</small></span></button>)}
         </div>}
         <div className={"chat-composer rounded-[23px] shadow-xl shadow-black/15 focus-within:ring-4 focus-within:ring-lilac/5 " + (prompt.trim() ? "is-typing" : "")}>
@@ -299,10 +309,11 @@ function Providers({ data, onEdit, onDelete, onTest, onHistory, onConnected }) {
   const [search,setSearch]=useState('');const [filter,setFilter]=useState('free')
   const filteredProviders=data.providers.filter(p=>(filter==='all'||providerCategory(p)===filter)&&`${p.name} ${p.model} ${p.kind}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))
   return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4">
+    <LocalRuntimesPanel api={api} onConnected={onConnected}/>
     <Heading eyebrow="INTEGRAÇÕES" title="Conecte sua equipe de IA" description="Catálogo oficial de modelos, configuração automática e conexões verificadas." action={<Button quiet onClick={()=>onEdit(null)}>Configuração manual</Button>} />
     <ProviderCatalog filter={filter} onFilter={setFilter} presets={providerPresets.map(p=>({...p,access:p.group,quick:false,keys_url:providerKeyLinks[p.kind]||providerKeyLinks.compatible,source_url:providerKeyLinks[p.kind]||providerKeyLinks.compatible,checked_at:"catálogo manual"}))} api={api} providers={data.providers} onConnected={onConnected} onManual={kind=>onEdit(null,providerPresets.find(p=>p.kind===kind))}/>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-semibold">Suas conexões · {filteredProviders.filter(p=>p.enabled).length} ativas</h2><input aria-label="Buscar conexão salva" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar conexão ou modelo..." className="min-h-10 rounded-xl border border-white/10 bg-panel px-3 text-xs"/></div>
-    <div className="overflow-x-auto rounded-2xl border border-white/[.09] bg-panel"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-white/[.035] text-[10px] uppercase tracking-wider text-muted"><tr>{['Provedor','Modelo','Prioridade','Saúde','Ações'].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{filteredProviders.map(p=>{const h=p.health||{};const state=!p.enabled?['Pausado','failed']:h.state==='healthy'?['Saudável','completed']:h.state==='suspended'?['Suspenso','failed']:h.state==='degraded'?['Instável','running']:['Sem medições',''];return <tr key={p.id} className="border-t border-white/[.07]"><td className="px-4 py-4"><strong>{p.name}</strong><small className="block text-muted">{providerKindLabels[p.kind]||(p.kind==='openai_chatgpt'?'ChatGPT (assinatura)':p.kind)} · {p.auth_type==='chatgpt_plan'?'Conta ChatGPT autorizada':p.has_key?'Chave armazenada':'Sem chave'}</small></td><td className="px-4 py-4">{p.model}</td><td className="px-4 py-4">{p.priority}</td><td className="px-4 py-4"><Status value={state[1]}>{state[0]}</Status><small className="mt-1 block text-muted">{h.success_rate==null?'—':`${h.success_rate.toFixed(1)}% sucesso`} · {h.avg_latency_ms==null?'—':`${h.avg_latency_ms} ms`}</small></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><Button small onClick={()=>onTest(p)}>Testar</Button><Button small quiet onClick={()=>onHistory(p)}>Histórico</Button>{p.auth_type!=='chatgpt_plan'&&<Button small quiet onClick={()=>onEdit(p)}>Editar</Button>}<Button small danger onClick={()=>onDelete(p)}>Excluir</Button></div></td></tr>})}{!filteredProviders.length&&<tr><td colSpan="5"><Empty icon="⬡" title={data.providers.length?'Nenhuma conexão neste filtro':'Nenhum provedor conectado'}>{data.providers.length?'Ajuste a categoria ou o texto pesquisado.':'Escolha um preset acima para preencher a conexão.'}</Empty></td></tr>}</tbody></table></div>
+    <div className="overflow-x-auto rounded-2xl border border-white/[.09] bg-panel"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-white/[.035] text-[10px] uppercase tracking-wider text-muted"><tr>{['Provedor','Modelo','Prioridade','Saúde','Ações'].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{filteredProviders.map(p=>{const h=p.health||{};const state=!p.enabled?['Pausado','failed']:h.state==='healthy'?['Saudável','completed']:h.state==='suspended'?['Suspenso','failed']:h.state==='degraded'?['Instável','running']:['Sem medições',''];return <tr key={p.id} className="border-t border-white/[.07]"><td className="px-4 py-4"><strong>{p.name}</strong><small className="block text-muted">{p.kind==='codex_cli'?'Codex local':providerKindLabels[p.kind]||(p.kind==='openai_chatgpt'?'ChatGPT (assinatura)':p.kind)} · {p.auth_type==='codex_cli'?'Login gerenciado pelo CLI':p.auth_type==='chatgpt_plan'?'Conta ChatGPT autorizada':p.has_key?'Chave armazenada':'Sem chave'}</small></td><td className="px-4 py-4">{p.model}</td><td className="px-4 py-4">{p.priority}</td><td className="px-4 py-4"><Status value={state[1]}>{state[0]}</Status><small className="mt-1 block text-muted">{h.success_rate==null?'—':`${h.success_rate.toFixed(1)}% sucesso`} · {h.avg_latency_ms==null?'—':`${h.avg_latency_ms} ms`}</small></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><Button small onClick={()=>onTest(p)}>Testar</Button><Button small quiet onClick={()=>onHistory(p)}>Histórico</Button>{p.auth_type!=='chatgpt_plan'&&p.kind!=='codex_cli'&&<Button small quiet onClick={()=>onEdit(p)}>Editar</Button>}<Button small danger onClick={()=>onDelete(p)}>Excluir</Button></div></td></tr>})}{!filteredProviders.length&&<tr><td colSpan="5"><Empty icon="⬡" title={data.providers.length?'Nenhuma conexão neste filtro':'Nenhum provedor conectado'}>{data.providers.length?'Ajuste a categoria ou o texto pesquisado.':'Escolha um preset acima para preencher a conexão.'}</Empty></td></tr>}</tbody></table></div>
   </div>
 }
 
@@ -349,6 +360,7 @@ function Agents({ data, onEdit, onRestored }) {
     } finally { setRepairing(false) }
   }
   return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="EQUIPE IA" title="Seus trabalhadores inteligentes" description="Veja a especialidade de cada agente nos cartões ou altere-a em Configurar." action={<div className="flex flex-wrap gap-2"><Button small disabled={!data.agents.length || repairing} onClick={distributeAgents}>{repairing ? 'Distribuindo...' : 'Distribuir agentes'}</Button><Button primary onClick={()=>onEdit(null)}>＋ Criar trabalhador</Button></div>} />
+    <SpecialistProfilesPanel api={api} onChanged={onRestored}/>
     {mismatches.length > 0 && <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/[.06] p-4">
       <div><strong className="text-xs text-amber-200">Especialidades inconsistentes detectadas</strong>
         <p className="mt-1 text-xs leading-5 text-muted">{mismatches.map(a => a.name).join(', ')}: os nomes e instruções originais indicam outras especialidades. A seleção automática já considera os papéis corretos.</p>
@@ -406,7 +418,7 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 }
 
 export default function App() {
-  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const sourceRef=useRef(null);const toastTimer=useRef(null)
+  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
@@ -509,17 +521,47 @@ export default function App() {
   async function cancelRun(){if(!currentRun)return;try{await api(`/runs/${currentRun}/cancel`,'POST')}catch(error){notify(error.message)}}
   async function approval(stepId,approved){if(!currentRun)return;try{await api(`/runs/${currentRun}/steps/${stepId}/approval`,'POST',{approved});notify(approved?'Etapa aprovada.':'Etapa rejeitada.')}catch(error){notify(error.message)}}
   async function saveEditor(kind,id,payload){const endpoints={provider:'/providers',agent:'/agents',project:'/projects',workflow:'/workflows'};if(id&&kind!=='project')await api(`${endpoints[kind]}/${id}`,'PUT',payload);else await api(endpoints[kind],'POST',payload);await loadAll();if(kind==='provider'||kind==='agent')notify(kind==='provider'?'Provedor salvo com segurança.':'Trabalhador salvo.')}
-  async function removeProvider(provider){if(!window.confirm(`Excluir o provedor ${provider.name}? As credenciais serão apagadas.`))return;try{await api(`/providers/${provider.id}`,'DELETE');await loadAll();notify('Provedor excluído.')}catch(error){notify(error.message)}}
+  async function removeProvider(provider){if(!window.confirm(provider.kind==='codex_cli'?'Desconectar o Codex da Central? O login do CLI será mantido.':`Excluir o provedor ${provider.name}? As credenciais serão apagadas.`))return;try{await api(`/providers/${provider.id}`,'DELETE');await loadAll();notify('Provedor excluído.')}catch(error){notify(error.message)}}
   async function testProvider(provider){try{const result=await api(`/providers/${provider.id}/test`,'POST');notify(result.ok?`Conexão validada: ${result.response}`:`Falha: ${result.error}`);await loadAll()}catch(error){notify(error.message)}}
   async function openRun(run){await openConversation(run.conversation_id);setInspectedRun(run.id);setExecutionPanelOpen(true);try{const detail=await api(`/runs/${run.id}`);setSteps(detail.steps||[]);if(['running','queued','awaiting_approval'].includes(detail.status)){setCurrentRun(run.id);api('/runs/'+run.id+'/workspace/approvals').then(setWorkspaceApprovals).catch(()=>setWorkspaceApprovals([]));const stream=new EventSource(`/api/runs/${run.id}/events?after=0`);sourceRef.current=stream;stream.onmessage=event=>{const msg=JSON.parse(event.data),d=msg.data||{};if(msg.event==='token')setMessages(old=>{const idx=old.findIndex(item=>item.stepId===d.step_id);return idx<0?[...old,{role:'assistant',agent:d.agent,content:d.text,stepId:d.step_id}]:old.map((item,i)=>i===idx?{...item,content:item.content+d.text}:item)});if(msg.event==='step_status')setSteps(old=>old.map(item=>item.id===d.id?{...item,...d}:item));if(msg.event==='workspace_approval_required')setWorkspaceApprovals(list=>list.some(x=>x.approval_id===d.approval_id)?list:[...list,d]);if(msg.event==='run_completed'||msg.event==='run_failed'||msg.event==='run_paused_limit'||(msg.event==='run_status'&&d.status==='cancelled'))finishRun(stream,run.conversation_id,msg.event==='run_completed',run.id)}}}catch(error){notify(error.message)}}
-  async function resumeRun(id){try{await api(`/runs/${id}/resume`,'POST');await loadAll();const run=data.runs.find(item=>item.id===id);if(run)await openRun(run);await refreshStats();notify('Execução retomada com o contexto do trabalhador preservado.')}catch(error){notify(error.message)}}
+  async function resumeRun(id, propagateError=false){try{await api(`/runs/${id}/resume`,'POST');await loadAll();const run=data.runs.find(item=>item.id===id);if(run)await openRun(run);await refreshStats();notify('Execução retomada com o contexto do trabalhador preservado.')}catch(error){if(propagateError)throw error;notify(error.message)}}
   function useWorkflow(id){setCurrentConvo(null);setSelectedProject(null);setMessages([]);setSelectedWorkflow(id);setSelectedAgent('');setMode('team');setPage('chat');notify('Fluxo selecionado. Envie a tarefa para executá-lo.')}
-  function runCommand(command) {
+  const [chatResourceCommand, setChatResourceCommand] = useState(null)
+  const resourceCommandLock = useRef(false)
+  const resourceScopes = []
+  const resourceProjectId = data.conversations.find(item => item.id === currentConvo)?.project_id || selectedProject
+  if (resourceProjectId) resourceScopes.push({key:'project:' + resourceProjectId, target_kind:'project', target_id:resourceProjectId, label:'Projeto: ' + (data.projects.find(p => p.id === resourceProjectId)?.name || 'atual')})
+  if (currentRun) resourceScopes.push({key:'run:' + currentRun, target_kind:'run', target_id:currentRun, label:'Execução atual'})
+  for (const agent of data.agents.filter(item => item.enabled)) resourceScopes.push({key:'agent:' + agent.id, target_kind:'agent', target_id:agent.id, label:'Trabalhador: ' + agent.name})
+  function resourceResult(content) { setMessages(old => [...old, {type:'event', content}]) }
+  async function runCommand(rawCommand) {
+    const resourceCommand = parseResourceCommand(rawCommand)
+    if (resourceCommand) {
+      if (resourceCommandLock.current) return
+      setPrompt('')
+      if (resourceCommand.action === 'listar' || !resourceCommand.query) return setChatResourceCommand(resourceCommand)
+      resourceCommandLock.current = true
+      try {
+        const rows = matchingResources(await api('/resources'), resourceCommand)
+        if (rows.length !== 1) {
+          setChatResourceCommand(resourceCommand)
+          return resourceResult(rows.length ? 'Há mais de um recurso com esse nome. Escolha qual deseja usar.' : 'Recurso não encontrado entre os importados. Confira a lista de skills e plugins.')
+        }
+        // Project/run is explicit in this chat. An unspecified worker must be
+        // chosen by the user rather than silently selecting the first agent.
+        const scope = resourceScopes.find(item => item.target_kind !== 'agent') || resourceScopes.find(item => item.target_id === selectedAgent)
+        if (rows[0].kind === 'skill' && !scope) return setChatResourceCommand(resourceCommand)
+        resourceResult(await setChatResourceState(api, rows[0], resourceCommand.action === 'ativar', scope))
+      } catch (error) { resourceResult(error.message); setChatResourceCommand(resourceCommand) }
+      finally { resourceCommandLock.current = false }
+      return
+    }
+    const command = rawCommand.trim().toLowerCase()
     setPrompt('')
     if (command === '/novo') return newChat()
     if (command === '/menu') return setMenuOpen(true)
     if (command === '/ajuda') {
-      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
+      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /skills e /plugins para gerenciar recursos no chat. Ative com /skill ativar nome ou /plugin ativar nome; desative com /skill desativar nome ou /plugin desativar nome. Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
       return
     }
     if (command === '/aprovar' || command === '/rejeitar') {
@@ -529,23 +571,33 @@ export default function App() {
     }
     const destinations = { '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/configuracoes': 'settings' }
     if (destinations[command]) return navigate(destinations[command])
+    notify('Comando não encontrado. Use /ajuda, /skills ou /plugins.')
   }
   const selectSuggestion=value=>setPrompt(value)
   if(!authReady)return <div className="grid min-h-screen place-items-center bg-ink text-sm text-muted">Abrindo sua central…</div>
   if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-[#28292c] px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
   return <div className="relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy">
-    {menuOpen && <><button aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/><div className="menu-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50"><Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/></div></>}
+    {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
+    {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
+    {menuOpen && <>
+      <button aria-hidden="true" tabIndex={-1} onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/>
+      <div className="menu-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
+        <button type="button" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-lg text-xl text-muted hover:bg-white/10">×</button>
+        <Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/>
+      </div>
+    </>}
     <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[radial-gradient(ellipse_at_55%_42%,#1c3762,transparent_49%),#131314]">
       <header className="z-10 flex h-[58px] shrink-0 items-center justify-between border-b border-white/[.06] bg-[#131314d9] px-5 backdrop-blur-xl max-sm:px-3">
         <div className="flex min-w-0 items-center gap-3"><button type="button" aria-label="Abrir menu" title="Menu" onClick={() => setMenuOpen(true)} className="menu-toggle grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-lg text-muted transition hover:bg-white/[.07] hover:text-copy"><span aria-hidden="true">☰</span></button><div className="min-w-0"><p className="truncate text-xs text-muted">{page === 'chat' ? 'Central IA' : 'Workspace'}</p><strong className="block truncate text-[13px] font-medium text-copy">{pageNames[page]}</strong></div></div>
-        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sistema online</span><button title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
+        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sistema online</span><button aria-label="Alternar tema" title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
-        {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)}/></div>
-          {executionPanelOpen && <ExecutionPanel api={api} runId={currentRun || inspectedRun}
+        {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
+          {executionPanelOpen && <><div role="separator" aria-label="Ajustar largura do painel de execução" aria-orientation="vertical" className="hidden w-1 shrink-0 cursor-col-resize bg-white/10 transition hover:bg-violet-400/70 lg:block" onPointerDown={event=>{event.preventDefault();const size=e=>Math.min(68,Math.max(34,100-(e.clientX/window.innerWidth*100)));const move=e=>setExecutionWidth(size(e));const up=e=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);localStorage.setItem('central-execution-width',String(Math.round(size(e))))};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>
+          <ExecutionPanel api={api} runId={currentRun || inspectedRun}
             active={!!currentRun} onStop={cancelRun}
             onFeedback={sendRunFeedback} onResume={() => resumeRun(currentRun || inspectedRun)}
-            onClose={() => setExecutionPanelOpen(false)}/>}
+            onClose={() => setExecutionPanelOpen(false)} width={executionWidth}/></>}
         </div>}
         {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}

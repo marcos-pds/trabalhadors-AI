@@ -5,15 +5,22 @@ const input = 'w-full rounded-xl border border-white/15 bg-[#151519] px-3 py-2.5
 
 function eventLabel(item) {
   const kind = item.event
+  if (kind === 'native_session_started') return 'Sessão Codex iniciada: ' + item.model
+  if (kind === 'native_session_resumed') return 'Sessão Codex retomada: ' + item.model
+  if (kind === 'native_turn_completed') return 'Resposta Codex recebida: ' + item.model
+  if (kind === 'delivery_repair_queued') return 'Autocorreção da entrega: tentativa ' + item.attempt
+  if (kind === 'agent_message_sent') return 'Mensagem entre trabalhadores: ' + item.message_type
+  if (kind === 'agent_messages_delivered') return 'Mensagens recebidas pelo trabalhador: ' + item.count
   if (kind === 'worker_heartbeat') return 'IA ainda processando'
   if (kind === 'worker_phase') return item.stage || 'Trabalhador em ação'
   if (kind === 'model_selected') return 'Modelo selecionado: ' + (item.model || 'não informado')
   if (kind === 'skill_context_selected') {
-    const selected = (item.selected_skills || []).map(skill => skill.name)
+    const selected = [...new Set((item.selected_skills || []).map(skill => skill.name))]
+    const available = [...new Set(item.available_skills || [])]
     return selected.length
       ? 'Skills no contexto: ' + selected.join(', ')
       : item.available_count
-        ? 'Skills ativas encontradas: ' + (item.available_skills || []).join(', ') +
+        ? 'Skills ativas encontradas: ' + available.join(', ') +
           (item.inventory_truncated ? ' (lista parcial)' : '') +
           '; nenhuma foi relevante para este pedido'
         : 'Nenhuma Skill ativa vinculada ao projeto ou trabalhador desta execução'
@@ -44,8 +51,8 @@ function eventLabel(item) {
   return kind.replaceAll('_', ' ')
 }
 
-export default function ExecutionPanel({ api, runId, active, onStop, onClose, onFeedback, onResume }) {
-  const [tab, setTab] = useState('activity')
+export default function ExecutionPanel({ api, runId, active, onStop, onClose, onFeedback, onResume, width }) {
+  const [tab, setTab] = useState('preview')
   const [activity, setActivity] = useState(null)
   const [now, setNow] = useState(Date.now())
   const [preview, setPreview] = useState({ status: 'stopped' })
@@ -55,6 +62,8 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
   const [frameKey, setFrameKey] = useState(0)
+  const [frameState, setFrameState] = useState('idle')
+  const [urlInput, setUrlInput] = useState('')
 
   useEffect(() => {
     let mounted = true
@@ -119,7 +128,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
       if (action === 'start') {
         if (!window.confirm('Iniciar o servidor npm dev deste projeto? O script executa código real no seu Windows, com os privilégios da sua conta.')) return
         const result = await api('/preview/start', 'POST', { cwd })
-        setPreview(result); setFrameKey(n => n + 1)
+        setPreview(result); setUrlInput(result.url || ''); setFrameState('loading'); setFrameKey(n => n + 1)
       } else {
         const result = await api('/preview/stop', 'POST', {})
         setPreview(result)
@@ -139,9 +148,11 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
     finally { setLoading('') }
   }
 
-  const safePreview = preview.url?.startsWith('http://127.0.0.1:') ? preview.url : null
-  return <aside aria-label="Painel da execução e prévia" className="flex h-full min-h-0 w-full flex-col border-t border-white/10 bg-[#17171b] lg:w-[48%] lg:border-l lg:border-t-0">
-    <div className="shrink-0 border-b border-white/10 px-4 py-3">
+  const requestedPreview = urlInput || preview.url || ''
+  const safePreview = /^https?:\/\/(?:127\.0\.0\.1|localhost):\d{1,5}(?:\/|$)/.test(requestedPreview)
+    ? requestedPreview : null
+  return <aside aria-label="Painel da execução e prévia" style={{'--execution-panel-width': `${width || 50}%`}} className="flex h-full min-h-0 w-full flex-col border-t border-white/10 bg-[#17171b] lg:w-[var(--execution-panel-width)] lg:border-l lg:border-t-0">
+    {tab !== 'preview' && <div className="shrink-0 border-b border-white/10 px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <strong className="text-sm">Central de execução</strong>
         <div className="flex items-center gap-2">
@@ -153,18 +164,13 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         </div>
       </div>
       <p role="status" className={'mt-2 text-xs ' + tone}>{isRunning ? '● ' : ''}{state}</p>
-      {activity?.workspace_binding && <div className="mt-2 rounded-xl border border-white/10 px-3 py-2 text-[10px] leading-5 text-muted">
-        <p className="font-semibold text-violet-200">Workspace vinculado a esta tarefa</p>
-        <p className="break-all font-mono">{activity.workspace_binding.folder}</p>
-        <p>Permissão inicial: {activity.workspace_binding.initial_mode}
-          {' · '}Executor: {activity.workspace_binding.command_runner === 'docker' ? 'Docker isolado' : 'Host local'}
-          {activity.workspace_binding.organization_id && ' · Organização: ' + activity.workspace_binding.organization_id.slice(0,8)}</p>
-        <p>O caminho da tarefa não pode ser alterado durante a execução.</p>
-      </div>}
       {activity?.error && <p role="alert" className="mt-2 break-words rounded-lg bg-amber-300/[.06] p-2 text-[11px] text-amber-200">{activity.error}</p>}
       <p className="mt-1 text-[10px] text-muted">{last ? 'Último evento: ' + Math.max(0, idle) + ' s atrás' : 'Nenhum evento recebido.'} · Sem atividade não significa necessariamente travamento.</p>
-      {checkpoints.length > 0 && <div className="mt-3 space-y-1 rounded-xl border border-violet-300/15 p-3">
-        <strong className="block text-[11px] text-violet-200">Checkpoint do trabalhador</strong>
+      {(activity?.workspace_binding || checkpoints.length > 0) && <details className="mt-2 rounded-xl border border-white/10 px-3 py-2 text-[10px] leading-5 text-muted">
+        <summary className="cursor-pointer font-semibold text-violet-200">Detalhes técnicos da execução</summary>
+        {activity?.workspace_binding && <div className="mt-2"><p className="break-all font-mono">{activity.workspace_binding.folder}</p><p>Permissão inicial: {activity.workspace_binding.initial_mode} · Executor: {activity.workspace_binding.command_runner === 'docker' ? 'Docker isolado' : 'Host local'}</p></div>}
+        {checkpoints.length > 0 && <div className="mt-2 space-y-1 border-t border-white/10 pt-2">
+        <strong className="block text-[11px] text-violet-200">Checkpoint</strong>
         {checkpoints.map(cp => <div key={cp.step_id} className="text-[11px] leading-5 text-muted">
           <p>{cp.state==='paused_limit' ? 'Pausado e salvo' : cp.state==='blocked' ? 'Interrompido após ação repetida sem sucesso' : cp.state==='completed' ? 'Etapa concluída' : 'Em execução'} · {cp.rounds_total} ciclos · {cp.actions_total} ações · {cp.resumes} retomada(s)</p>
           <p>Última ação: <span className="break-all text-copy">{cp.last_action || 'Ainda não registrada'}</span></p>
@@ -172,15 +178,24 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
           {cp.changed_files?.length > 0 && <p className="break-words">Arquivos alterados: {cp.changed_files.join(', ')}</p>}
           {cp.last_validation && <details><summary className="cursor-pointer text-violet-200">Última validação</summary><pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-[10px]">{cp.last_validation}</pre></details>}
         </div>)}
-      </div>}
+        </div>}</details>}
       {activity?.steps?.length > 0 && !isRunning && <p className="mt-2 text-[10px] text-muted">Etapas: {activity.steps.map(x => x.name + ' (' + (x.status==='paused_limit'?'pausado':x.status) + ')').join(' → ')}</p>}
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={() => setTab('activity')} className={btn + (tab==='activity' ? ' border-violet-400 text-violet-200' : '')}>Atividade e logs</button>
-        <button type="button" onClick={() => setTab('preview')} className={btn + (tab==='preview' ? ' border-violet-400 text-violet-200' : '')}>Prévia ao vivo</button>
+        <button type="button" aria-pressed={tab==='activity'} onClick={() => setTab('activity')} className={btn + (tab==='activity' ? ' border-violet-400 text-violet-200' : '')}>Logs</button>
+        <button type="button" aria-pressed={tab==='preview'} onClick={() => setTab('preview')} className={btn + (tab==='preview' ? ' border-violet-400 text-violet-200' : '')}>Navegador</button>
       </div>
-    </div>
+    </div>}
 
     {tab === 'activity' ? <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+      <section aria-label="Equipe em execução" className="rounded-xl border border-white/10 p-3 text-xs">
+        <h3 className="font-semibold">Trabalhadores e comunicação</h3>
+        <div className="mt-2 space-y-1">{(activity?.steps || []).map(step =>
+          <p key={step.id} className="break-words text-muted">{step.name} · {step.status}</p>)}</div>
+        {(activity?.agent_messages || []).map(message => <details key={message.id} className="mt-2 border-t border-white/10 pt-2">
+          <summary className="cursor-pointer break-words">{message.sender_name} → {message.recipient_name} · {message.message_type} · {message.state === 'delivered' ? 'Recebida' : 'Aguardando leitura'}</summary>
+          <p className="mt-2 whitespace-pre-wrap break-words text-muted">{message.content}</p>
+        </details>)}
+      </section>
       {log.length ? log.map(item => <div key={item.seq} className="rounded-xl border border-white/[.08] bg-white/[.025] p-3">
         <div className="flex items-start justify-between gap-2">
           <span className="break-words text-xs text-copy">{eventLabel(item)}</span>
@@ -192,9 +207,9 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         {item.detail && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-rose-400/[.04] p-2 font-mono text-[10px] text-rose-200">{item.detail}</pre>}
         {item.error && <p className="mt-2 break-words text-[11px] text-rose-200">{item.error}</p>}
       </div>) : <p className="p-4 text-xs text-muted">Os eventos de ferramentas, modelos e validações aparecerão aqui.</p>}
-    </div> : <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-      <p className="text-[11px] leading-5 text-muted">Escolha o aplicativo da pasta autorizada. A prévia inicia um servidor npm dev apenas em 127.0.0.1. Mudanças podem aparecer via atualização automática do framework.</p>
-      {preview.status !== 'running' && <div className="flex flex-wrap gap-2">
+    </div> : <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-0">
+      {preview.status !== 'running' && <p className="p-3 text-[11px] leading-5 text-muted">Escolha o aplicativo da pasta autorizada. A prévia inicia um servidor npm dev apenas em 127.0.0.1.</p>}
+      {preview.status !== 'running' && <div className="flex flex-wrap gap-2 px-3">
         <select value={cwd} onChange={e => setCwd(e.target.value)} aria-label="Aplicativo para prévia"
           className={input + ' min-w-0 flex-1'}>
           {!projects.length && <option value="">Nenhum projeto npm dev encontrado</option>}
@@ -202,25 +217,30 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         </select>
         <button type="button" className={btn} disabled={!projects.length || !!loading} onClick={() => control('start')}>▶ Iniciar prévia</button>
       </div>}
-      {preview.status === 'running' && <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">{preview.cwd || 'raiz'} · {safePreview}</span>
-        <button type="button" onClick={() => setFrameKey(n=>n+1)} className={btn}>↻ Atualizar</button>
-        {safePreview && <a href={safePreview} target="_blank" rel="noopener noreferrer" className={btn}>Abrir janela ↗</a>}
-        <button type="button" disabled={!!loading} onClick={() => control('stop')} className={btn}>Parar prévia</button>
-      </div>}
-      {safePreview ? <iframe key={frameKey} title="Prévia local do aplicativo" src={safePreview}
-        sandbox="allow-scripts allow-forms" referrerPolicy="no-referrer"
-        className="min-h-[330px] w-full flex-1 rounded-xl border border-white/20 bg-white" /> :
+      <form className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-[#17171b] px-3 py-2" onSubmit={event => { event.preventDefault(); setFrameState('loading'); setFrameKey(n => n + 1) }}>
+        <span aria-hidden="true" className="text-xs text-emerald-300">●</span>
+        <input aria-label="Endereço da prévia local" value={requestedPreview} onChange={event => setUrlInput(event.target.value)}
+          placeholder="http://127.0.0.1:porta/" className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-copy outline-none placeholder:text-muted" />
+        <button type="submit" className={btn} title="Atualizar página">↻</button>
+        {safePreview && <a href={safePreview} target="_blank" rel="noopener noreferrer" className={btn} title="Abrir em nova janela">↗</a>}
+      </form>
+      {requestedPreview && !safePreview && <p role="alert" className="px-3 py-2 text-[11px] text-amber-200">Use apenas uma URL local, como http://127.0.0.1:5173/.</p>}
+      {safePreview ? <div className="relative flex min-h-[330px] flex-1 overflow-hidden bg-white">
+        {frameState === 'loading' && <div className="absolute inset-0 z-10 grid place-items-center bg-white text-xs text-slate-600">Carregando a página local…</div>}
+        <iframe key={frameKey} title="Navegador embutido: prévia local do aplicativo" src={safePreview}
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin" referrerPolicy="no-referrer" onLoad={() => setFrameState('loaded')}
+          className="min-h-[330px] w-full flex-1 border-0 bg-white" />
+      </div> :
         <div className="grid min-h-[260px] flex-1 place-items-center rounded-xl border border-dashed border-white/15 text-center text-xs text-muted">Inicie a prévia para visualizar o site aqui.</div>}
     </div>}
 
-    {(active || canContinue) && <form onSubmit={send} className="shrink-0 border-t border-white/10 p-3">
+    {tab !== 'preview' && (active || canContinue) && <form onSubmit={send} className="shrink-0 border-t border-white/10 p-3">
       <label className="block text-xs font-semibold">Conversar durante a execução</label>
       <p className="mt-1 text-[10px] text-muted">{canContinue ? 'A execução não terminou. Confira o motivo e o último resultado acima; corrija arquivos/permissões ou envie um ajuste, depois clique em Continuar execução.' : 'O próximo ciclo do trabalhador receberá seu ajuste. Isso não interrompe a operação já iniciada.'}</p>
       <textarea value={note} onChange={e=>setNote(e.target.value)} maxLength={1800} rows={2}
         placeholder="Ex.: Deixe o título maior e troque a cor do botão..." className={input + ' mt-2 resize-y'}/>
       <button type="submit" disabled={!note.trim() || !!loading} className={btn + ' mt-2 border-violet-400/40'}>Enviar ajuste aos trabalhadores</button>
     </form>}
-    {error && <p role="alert" className="shrink-0 border-t border-rose-300/15 px-4 py-2 text-xs text-rose-200">{error}</p>}
+    {tab !== 'preview' && error && <p role="alert" className="shrink-0 border-t border-rose-300/15 px-4 py-2 text-xs text-rose-200">{error}</p>}
   </aside>
 }

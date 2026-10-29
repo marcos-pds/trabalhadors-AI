@@ -1,0 +1,29 @@
+"""Generation constraints, not permission grants; tools validate every field again."""
+
+ACTION_RESPONSE_SCHEMA = {
+    'type': 'object', 'additionalProperties': False, 'required': ['action'],
+    'properties': {
+        'action': {'type': 'string', 'enum': ['list', 'read', 'mkdir', 'write', 'replace',
+                  'command', 'browser_tool', 'reference_search', 'agent_message', 'agent_message_read', 'finish']},
+        'message_id': {'type': 'string', 'maxLength': 80},
+        'offset': {'type': 'integer', 'minimum': 0, 'maximum': 500000},
+        'path': {'type': 'string', 'maxLength': 300},
+        'content': {'type': 'string', 'maxLength': 32000},
+        'old': {'type': 'string', 'maxLength': 32000},
+        'new': {'type': 'string', 'maxLength': 32000},
+        'expected_sha256': {'anyOf': [{'type': 'null'},
+                            {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}]},
+        'command': {'type': 'string', 'maxLength': 100},
+        'cwd': {'type': 'string', 'maxLength': 300},
+        'package': {'type': 'string', 'maxLength': 160},
+        'tool': {'type': 'string', 'maxLength': 100},
+        'arguments': {'type': 'object'},
+        'query': {'type': 'string', 'maxLength': 500},
+        'message': {'type': 'string', 'maxLength': 4000},
+        'recipient_agent_id': {'type': 'string', 'maxLength': 80},
+        'message_type': {'type': 'string', 'enum': ['task_request', 'result', 'question',
+                         'answer', 'blocker', 'review', 'correction', 'completion']},
+        'artifacts': {'type': 'array', 'items': {'type': 'object'}, 'maxItems': 64},
+        'parent_message_id': {'type': ['string', 'null'], 'maxLength': 80},
+    },
+}

@@ -14,7 +14,10 @@ import hashlib
 
 
 @pytest.fixture
-def workspace(tmp_path):
+def workspace(tmp_path, monkeypatch):
+    # Exercise small segment boundaries independently of production budgets.
+    monkeypatch.setattr('central.agent_autonomy.MAX_ROUNDS', 12)
+    monkeypatch.setattr('central.agent_autonomy.MAX_STALLED_ROUNDS', 20)
     root = tmp_path / 'repo'
     root.mkdir()
     (root / 'hello.py').write_bytes(b"print('old')\n")
@@ -69,6 +72,16 @@ def test_checkpoint_keeps_latest_bounded_corrections_in_order(workspace):
     saved = load_checkpoint(db, 'user', 'run', 'step', str(folder))['transcript']
     assert [m for m in saved if m in notes] == notes[-6:]
     assert saved[-1] == transcript[-1]
+
+
+def test_checkpoint_preserves_end_of_a_long_design_brief(workspace):
+    from central.worker_checkpoint import save_checkpoint
+    db, folder = workspace
+    prompt = 'Design requirements\n' + 'x' * 18000 + '\nMandatory browser tests and final delivery'
+    save_checkpoint(db, 'user', 'run', 'step', str(folder), [{'role':'user','content':prompt}],
+                    changed_files=[], observed_actions=[], validation_failures=0,
+                    rounds_total=1, actions_total=0)
+    assert load_checkpoint(db, 'user', 'run', 'step', str(folder))['transcript'][0]['content'] == prompt
 
 
 class FakeModel:
@@ -248,6 +261,14 @@ def test_no_project_with_real_build_or_python_files_cannot_fake_validation(tmp_p
         json.dumps({'scripts': {'dev': 'vite'}}), encoding='utf-8')
     with pytest.raises(RuntimeError, match='Nenhum build'):
         validation_commands(str(root))
+
+
+def test_frontend_with_build_and_tests_runs_both_after_changes(tmp_path):
+    from central.workspace_tools import validation_commands
+    (tmp_path / 'package.json').write_text(json.dumps({'scripts': {
+        'build':'vite build', 'test':'playwright test'}}), encoding='utf-8')
+    (tmp_path / 'App.tsx').write_text('export default null', encoding='utf-8')
+    assert [item['command'] for item in validation_commands(str(tmp_path), ['App.tsx'])] == ['npm_build','npm_test']
 
 
 

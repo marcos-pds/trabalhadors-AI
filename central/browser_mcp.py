@@ -178,7 +178,7 @@ def worker_instruction(db, user_id, *, required=False):
         instructions += (
             '\nVALIDAÇÃO OBRIGATÓRIA DA TAREFA: depois da última alteração, abra ou '
             'selecione a URL local indicada pelo usuário e execute take_snapshot, '
-            'list_console_messages e lighthouse_audit. Cada ação exige sua aprovação '
+            'list_console_messages e lighthouse_audit para desktop E mobile. Cada ação exige sua aprovação '
             'no chat. Corrija defeitos encontrados e repita as verificações após '
             'qualquer correção. Não finalize se o servidor local não estiver disponível; '
             'explique qual serviço o usuário precisa iniciar.'

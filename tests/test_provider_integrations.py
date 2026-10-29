@@ -24,6 +24,7 @@ def test_provider_stream_request(kind, model, url):
         assert request.headers['Authorization'] == 'Bearer test-key'
         body = json.loads(request.content)
         assert body['model'] == model
+        assert body['max_tokens'] == 8192
         assert body['stream'] is True
         assert body['messages'] == [
             {'role': 'system', 'content': 'Be helpful'},
@@ -43,7 +44,7 @@ def test_provider_stream_request(kind, model, url):
         return client_type(*args, transport=httpx.MockTransport(respond), **kwargs)
 
     async def run():
-        provider = {'kind': kind, 'base_url': DEFAULT_ENDPOINTS[kind]}
+        provider = {'kind': kind, 'base_url': DEFAULT_ENDPOINTS[kind], '_max_tokens':8192}
         with patch('central.providers.httpx.AsyncClient', side_effect=client_factory):
             return ''.join([token async for token in ProviderClient().stream(
                 provider, 'test-key', model, 'Be helpful',

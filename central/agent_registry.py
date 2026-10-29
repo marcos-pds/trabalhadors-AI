@@ -96,8 +96,10 @@ def team_for_task(agents, prompt):
         return next((a for specialty in specialties for a in available
                      if effective_specialty(a) == specialty and a['id'] not in exclude), None)
     result = []
-    for candidates in (('architecture', 'coordination'), ('research',), order,
-                       ('review',)):
+    from .task_contract import requested_text_change
+    stages = (order, ('review',)) if requested_text_change(prompt) else (
+        ('architecture', 'coordination'), ('research',), order, ('review',))
+    for candidates in stages:
         pick = select(candidates, {a['id'] for a in result})
         if pick is not None:
             result.append(pick)

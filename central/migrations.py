@@ -12,6 +12,8 @@ from .knowledge import SCHEMA as KNOWLEDGE_SCHEMA
 from .git_change_plans import SCHEMA as GIT_PLAN_SCHEMA
 from .addon_schema import SCHEMA as ADDON_SCHEMA
 from .token_usage import token_usage_schema
+from .agent_messages import SCHEMA as AGENT_MESSAGE_SCHEMA
+from .codex_bridge import SCHEMA as CODEX_SESSION_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -68,6 +70,27 @@ MIGRATIONS = (
         "project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,"
         "mode TEXT NOT NULL CHECK(mode IN ('run_isolated','project_persistent')),"
         "updated_at TEXT NOT NULL)",
+    )),
+    (15, 'persistent_agent_messages', AGENT_MESSAGE_SCHEMA),
+    (16, 'scoped_codex_step_sessions', CODEX_SESSION_SCHEMA),
+    (17, 'legacy_personal_workspace_tenant_reconciliation', (
+        'CREATE TABLE IF NOT EXISTS workspace_tenant_backfills('
+        'run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,'
+        'user_id TEXT NOT NULL REFERENCES users(id),'
+        'organization_id TEXT NOT NULL REFERENCES organizations(id),'
+        'created_at TEXT NOT NULL)',
+        'INSERT OR IGNORE INTO workspace_tenant_backfills(run_id,user_id,organization_id,created_at) '
+        "SELECT b.run_id,b.user_id,o.id,strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+        'FROM run_workspace_bindings b JOIN runs r ON r.id=b.run_id AND r.user_id=b.user_id '
+        'JOIN organization_runs x ON x.run_id=r.id '
+        'JOIN organizations o ON o.id=x.organization_id AND o.created_by=b.user_id AND o.is_personal=1 '
+        'WHERE b.organization_id IS NULL',
+        'UPDATE run_workspace_bindings SET organization_id=('
+        'SELECT f.organization_id FROM workspace_tenant_backfills f '
+        'WHERE f.run_id=run_workspace_bindings.run_id AND f.user_id=run_workspace_bindings.user_id) '
+        'WHERE organization_id IS NULL AND EXISTS('
+        'SELECT 1 FROM workspace_tenant_backfills f WHERE f.run_id=run_workspace_bindings.run_id '
+        'AND f.user_id=run_workspace_bindings.user_id)',
     )),
 )
 

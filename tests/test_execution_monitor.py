@@ -51,6 +51,10 @@ def test_adjustments_are_persistent_scoped_and_consumed_once(monkeypatch, tmp_pa
         assert activity.status_code == 200
         assert any(e['event'] == 'workspace_feedback_received'
                    for e in activity.json()['events'])
+        DB.event(rid, 'workspace_validation', {'passed': False, 'results': []})
+        validation = next(e for e in client.get('/api/runs/' + rid + '/activity').json()['events']
+                          if e['event'] == 'workspace_validation')
+        assert validation['success'] is False
         assert consume_run_feedback(DB, user, rid) == ['Troque a cor do botão para azul.']
         assert consume_run_feedback(DB, user, rid) == []
         DB.execute("UPDATE runs SET status='paused_limit' WHERE id=?", (rid,))

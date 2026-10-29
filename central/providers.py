@@ -74,13 +74,18 @@ class ProviderClient:
 
     async def stream(self, provider, api_key, model, system, messages):
         kind = provider['kind']
+        if kind == 'codex_cli':
+            from .codex_bridge import stream_response
+            async for token in stream_response(provider, model, system, messages, timeout=max(120, self.timeout)):
+                yield token
+            return
         if kind == 'openai_chatgpt':
             from .chatgpt_plan import stream_response
             async for token in stream_response(api_key, model, system, messages, timeout=self.timeout):
                 yield token
             return
         requested = provider.get('_max_tokens', 1400)
-        max_tokens = max(256, min(4096, int(requested)))
+        max_tokens = max(256, min(8192, int(requested)))
         base = provider['base_url'].rstrip('/')
         input_tokens = output_tokens = None
         output_chars = 0
@@ -139,6 +144,13 @@ class ProviderClient:
             payload = {'model': model, 'messages': [{'role': 'system', 'content': system}] + messages,
                        'stream': True, 'max_tokens': max_tokens,
                        'stream_options': {'include_usage': True}}
+            if kind == 'ollama' and provider.get('_structured_actions'):
+                # Ollama's documented JSON mode applies only to the tool loop;
+                # ordinary conversation remains free-form text.
+                from .action_schema import ACTION_RESPONSE_SCHEMA
+                payload['response_format'] = {'type': 'json_schema', 'json_schema': {
+                    'name': 'workspace_action', 'schema': ACTION_RESPONSE_SCHEMA}}
+                payload['temperature'] = 0
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=12)) as client:
                 async with client.stream('POST', url, json=payload, headers=headers) as response:

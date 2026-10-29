@@ -7,7 +7,7 @@ permission checks, hashes and the restricted command allowlist.
 import json
 from .database import utcnow
 
-MAX_RESUMES = 8
+from .worker_limits import MAX_RESUMES
 MAX_TRANSCRIPT_CHARS = 105000
 
 
@@ -40,10 +40,11 @@ def save_checkpoint(db, user_id, run_id, step_id, folder, transcript, *,
                     last_action='', last_result='', last_validation=''):
     # Save a bounded tail plus original user request. Strip oldest tool exchanges,
     # not the original instructions or the latest read hashes/validation messages.
-    preserved = [dict(role=m.get('role', 'user'), content=str(m.get('content', ''))[:16000])
+    preserved = [dict(role=m.get('role', 'user'), content=str(m.get('content', ''))[:48000])
                  for m in transcript if isinstance(m, dict)]
     def priority(message):
         return message['role'] == 'user' and message['content'].startswith((
+            'MENSAGENS DA EQUIPE',
             'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO',
             'Novos ajustes chegaram antes de concluir.',
         ))

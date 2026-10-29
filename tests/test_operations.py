@@ -24,7 +24,8 @@ def account(client):
 def test_classification_policies_are_explicit_and_never_grant_access():
     code = classify_task('Desenvolva uma landing page React com testes', True)
     assert code['task_type'] == 'code'
-    assert code['policy_version'] == 1
+    assert code['policy_version'] == 2
+    assert code['interpretation_reason']
     assert code['required_checks'] == ['actual_file_change', 'build_or_test_after_change']
     assert code['recommended_review']
     inspect = classify_task('Leia os arquivos do repositório', True)

@@ -71,8 +71,7 @@ def stop_run_commands(run_id):
 
 MAX_WRITE_BYTES = 32000
 MAX_OUTPUT = 9000
-MAX_ACTIONS = 18
-MAX_ROUNDS = 12
+from .worker_limits import MAX_ACTIONS, MAX_ROUNDS
 MAX_VALIDATION_RETRIES = 2
 COMMAND_TIMEOUT = 45
 # Installers can execute package hooks, even when npm --ignore-scripts is set
@@ -534,6 +533,7 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
     emit(run_id, 'workspace_action_result', {
         'step_id': step_id, 'summary': summary,
         'tool': request.get('tool', ''),
+        'browser_arguments': (request.get('arguments', {}) if browser_tool else {}),
         'references': result.get('references', [])[:6],
         'success': result.get('success', 'error' not in result),
         'exit_code': result.get('exit_code'), 'output': str(result.get('output', ''))[-1600:]})
@@ -567,7 +567,7 @@ def validation_commands(folder, changed_files=None):
                 if isinstance(scripts, dict):
                     if 'build' in scripts:
                         candidates.append((directory, 'npm_build'))
-                    elif 'test' in scripts:
+                    if 'test' in scripts:
                         candidates.append((directory, 'npm_test'))
                 if 'build' in scripts or 'test' in scripts:
                     break
@@ -584,7 +584,7 @@ def validation_commands(folder, changed_files=None):
             if isinstance(scripts, dict):
                 if 'build' in scripts:
                     candidates.append((directory, 'npm_build'))
-                elif 'test' in scripts:
+                if 'test' in scripts:
                     candidates.append((directory, 'npm_test'))
 
     commands = []

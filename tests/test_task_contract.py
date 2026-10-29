@@ -7,7 +7,8 @@ from central.task_contract import (
     needs_workspace_tools, delivery_evidence, is_continuation_request,
     resolve_continuation_prompt,
     assert_implementation_delivered, assert_inspection_performed,
-    requires_browser_validation,
+    requires_browser_validation, requires_visual_qa,
+    requested_text_change, verify_requested_text,
 )
 
 
@@ -27,6 +28,53 @@ class FakeEvents:
         return list(self.events)
 
 
+TITLE_REQUEST = ('Transformamos ideias em experiências extraordinárias.\n\n'
+                 'altere esse titulo para, essa pagina foi feita por mim app central')
+
+
+@pytest.mark.parametrize('prompt', [TITLE_REQUEST,
+    'mude o titulo do projeto para, esse e um projeto feito pela central IA',
+    'Troque o texto do botão para "Começar agora"',
+    'Substitua o subtítulo por "Tecnologia para todos"',
+])
+def test_short_copy_edits_are_real_implementation_requests(prompt):
+    from central.run_policy import classify_task
+    assert is_implementation_request(prompt)
+    assert needs_workspace_tools(prompt)
+    assert classify_task(prompt, autonomous=True)['task_type'] == 'code'
+    assert requested_text_change(prompt)
+    assert not requires_visual_qa(prompt)
+
+
+@pytest.mark.parametrize('prompt', [
+    'Explique como alterar o título sem modificar arquivos',
+    'Crie um prompt para alterar o título da página',
+    'Não altere o título, apenas explique o projeto',
+])
+def test_copy_edit_explanations_do_not_authorize_writes(prompt):
+    assert not is_implementation_request(prompt)
+    assert not requested_text_change(prompt)
+
+
+def test_title_change_is_verified_in_saved_heading_not_in_comment_or_css(tmp_path):
+    path = tmp_path / 'App.tsx'
+    path.write_text('<h1>Transformamos ideias em experiências extraordinárias.</h1>', encoding='utf-8')
+    assert requested_text_change(TITLE_REQUEST)['text'] == 'essa pagina foi feita por mim app central'
+    assert not verify_requested_text(str(tmp_path), ['App.tsx'], TITLE_REQUEST)
+    path.write_text('// essa pagina foi feita por mim app central\n<h1>Antigo</h1>', encoding='utf-8')
+    assert not verify_requested_text(str(tmp_path), ['App.tsx'], TITLE_REQUEST)
+    path.write_text('<h1>essa pagina foi feita por mim app central</h1>', encoding='utf-8')
+    assert verify_requested_text(str(tmp_path), ['App.tsx'], TITLE_REQUEST)
+
+
+def test_small_copy_change_routes_directly_to_implementer_and_reviewer():
+    from central.agent_registry import team_for_task
+    agents = [dict(id=role, name=role, specialty=role, instructions='', enabled=True)
+              for role in ('coordination', 'architecture', 'research', 'frontend', 'code', 'review')]
+    chosen = team_for_task(agents, TITLE_REQUEST)
+    assert [a['specialty'] for a in chosen] == ['frontend', 'review']
+
+
 def test_nova_studio_long_implementation_request_is_not_just_a_plan():
     prompt = ('Desenvolva uma landing page premium NOVA STUDIO em React. '
               'Crie componentes, implemente visual moderno e execute os testes.')
@@ -40,6 +88,19 @@ def test_explicit_chrome_devtools_request_requires_live_browser_validation():
               'snapshot, console e Lighthouse.')
     assert requires_browser_validation(prompt)
     assert not requires_browser_validation('Corrija uma função Python e rode pytest.')
+
+
+@pytest.mark.parametrize('prompt', [
+    'Deixe esta landing page premium e atraente',
+    'Corrija o layout quebrado e responsivo da tela de login',
+    'Implemente um dashboard React bonito',
+])
+def test_visual_implementation_requests_browser_qa_without_naming_devtools(prompt):
+    assert requires_visual_qa(prompt)
+
+
+def test_non_visual_backend_change_does_not_require_browser_qa():
+    assert not requires_visual_qa('Corrija o endpoint Python que calcula impostos')
 
 
 @pytest.mark.parametrize('prompt', [
@@ -165,7 +226,11 @@ def test_browser_requested_delivery_requires_snapshot_console_and_lighthouse_aft
     db.add('workspace_action_result', success=True,
            summary={'action': 'browser_tool', 'tool': 'list_console_messages'})
     db.add('workspace_action_result', success=True,
-           summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'})
+           summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'},
+           browser_arguments={'device': 'desktop'})
+    db.add('workspace_action_result', success=True,
+           summary={'action': 'browser_tool', 'tool': 'lighthouse_audit'},
+           browser_arguments={'device': 'mobile'})
     db.add('workspace_validation', passed=True, results=[
         {'command': 'npm_test', 'success': True},
     ])
