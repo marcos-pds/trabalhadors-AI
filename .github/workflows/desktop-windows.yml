@@ -74,13 +74,19 @@ jobs:
         run: |
           $files = @(Get-ChildItem "desktop/dist-installer" -Filter "*.exe" -File)
           if ($files.Count -eq 0) { throw "No Windows installer was generated." }
+          $lines = @()
           foreach ($file in $files) {
-            Write-Host ("Unsigned pilot installer: {0} ({1} bytes)" -f $file.Name, $file.Length)
+            $checksum = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines += ("{0} *{1}" -f $checksum, $file.Name)
+            Write-Host ("Unsigned pilot installer: {0} ({1} bytes), SHA256 {2}" -f $file.Name, $file.Length, $checksum)
           }
+          $lines | Set-Content -Path "desktop/dist-installer/SHA256SUMS.txt" -Encoding ascii
       - name: Save unsigned pilot for controlled VM testing
         uses: actions/upload-artifact@v4
         with:
           name: central-ia-desktop-windows-unsigned
-          path: desktop/dist-installer/*.exe
+          path: |
+            desktop/dist-installer/*.exe
+            desktop/dist-installer/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 3
