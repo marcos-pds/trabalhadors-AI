@@ -258,9 +258,11 @@ def _write_file(root, relative, raw, expected):
 
 def prepare_step(db, user, rid, sid):
     root, config = _scope(db, user, rid)
+    if not config or not config['enabled']:
+        return str(root)
     step, role = _step(db, user, rid, sid, execution=True)
-    if not config or not config['enabled'] or role not in _IMPLEMENTERS:
-        if config and config['enabled'] and role == 'review' and _blocking(db, rid):
+    if role not in _IMPLEMENTERS:
+        if role == 'review' and _blocking(db, rid):
             _fail('Aguarde a integracao dos trabalhadores antes da revisao.')
         return str(root)
     with _locked(root):
@@ -320,9 +322,9 @@ def prepare_step(db, user, rid, sid):
 
 def execution_folder(db, user, rid, sid):
     root, config = _scope(db, user, rid)
-    _, role = _step(db, user, rid, sid, execution=True)
     if not config or not config['enabled']:
         return str(root)
+    _, role = _step(db, user, rid, sid, execution=True)
     if role not in _IMPLEMENTERS:
         if role == 'review' and _blocking(db, rid):
             _fail('Revisao bloqueada ate concluir a integracao.')
@@ -339,6 +341,8 @@ def checkpoint_folder(db, user, rid, sid):
     step = db.one('SELECT * FROM steps WHERE id=? AND run_id=?', (sid, rid))
     if not step:
         _fail('Etapa nao pertence a tarefa.', 404)
+    if not config or not config['enabled']:
+        return str(root)
     agent = db.one('SELECT * FROM agents WHERE id=? AND user_id=?', (step['agent_id'], user)) if step['kind'] == 'agent' else None
     if step['kind'] == 'agent' and not agent:
         _fail('Agente nao pertence a conta.', 404)
@@ -386,8 +390,10 @@ def _summary(row):
 
 def finish_step(db, user, rid, sid):
     root, config = _scope(db, user, rid)
+    if not config or not config['enabled']:
+        return dict(state='shared', status='shared', pending_review=False, changed_files=[])
     _, role = _step(db, user, rid, sid)
-    if not config or not config['enabled'] or role not in _IMPLEMENTERS:
+    if role not in _IMPLEMENTERS:
         return dict(state='shared', status='shared', pending_review=False, changed_files=[])
     with _locked(root):
         row = _session(db, rid, sid)
