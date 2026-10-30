@@ -61,7 +61,7 @@ def test_workspace_service_rejects_accidental_cross_database_use():
         first.close(); second.close()
 
 
-def test_concurrent_approval_decisions_have_only_one_winner(monkeypatch):
+def test_concurrent_approval_decisions_have_only_one_winner(monkeypatch, tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     import threading
     from central import approval_engine as approvals
@@ -71,9 +71,10 @@ def test_concurrent_approval_decisions_have_only_one_winner(monkeypatch):
                ('run', 'alice', 'chat', 'test', 'running', 'auto', '[]', '[]', utcnow(), utcnow()))
     db.execute('INSERT INTO steps(id,run_id,name,deps,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
                ('step', 'run', 'Step', '[]', 'running', utcnow(), utcnow()))
-    token = approvals.issue_approval(db, 'alice', 'run', 'step', 'folder', {'action': 'list'}, {})
-    monkeypatch.setattr(approvals, 'policy', lambda *_: {'mode': 'ask', 'folder': 'folder'})
-    monkeypatch.setattr(approvals, 'enforce_run_scope', lambda *args, **kwargs: 'folder')
+    from central.computer_access import set_policy
+    # Exercise the real scope/approval code. Only stub concurrent SQL requests.
+    set_policy(db, 'alice', 'ask', str(tmp_path))
+    token = approvals.issue_approval(db, 'alice', 'run', 'step', str(tmp_path), {'action': 'list'}, {})
     original = db.execute
     barrier = threading.Barrier(2)
     def execute(query, args=()):

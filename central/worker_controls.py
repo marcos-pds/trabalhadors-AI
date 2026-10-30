@@ -51,7 +51,8 @@ def _transaction(db):
             raise
 
 
-def _scope(db, user, rid, sid=None, *, write=False, organization_id=None):
+def _scope(db, user, rid, sid=None, *, write=False, organization_id=None,
+           allow_legacy_unassigned=False):
     if write:
         run = require_run_write(db, rid, user)
     else:
@@ -68,6 +69,11 @@ def _scope(db, user, rid, sid=None, *, write=False, organization_id=None):
     step = db.one("SELECT * FROM steps WHERE id=? AND run_id=? AND kind='agent'", (sid, rid))
     if not step:
         raise HTTPException(404, 'Trabalhador não encontrado nesta execução.')
+    # Old test/legacy steps can be unassigned. The control boundary cannot
+    # grant any new permission, but an operator must never control a step
+    # without an actual owned worker. Foreign non-null IDs always fail closed.
+    if step['agent_id'] is None and allow_legacy_unassigned:
+        return run, org, step
     agent = db.one('SELECT id FROM agents WHERE id=? AND user_id=?', (step['agent_id'], user))
     if not agent:
         raise HTTPException(404, 'Trabalhador fora do proprietário da execução.')
@@ -121,7 +127,8 @@ def check_control(db, user, rid, sid, *, organization_id=None):
     """
     decision = None
     with _transaction(db):
-        run, org, step = _scope(db, user, rid, sid, write=True, organization_id=organization_id)
+        run, org, step = _scope(db, user, rid, sid, write=True, organization_id=organization_id,
+                                allow_legacy_unassigned=True)
         row = db.one('SELECT * FROM worker_controls WHERE step_id=? AND run_id=? AND user_id=?', (sid, rid, user))
         if row and row['organization_id'] != org:
             raise HTTPException(409, 'O escopo da organização mudou.')

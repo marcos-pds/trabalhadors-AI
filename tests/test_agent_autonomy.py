@@ -175,7 +175,8 @@ def test_preview_start_requires_operator_approval_before_launch(workspace, monke
     set_policy(db, 'user', 'full', str(root))
     launched = []
 
-    async def start(*args):
+    async def start(*args, **kwargs):
+        assert kwargs['step_id'] == 'step'
         launched.append(True)
         return {'success': True, 'output': '{"status":"running","url":"http://127.0.0.1:12345/"}'}
 

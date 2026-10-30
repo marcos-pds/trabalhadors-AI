@@ -769,7 +769,8 @@ class RunOrchestrator:
                         from .worker_collaboration import publish_handoff
                         from .isolated_workspaces import finish_step
                         isolated_result = (await asyncio.to_thread(finish_step, self.db, user, run['id'], sid)
-                                           if run.get('autonomous') else None)
+                                           if run.get('autonomous') and specialty in ('code', 'frontend', 'backend')
+                                           else None)
                         integration_pending = bool(isolated_result and
                                                    isolated_result.get('state') == 'pending_review')
                         handoff_events = []
