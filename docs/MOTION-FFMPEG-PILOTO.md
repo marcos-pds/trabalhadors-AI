@@ -46,6 +46,9 @@ não processa Wan/ComfyUI/Remotion/WhisperX e não integra ainda o agendador.
 - O recurso não foi registrado como ferramenta de IA, rota HTTP ou execução
   automática. Requer confirmação textual de operador no terminal.
 - Somente um job com adaptador ffmpeg, perfis h264 ou pcm_s16le, sem shell.
+- No Windows, so aceita o executavel ffmpeg.exe (nao wrappers .bat/.cmd).
+- Copia da entrada e limitada durante leitura, e alteracoes de origem ate
+  o momento da promocao bloqueiam a publicacao do arquivo de saida.
 - Entradas até 64 MiB, resultados até 128 MiB e timeout máximo de 180 s.
 - Apenas caminhos internos validados e arquivo de saída inexistente.
 - Copia entrada para diretório temporário privado; ffmpeg recebe protocolo
