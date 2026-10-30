@@ -1,14 +1,38 @@
 'use strict'
-const { app, BrowserWindow, dialog, session } = require('electron')
+const { app, BrowserWindow, dialog, session, Menu } = require('electron')
 const { spawn } = require('node:child_process')
 const { createConnection } = require('node:net')
 const fs = require('node:fs')
 const path = require('node:path')
+const { inventory, summary } = require('./dependency_inventory.cjs')
 
 const READY = /^CENTRAL_DESKTOP_READY=(http:\/\/127\.0\.0\.1:(\d{1,5})\/)$/
 let child = null
 let win = null
 let serverOrigin = null
+
+function diagnostics(firstRun = false) {
+  return dialog.showMessageBox({
+    type: 'info', title: 'Central IA — dependências opcionais',
+    message: 'Diagnóstico local de recursos disponíveis',
+    detail: summary(inventory()),
+    buttons: firstRun ? ['Abrir a Central', 'Sair'] : ['Entendido'],
+    defaultId: 0, cancelId: firstRun ? 1 : 0, noLink: true,
+    checkboxLabel: firstRun ? 'Não mostrar automaticamente nas próximas inicializações' : undefined,
+    checkboxChecked: false,
+  })
+}
+
+async function welcomeIfNeeded() {
+  const marker = path.join(app.getPath('userData'), 'desktop-dependencies-reviewed-v1')
+  if (fs.existsSync(marker)) return true
+  const choice = await diagnostics(true)
+  if (choice.response !== 0) return false
+  if (choice.checkboxChecked) {
+    try { fs.writeFileSync(marker, 'v1\n', { flag: 'wx', mode: 0o600 }) } catch (_) {}
+  }
+  return true
+}
 
 function backendSpec() {
   if (app.isPackaged) {
@@ -119,6 +143,12 @@ if (!app.requestSingleInstanceLock()) {
     }
   })
   app.whenReady().then(async () => {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{
+      label: 'Central IA', submenu: [
+        { label: 'Verificar dependências opcionais', click: () => { diagnostics().catch(() => {}) } },
+        { role: 'quit', label: 'Sair' },
+      ],
+    }]))
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false))
     session.defaultSession.webRequest.onBeforeRequest((details, done) => {
       try {
@@ -130,6 +160,7 @@ if (!app.requestSingleInstanceLock()) {
       done({ cancel: true })
     })
     try {
+      if (!await welcomeIfNeeded()) { app.quit(); return }
       showWindow(await startPython())
     } catch (err) {
       dialog.showErrorBox('Central IA Desktop', err.message)
