@@ -1,0 +1,48 @@
+name: Windows desktop installer pilot
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Create developer packaging environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+      - name: Build unsigned desktop package
+        shell: pwsh
+        run: |
+          .\desktop\build_windows.ps1
+      - name: Check installer exists
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "desktop/dist-installer" -Filter "*.exe" -File)
+          if ($files.Count -eq 0) { throw "No Windows installer was generated." }
+          foreach ($file in $files) {
+            Write-Host ("Unsigned pilot installer: {0} ({1} bytes)" -f $file.Name, $file.Length)
+          }
+      - name: Save unsigned pilot for controlled VM testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-ia-desktop-windows-unsigned
+          path: desktop/dist-installer/*.exe
+          if-no-files-found: error
+          retention-days: 3
