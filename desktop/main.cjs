@@ -29,7 +29,10 @@ async function welcomeIfNeeded() {
   const choice = await diagnostics(true)
   if (choice.response !== 0) return false
   if (choice.checkboxChecked) {
-    try { fs.writeFileSync(marker, 'v1\n', { flag: 'wx', mode: 0o600 }) } catch (_) {}
+    try {
+      fs.mkdirSync(path.dirname(marker), { recursive: true, mode: 0o700 })
+      fs.writeFileSync(marker, 'v1\n', { flag: 'wx', mode: 0o600 })
+    } catch (_) {}
   }
   return true
 }
@@ -66,6 +69,12 @@ function startPython() {
     CENTRAL_DEPLOYMENT_MODE: 'local',
     CENTRAL_HOST: '127.0.0.1',
     CENTRAL_JOB_MODE: 'embedded',
+  }
+  // Desktop must not accidentally reuse the Web server encryption key,
+  // registration policy or experimental automation switches.
+  for (const key of ['CENTRAL_SECRET_KEY', 'CENTRAL_PUBLIC_ORIGIN',
+                     'CENTRAL_ALLOW_REGISTRATION', 'CENTRAL_WORKTREE_REVIEWS_ENABLED']) {
+    delete env[key]
   }
   return new Promise((resolve, reject) => {
     let decided = false
