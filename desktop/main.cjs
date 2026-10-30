@@ -123,6 +123,7 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.webRequest.onBeforeRequest((details, done) => {
       try {
         const url = new URL(details.url)
+        if (url.protocol === 'data:' || (url.protocol === 'blob:' && url.origin === serverOrigin)) return done({})
         if (url.protocol === 'http:' && url.origin === serverOrigin &&
             url.hostname === '127.0.0.1') return done({})
       } catch (_) {}
