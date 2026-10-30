@@ -29,14 +29,14 @@ def manifest(profile="h264", output="result.mp4"):
 @pytest.fixture
 def lab(tmp_path, monkeypatch):
     (tmp_path / "clip.mp4").write_bytes(b"fake test source input")
-    monkeypatch.setattr(runner.shutil, "which", lambda name: "/mock/ffmpeg")
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/mock/ffmpeg.exe")
     return tmp_path
 
 
 def test_successful_render_is_operator_only_and_exclusive(lab, monkeypatch):
     seen = []
     def execute(args, **opts):
-        assert args[0] == "/mock/ffmpeg"
+        assert args[0] == "/mock/ffmpeg.exe"
         assert args[1:5] == ["-hide_banner", "-loglevel", "error", "-nostdin"]
         assert opts["shell"] is False
         assert opts["cwd"] != str(lab)
@@ -114,3 +114,14 @@ def test_wav_profile_and_container_signature(lab, monkeypatch):
 def test_invalid_timeout_is_rejected(lab, seconds):
     with pytest.raises(ContractError):
         runner.render_one(manifest(), lab, operator_approved=True, timeout=seconds)
+
+
+def test_source_mutation_during_ffmpeg_refuses_to_publish(lab, monkeypatch):
+    def tamper(args, **opts):
+        (lab / "clip.mp4").write_bytes(b"mutated during encoding")
+        Path(args[-1]).write_bytes(b"\x00\x00\x00\x18ftypisom")
+        return subprocess.CompletedProcess(args, 0)
+    monkeypatch.setattr(runner.subprocess, "run", tamper)
+    with pytest.raises(ContractError, match="input changed"):
+        runner.render_one(manifest(), lab, operator_approved=True)
+    assert not (lab / "result.mp4").exists()
