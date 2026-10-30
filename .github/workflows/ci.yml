@@ -41,6 +41,8 @@ jobs:
         run: npm run build
       - name: Validate optional desktop shell JavaScript
         run: node --check desktop/main.cjs
+      - name: Test desktop read-only dependency diagnostics
+        run: node --test desktop/dependency_inventory.test.cjs
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash
