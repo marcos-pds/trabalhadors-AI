@@ -19,6 +19,7 @@
     "asar": true,
     "files": [
       "main.cjs",
+      "dependency_inventory.cjs",
       "package.json"
     ],
     "extraResources": [
