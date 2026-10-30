@@ -19,7 +19,7 @@ try {
     & node --check (Join-Path $PSScriptRoot "main.cjs")
     if ($LASTEXITCODE -ne 0) { throw "Sintaxe JavaScript invalida." }
     $staticData = (Join-Path $root "static") + ";static"
-    $args = @(
+    $pyiArgs = @(
         "--noconfirm", "--clean", "--onedir",
         "--name", "central-desktop-backend",
         "--paths", $root,
@@ -29,7 +29,7 @@ try {
         "--add-data", $staticData,
         (Join-Path $PSScriptRoot "backend_launcher.py")
     )
-    & $python -m PyInstaller @args
+    & $python -m PyInstaller @pyiArgs
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller falhou." }
     $binary = Join-Path $PSScriptRoot "dist\central-desktop-backend\central-desktop-backend.exe"
     if (-not (Test-Path $binary)) { throw "Backend empacotado ausente." }
