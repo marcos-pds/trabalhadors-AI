@@ -16,6 +16,9 @@ from .agent_messages import SCHEMA as AGENT_MESSAGE_SCHEMA
 from .codex_bridge import SCHEMA as CODEX_SESSION_SCHEMA
 from .dynamic_delegation import SCHEMA as DYNAMIC_STEP_SCHEMA
 from .scoped_worker_reviews import SCHEMA as SCOPED_WORKTREE_REVIEW_SCHEMA
+from .resource_versions import SCHEMA as RESOURCE_VERSION_SCHEMA
+from .worker_controls import SCHEMA as WORKER_CONTROL_SCHEMA
+from .isolated_workspaces import SCHEMA as ISOLATED_WORKSPACE_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -96,6 +99,10 @@ MIGRATIONS = (
     )),
     (18, 'bounded_dynamic_agent_steps', DYNAMIC_STEP_SCHEMA),
     (19, 'scoped_worker_worktree_reviews', SCOPED_WORKTREE_REVIEW_SCHEMA),
+    # Additive only; never modify checksums of previously installed migrations.
+    (20, 'resource_version_history', RESOURCE_VERSION_SCHEMA),
+    (21, 'worker_control_decisions', WORKER_CONTROL_SCHEMA),
+    (22, 'run_step_isolated_workspaces', ISOLATED_WORKSPACE_SCHEMA),
 )
 
 

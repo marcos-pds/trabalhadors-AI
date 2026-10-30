@@ -74,15 +74,20 @@ def _scope(db, user, rid, *, parked=()):
         if org:
             from .organizations import require_org
             require_org(db, org, user, write=True)
+    config = db.one('SELECT * FROM isolated_workspace_runs WHERE run_id=?', (rid,))
     binding = db.one('SELECT * FROM run_workspace_bindings WHERE run_id=?', (rid,))
+    # Legacy non-autonomous actions and pre-isolation runs do not have isolated
+    # state. The existing scope check above remains mandatory; do not require
+    # new isolation bindings for an unconfigured feature.
+    if not config:
+        return Path(folder), None
     from .sandbox_executor import backend
     if (not binding or binding['user_id'] != user or binding['folder'] != folder
             or binding['organization_id'] != current_organization(db, rid)
             or binding['command_runner'] != backend()):
         _fail('Workspace original, organizacao ou executor mudou; operacao bloqueada.')
-    config = db.one('SELECT * FROM isolated_workspace_runs WHERE run_id=?', (rid,))
-    if config and (config['user_id'] != user or config['root'] != folder
-                   or config['organization_id'] != binding['organization_id']):
+    if (config['user_id'] != user or config['root'] != folder
+            or config['organization_id'] != binding['organization_id']):
         _fail('A configuracao de isolamento nao corresponde ao vinculo original.')
     return Path(folder), config
 
