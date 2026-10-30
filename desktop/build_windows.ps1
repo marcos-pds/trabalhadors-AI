@@ -18,6 +18,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Testes do bootstrap falharam." }
     & node --check (Join-Path $PSScriptRoot "main.cjs")
     if ($LASTEXITCODE -ne 0) { throw "Sintaxe JavaScript invalida." }
+    & node --test (Join-Path $PSScriptRoot "dependency_inventory.test.cjs")
+    if ($LASTEXITCODE -ne 0) { throw "Teste de diagnostico de dependencias falhou." }
     $staticData = (Join-Path $root "static") + ";static"
     $pyiArgs = @(
         "--noconfirm", "--clean", "--onedir",
