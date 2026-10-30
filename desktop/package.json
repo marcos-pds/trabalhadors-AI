@@ -1,0 +1,47 @@
+{
+  "name": "central-ia-desktop",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Central de Trabalhadores IA - Windows desktop shell",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack:win": "electron-builder --win dir",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "br.centralia.desktop",
+    "productName": "Central IA",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "dependency_inventory.cjs",
+      "process_lifecycle.cjs",
+      "setup_profiles.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/central-desktop-backend",
+        "to": "backend"
+      }
+    ],
+    "directories": {
+      "output": "dist-installer"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "Central-IA-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true
+    }
+  }
+}

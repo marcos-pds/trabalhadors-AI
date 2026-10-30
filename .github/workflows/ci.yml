@@ -39,6 +39,14 @@ jobs:
         run: python -m compileall -q central
       - name: Build React frontend
         run: npm run build
+      - name: Validate optional desktop shell JavaScript
+        run: node --check desktop/main.cjs
+      - name: Test desktop read-only dependency diagnostics
+        run: node --test desktop/dependency_inventory.test.cjs
+      - name: Test desktop process tree cleanup
+        run: node --test desktop/process_lifecycle.test.cjs
+      - name: Test optional desktop setup profiles
+        run: node --test desktop/setup_profiles.test.cjs
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash

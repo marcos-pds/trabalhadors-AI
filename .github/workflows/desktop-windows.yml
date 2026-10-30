@@ -1,0 +1,92 @@
+name: Windows desktop installer pilot
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Create developer packaging environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+      - name: Build unsigned desktop package
+        shell: pwsh
+        run: |
+          .\desktop\build_windows.ps1
+      - name: Smoke-test frozen Python backend on loopback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $binary = (Resolve-Path "desktop/dist/central-desktop-backend/central-desktop-backend.exe").Path
+          $env:CENTRAL_DATA_DIR = Join-Path $env:RUNNER_TEMP "central-desktop-smoke-data"
+          $env:CENTRAL_DEPLOYMENT_MODE = "local"
+          $out = Join-Path $env:RUNNER_TEMP "central-desktop-smoke-stdout.txt"
+          $err = Join-Path $env:RUNNER_TEMP "central-desktop-smoke-stderr.txt"
+          $proc = Start-Process -FilePath $binary -PassThru -WorkingDirectory (Split-Path $binary) -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            $url = $null
+            for ($i = 0; $i -lt 150; $i++) {
+              if ($proc.HasExited) { throw "Frozen desktop backend stopped before reporting ready." }
+              if (Test-Path $out) {
+                $raw = Get-Content -Raw $out -ErrorAction SilentlyContinue
+                if ($raw -match 'CENTRAL_DESKTOP_READY=(http://127\.0\.0\.1:\d{1,5}/)') {
+                  $url = $Matches[1]
+                  break
+                }
+              }
+              Start-Sleep -Milliseconds 500
+              $proc.Refresh()
+            }
+            if (-not $url) { throw "Frozen backend did not report its bound loopback URL." }
+            $health = Invoke-RestMethod -Uri ($url + "api/health/ready") -TimeoutSec 8
+            if ($health.status -ne "ready" -or $health.database -ne "ready") {
+              throw "Frozen backend did not report database ready."
+            }
+            $html = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 8
+            if ($html.StatusCode -ne 200 -or $html.Content -notmatch "<html") {
+              throw "Bundled React static site did not load."
+            }
+            Write-Host "Frozen backend HTTP health + React successful (ephemeral loopback port)."
+          } finally {
+            & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null
+            Remove-Item Env:CENTRAL_DATA_DIR -ErrorAction SilentlyContinue
+          }
+      - name: Check installer exists
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "desktop/dist-installer" -Filter "*.exe" -File)
+          if ($files.Count -eq 0) { throw "No Windows installer was generated." }
+          $lines = @()
+          foreach ($file in $files) {
+            $checksum = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines += ("{0} *{1}" -f $checksum, $file.Name)
+            Write-Host ("Unsigned pilot installer: {0} ({1} bytes), SHA256 {2}" -f $file.Name, $file.Length, $checksum)
+          }
+          $lines | Set-Content -Path "desktop/dist-installer/SHA256SUMS.txt" -Encoding ascii
+      - name: Save unsigned pilot for controlled VM testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-ia-desktop-windows-unsigned
+          path: |
+            desktop/dist-installer/*.exe
+            desktop/dist-installer/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 3
