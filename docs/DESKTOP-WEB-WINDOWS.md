@@ -25,6 +25,23 @@ ComfyUI/Wan, CUDA e drivers de vídeo. Precisam de instalador/configurador
 posterior, com inspeção de licença, versão, tamanho, origem/hash e autorização.
 Modelos e serviços podem exigir credenciais, assinatura paga ou muito disco.
 
+## Diagnóstico inicial de dependências (leitura somente)
+
+Na primeira abertura, o desktop apresenta um diálogo nativo com o catálogo
+de ferramentas locais. Ele procura apenas nomes de arquivos executáveis
+em pastas absolutas do PATH; **não executa** ferramentas externas, não testa
+credenciais, não instala modelos e não pede privilégios de administrador.
+
+- "Detectado no PATH" não comprova versão, licença, assinatura, compatibilidade
+  com a Central ou disponibilidade de um modelo/servidor.
+- Componentes como Chrome DevTools MCP, ACP, WhisperX, Playwright e ComfyUI
+  são mostrados como **não verificados**, não como instalados.
+- O operador pode abrir a Central sem instalar nada. A caixa "Não mostrar"
+  controla apenas a reapresentação do aviso, e o diagnóstico permanece
+  acessível pelo menu **Central IA → Verificar dependências opcionais**.
+- Um assistente de instalação real, com hashes, origem, licença, espaço,
+  aprovação e rollback, é uma próxima fase; não faz parte deste piloto.
+
 ## Dados e segurança
 
 - Desktop reserva socket na interface 127.0.0.1 com porta dinâmica.
@@ -60,6 +77,7 @@ usuário final não precisará rodar pip/npm para abrir a Central.
 
 - CI de Python+frontend em Windows e Ubuntu; sintaxe da janela Electron.
 - Construir binário PyInstaller em Windows e executar health check local.
+  O CI testa agora GET /api/health/ready e GET / usando o executável empacotado.
 - Gerar instalador NSIS e testar em VM Windows limpa sem Python/Node.
 - Executar Desktop e Web simultaneamente sem conflito de porta/banco.
 - Criar conta, projetos, agentes, testes, prévia, aprovações e persistência.
