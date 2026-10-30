@@ -12,13 +12,13 @@ test('Windows shuts down only the owned backend tree, without shell', async () =
   const child = fake()
   let invocation = null
   const result = await stopOwnedBackend(child, {
-    platform: 'win32',
+    platform: 'win32', systemRoot: 'C:\\Windows',
     execFile(cmd, args, opts, callback) {
       invocation = { cmd, args, opts }
       callback(null)
     },
   })
-  assert.equal(invocation.cmd, 'taskkill.exe')
+  assert.equal(invocation.cmd, 'C:\\Windows\\System32\\taskkill.exe')
   assert.deepEqual(invocation.args, ['/PID', '1234', '/T', '/F'])
   assert.equal(invocation.opts.windowsHide, true)
   assert.equal(result.method, 'process_tree')
@@ -59,7 +59,7 @@ test('POSIX uses child handle rather than operating on a PID', async () => {
 test('synchronous taskkill failure still closes the owned process', async () => {
   const child = fake()
   const report = await stopOwnedBackend(child, {
-    platform: 'win32',
+    platform: 'win32', systemRoot: 'C:\\Windows',
     execFile() { throw new Error('cannot spawn') },
   })
   assert.equal(child.killed, true)
