@@ -21,6 +21,7 @@
       "main.cjs",
       "dependency_inventory.cjs",
       "process_lifecycle.cjs",
+      "setup_profiles.cjs",
       "package.json"
     ],
     "extraResources": [

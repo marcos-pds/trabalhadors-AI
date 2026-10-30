@@ -6,12 +6,32 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { inventory, summary } = require('./dependency_inventory.cjs')
 const { isRunning, stopOwnedBackend } = require('./process_lifecycle.cjs')
+const { PROFILES, planFor, planText } = require('./setup_profiles.cjs')
 
 const READY = /^CENTRAL_DESKTOP_READY=(http:\/\/127\.0\.0\.1:(\d{1,5})\/)$/
 let child = null
 let win = null
 let serverOrigin = null
 let closingBackend = false
+
+async function chooseSetupProfile() {
+  const choice = await dialog.showMessageBox({
+    type: 'question', title: 'Central IA — componentes opcionais',
+    message: 'Qual perfil você deseja preparar?',
+    detail: 'Esta versão apenas mostra o plano; não instala nada automaticamente.',
+    buttons: [...PROFILES.map(p => p.title), 'Cancelar'],
+    defaultId: 0, cancelId: PROFILES.length, noLink: true,
+  })
+  if (choice.response >= PROFILES.length) return
+  const profile = PROFILES[choice.response]
+  const plan = planFor(profile.id, inventory())
+  await dialog.showMessageBox({
+    type: 'info', title: 'Plano: ' + plan.title,
+    message: 'Componentes opcionais do perfil',
+    detail: planText(plan),
+    buttons: ['Entendido'], noLink: true,
+  })
+}
 
 function diagnostics(firstRun = false) {
   return dialog.showMessageBox({
@@ -157,6 +177,7 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(Menu.buildFromTemplate([{
       label: 'Central IA', submenu: [
         { label: 'Verificar dependências opcionais', click: () => { diagnostics().catch(() => {}) } },
+        { label: 'Planejar componentes para instalação', click: () => { chooseSetupProfile().catch(() => {}) } },
         { role: 'quit', label: 'Sair' },
       ],
     }]))

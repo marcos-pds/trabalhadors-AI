@@ -22,6 +22,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Teste de diagnostico de dependencias falhou." }
     & node --test (Join-Path $PSScriptRoot "process_lifecycle.test.cjs")
     if ($LASTEXITCODE -ne 0) { throw "Teste de encerramento do processo falhou." }
+    & node --test (Join-Path $PSScriptRoot "setup_profiles.test.cjs")
+    if ($LASTEXITCODE -ne 0) { throw "Teste de perfis opcionais falhou." }
     $staticData = (Join-Path $root "static") + ";static"
     $pyiArgs = @(
         "--noconfirm", "--clean", "--onedir",

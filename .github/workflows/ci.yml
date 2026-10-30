@@ -45,6 +45,8 @@ jobs:
         run: node --test desktop/dependency_inventory.test.cjs
       - name: Test desktop process tree cleanup
         run: node --test desktop/process_lifecycle.test.cjs
+      - name: Test optional desktop setup profiles
+        run: node --test desktop/setup_profiles.test.cjs
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash

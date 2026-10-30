@@ -39,6 +39,10 @@ credenciais, não instala modelos e não pede privilégios de administrador.
 - O operador pode abrir a Central sem instalar nada. A caixa "Não mostrar"
   controla apenas a reapresentação do aviso, e o diagnóstico permanece
   acessível pelo menu **Central IA → Verificar dependências opcionais**.
+- O menu **Planejar componentes para instalação** mostra quatro perfis:
+  Essencial, IA local, QA de navegador e AI Motion Studio. Cada plano
+  distingue componentes encontrados dos não verificados, mas não executa
+  comandos nem downloads.
 - Um assistente de instalação real, com hashes, origem, licença, espaço,
   aprovação e rollback, é uma próxima fase; não faz parte deste piloto.
 
