@@ -5,11 +5,13 @@ const { createConnection } = require('node:net')
 const fs = require('node:fs')
 const path = require('node:path')
 const { inventory, summary } = require('./dependency_inventory.cjs')
+const { isRunning, stopOwnedBackend } = require('./process_lifecycle.cjs')
 
 const READY = /^CENTRAL_DESKTOP_READY=(http:\/\/127\.0\.0\.1:(\d{1,5})\/)$/
 let child = null
 let win = null
 let serverOrigin = null
+let closingBackend = false
 
 function diagnostics(firstRun = false) {
   return dialog.showMessageBox({
@@ -176,8 +178,12 @@ if (!app.requestSingleInstanceLock()) {
       app.quit()
     }
   })
-  app.on('before-quit', () => {
-    if (child && !child.killed) child.kill()
+  app.on('before-quit', event => {
+    if (closingBackend || !isRunning(child)) return
+    // Preserve database integrity and stop the whole PyInstaller tree.
+    event.preventDefault()
+    closingBackend = true
+    stopOwnedBackend(child).finally(() => app.quit())
   })
   app.on('window-all-closed', () => app.quit())
 }
