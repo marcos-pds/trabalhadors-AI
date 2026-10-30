@@ -1,0 +1,3 @@
+# Optional PostgreSQL queue prototype only. Do not install in the local SQLite MVP.
+psycopg[binary]>=3.2,<4
+pytest>=8,<10

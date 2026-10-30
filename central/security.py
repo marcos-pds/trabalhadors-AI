@@ -28,6 +28,12 @@ class Security:
     def __init__(self, db, data_dir):
         self.db = db
         keyfile = Path(data_dir) / 'secret.key'
+        configured_key = os.environ.get('CENTRAL_SECRET_KEY')
+        if configured_key:
+            self.fernet = Fernet(configured_key.encode())
+            if keyfile.exists() and keyfile.read_bytes().strip() != configured_key.encode():
+                raise ValueError('CENTRAL_SECRET_KEY differs from existing secret.key; migrate keys explicitly')
+            return
         if not keyfile.exists():
             try:
                 with keyfile.open('xb') as f:
@@ -80,4 +86,13 @@ def require_owned(db, table, obj_id, user_id):
     obj = db.one(f'SELECT * FROM {table} WHERE id=? AND user_id=?', (obj_id, user_id))
     if not obj:
         raise HTTPException(404, 'Registro não encontrado.')
+    if table == 'projects':
+        from .organizations import require_project
+        return require_project(db,obj_id,user_id)
+    if table == 'conversations':
+        from .organizations import require_conversation_scope
+        return require_conversation_scope(db,obj,user_id)
+    if table == 'runs':
+        from .organizations import require_run_scope
+        return require_run_scope(db,obj,user_id)
     return obj

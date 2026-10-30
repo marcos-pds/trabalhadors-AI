@@ -29,6 +29,7 @@ venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/.pytest-*/
 .mypy_cache/
 
 # VS Code e IDEs
@@ -47,3 +48,12 @@ dist/
 build/
 /static/build/
 /data/
+
+.central-npm-cache/
+
+.central-python/
+.central-pip-cache/
+.central-wheels/
+
+# Git worktrees locais de trabalhadores (nunca empacotar no ZIP)
+/.central-worker-worktrees/

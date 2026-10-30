@@ -1,0 +1,139 @@
+name: Central IA checks
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+        node-version: ["22"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Install frontend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check Python syntax
+        run: python -m compileall -q central
+      - name: Build React frontend
+        run: npm run build
+      - name: Run regression and autonomy tests
+        id: pytests
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q > pytest-output.txt 2>&1
+          rc=$?
+          cat pytest-output.txt
+          if [ "$rc" -ne 0 ]; then
+            summary=$(grep -E '^(FAILED|ERROR) ' pytest-output.txt | head -n 2 | cut -c1-130 | paste -sd ';' -)
+            if [ -z "$summary" ]; then summary='pytest failed: consult workflow logs'; fi
+            printf 'failures=%s\n' "$summary" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
+      - name: Record failed test names on commit
+        if: failure() && steps.pytests.outputs.failures != ''
+        uses: actions/github-script@v7
+        env:
+          TEST_FAILURES: ${{ steps.pytests.outputs.failures }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'failure',
+              context: 'pytest/${{ matrix.os }}',
+              description: (process.env.TEST_FAILURES || 'pytest failed').slice(0, 140)
+            })
+      - name: Test frontend streams and resource import controls
+        run: npm test
+      - name: Use Node 24 for the native URLPattern compatibility check
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify Chrome DevTools URL allowlist with real URLPattern
+        run: python -m pytest tests/test_browser_mcp.py -k navigation_patterns_construct_in_node -q
+
+
+  docker-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Build isolated executor and dependency proxy
+        run: |
+          docker version
+          docker build -f sandbox/Dockerfile -t central-ai-executor:py311-node22 sandbox
+          docker build -f sandbox/Dockerfile.egress -t central-ai-egress:py311-v1 sandbox
+      - name: Validate real Docker network, packages and preview
+        env:
+          CENTRAL_DOCKER_INTEGRATION: "1"
+        run: python -m pytest tests/test_docker_integration.py -v --tb=short
+
+
+  postgres-prototype:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: central_test
+          POSTGRES_PASSWORD: central_test_password
+          POSTGRES_DB: central_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U central_test -d central_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install optional PostgreSQL and Redis test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-postgres.txt -r requirements-redis.txt
+      - name: Test PostgreSQL queue and Redis hints against real services
+        env:
+          CENTRAL_PG_TEST_DSN: postgresql://central_test:central_test_password@127.0.0.1:5432/central_test
+          CENTRAL_REDIS_TEST_URL: redis://127.0.0.1:6379/0
+        run: python -m pytest tests/test_postgres_queue.py tests/test_redis_signals.py tests/test_postgres_staging.py -v --tb=short
