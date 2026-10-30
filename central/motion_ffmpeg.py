@@ -62,6 +62,9 @@ def render_one(manifest, project_root, *, operator_approved=False, timeout=120):
     plan = plan_jobs(payload, root)
     if not executable or len(plan) != 1 or plan[0].status != "planned":
         raise ContractError("ffmpeg not available; no process was started")
+    # subprocess(shell=False) may still launch .cmd/.bat via cmd.exe on Windows.
+    if os.name == "nt" and Path(executable).suffix.casefold() != ".exe":
+        raise ContractError("trusted ffmpeg.exe required on Windows")
     profile = job["params"]["profile"]
     suffix = ".mp4" if profile == "h264" else ".wav"
     if target.suffix.lower() != suffix:
@@ -72,7 +75,15 @@ def render_one(manifest, project_root, *, operator_approved=False, timeout=120):
         stage = work / ("rendered" + suffix)
         # No symlink/hardlink is copied, only bytes, with a bounded input size.
         with source.open("rb") as inp, copied.open("xb") as out:
-            shutil.copyfileobj(inp, out, 65536)
+            total = 0
+            while True:
+                chunk = inp.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_INPUT_BYTES:
+                    raise ContractError("input grew beyond pilot limits")
+                out.write(chunk)
         if copied.stat().st_size != size or _digest(source) != _digest(copied):
             raise ContractError("input changed during preparation")
         command = [
@@ -105,6 +116,8 @@ def render_one(manifest, project_root, *, operator_approved=False, timeout=120):
             raise ContractError("render is not a WAV container")
         # Refuse changed destination and linked ancestor at the commit boundary.
         scoped_path(root, artifacts[job["outputs"][0]]["path"], output=True)
+        if _digest(source) != _digest(copied):
+            raise ContractError("input changed during rendering")
         try:
             os.link(stage, target)  # Atomic no-clobber, same project filesystem.
         except OSError as exc:
@@ -113,6 +126,6 @@ def render_one(manifest, project_root, *, operator_approved=False, timeout=120):
             "status": "rendered", "adapter": "ffmpeg", "job_id": job["id"],
             "output": artifacts[job["outputs"][0]]["path"],
             "bytes": output_size, "sha256": _digest(target),
-            "operator_approved": True, "source_unchanged": _digest(source) == _digest(copied),
+            "operator_approved": True, "source_unchanged": True,
             "rendering_verified": "container_signature_only_not_visual_qa",
         }
