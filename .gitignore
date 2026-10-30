@@ -63,4 +63,3 @@ build/
 /desktop/dist-installer/
 /desktop/.pyinstaller-build/
 /desktop/*.spec
-/desktop/package-lock.json
