@@ -122,3 +122,36 @@ def test_foreign_run_and_wrong_folder_are_rejected(tmp_path):
             evaluate(db, "owner", "run", other, independent())
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("address", [
+    "https://127.0.0.1:8000/", "http://remote.example:8000/",
+    "http://127.0.0.1:8000/secret", "http://127.0.0.1:8000/?foo=1",
+    "http://test:secret@localhost:8000/", "file:///etc/passwd",
+    "http://localhost/", "http://127.0.0.2:8000"
+])
+def test_independent_verifier_rejects_non_loopback_targets(address):
+    from examples.verify_fullstack_acceptance import local_url
+    with pytest.raises(AcceptanceError):
+        local_url(address)
+
+
+def test_independent_verifier_accepts_loopback_targets():
+    from examples.verify_fullstack_acceptance import local_url
+    assert local_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000/"
+    assert local_url("http://[::1]:8000/") == "http://[::1]:8000/"
+
+
+def test_read_only_evidence_database_cannot_write(tmp_path):
+    import sqlite3
+    from examples.verify_fullstack_acceptance import ReadOnlyDatabase
+    db, root = fixture(tmp_path)
+    path = tmp_path / "db.sqlite3"
+    db.close()
+    reader = ReadOnlyDatabase(path)
+    try:
+        assert reader.one("SELECT id FROM runs WHERE id='run'")["id"] == "run"
+        with pytest.raises(sqlite3.OperationalError):
+            reader.conn.execute("DELETE FROM runs")
+    finally:
+        reader.close()
