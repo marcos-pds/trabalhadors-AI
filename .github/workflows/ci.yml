@@ -43,6 +43,8 @@ jobs:
         run: node --check desktop/main.cjs
       - name: Test desktop read-only dependency diagnostics
         run: node --test desktop/dependency_inventory.test.cjs
+      - name: Test desktop process tree cleanup
+        run: node --test desktop/process_lifecycle.test.cjs
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash
