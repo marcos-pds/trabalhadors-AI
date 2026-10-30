@@ -4,6 +4,7 @@
 // On Windows, killing the PyInstaller parent alone can leave a worker/child
 // process holding the database and port. taskkill /T targets that process tree.
 const { execFile } = require('node:child_process')
+const path = require('node:path')
 
 function isRunning(proc) {
   return !!proc && Number.isSafeInteger(proc.pid) && proc.pid > 0 &&
@@ -19,6 +20,13 @@ function stopOwnedBackend(proc, options = {}) {
     return Promise.resolve({ attempted: true, method: 'signal' })
   }
   const pid = proc.pid
+  const systemRoot = options.systemRoot || process.env.SystemRoot || process.env.WINDIR
+  // Never resolve taskkill via the user PATH (possible executable hijacking).
+  if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
+    try { proc.kill() } catch (_) {}
+    return Promise.resolve({ attempted: true, method: 'fallback_process_handle' })
+  }
+  const taskkill = path.win32.join(systemRoot, 'System32', 'taskkill.exe')
   return new Promise(resolve => {
     let settled = false
     const done = (method) => {
@@ -27,7 +35,7 @@ function stopOwnedBackend(proc, options = {}) {
       resolve({ attempted: true, method })
     }
     try {
-      exec('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      exec(taskkill, ['/PID', String(pid), '/T', '/F'], {
         windowsHide: true, timeout: 6000,
       }, (error) => {
         if (error) {
