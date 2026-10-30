@@ -18,6 +18,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Testes do bootstrap falharam." }
     & node --check (Join-Path $PSScriptRoot "main.cjs")
     if ($LASTEXITCODE -ne 0) { throw "Sintaxe JavaScript invalida." }
+    $staticData = (Join-Path $root "static") + ";static"
     $args = @(
         "--noconfirm", "--clean", "--onedir",
         "--name", "central-desktop-backend",
@@ -25,7 +26,7 @@ try {
         "--distpath", (Join-Path $PSScriptRoot "dist"),
         "--workpath", (Join-Path $PSScriptRoot ".pyinstaller-build"),
         "--specpath", $PSScriptRoot,
-        "--add-data", (Join-Path $root "static") + ";static",
+        "--add-data", $staticData,
         (Join-Path $PSScriptRoot "backend_launcher.py")
     )
     & $python -m PyInstaller @args
