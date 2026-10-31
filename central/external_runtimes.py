@@ -309,12 +309,30 @@ class _Process:
 
 @contextmanager
 def _connection(command, deadline, cancel_event):
-    with tempfile.TemporaryDirectory(prefix='central-runtime-') as home:
+    directory = tempfile.TemporaryDirectory(prefix='central-runtime-')
+    try:
+        home = directory.name
         process = _Process(command, deadline, cancel_event, home)
         try:
             yield process
         finally:
             process.close()
+    finally:
+        # Windows can signal process termination before releasing its cwd's
+        # directory handles. A sharing violation here used to replace the ACP
+        # output_limit diagnosis with generic "unavailable". Retry only these
+        # transient Windows errors, after process/pipe cleanup, and stay bounded.
+        cleanup_deadline = time.monotonic() + 1
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except OSError as exc:
+                if os.name != 'nt' or getattr(exc, 'winerror', None) not in (5, 32, 33):
+                    raise
+                if time.monotonic() >= cleanup_deadline:
+                    raise RuntimeBlocked('cleanup_failed') from None
+                time.sleep(.025)
 
 
 def _read_version(process, pattern):
@@ -409,7 +427,8 @@ def probe(runtime, timeout=5.0, cancel_event=None):
 
     ACP transport_ready proves only initialize, never auth, tool safety or model
     access. CLI unsupported_version reports parsed version but no certification.
-    Timeout <=60s covers all IO; cleanup adds up to two bounded worker waits.
+    Timeout <=60s covers all IO; cleanup adds up to two bounded worker waits
+    and up to 1s of retries for transient Windows directory sharing errors.
     """
     name = runtime if isinstance(runtime, str) and runtime in _REGISTRY else 'unknown'
     result = {'runtime': name, 'present': False, 'version': None,

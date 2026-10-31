@@ -176,6 +176,79 @@ def test_non_mutating_followup_is_not_treated_as_implementation_continuation(pro
     assert not is_continuation_request(prompt)
 
 
+@pytest.fixture
+def short_request_history(tmp_path):
+    from central.database import Database, utcnow
+    db = Database(tmp_path / 'short-requests.sqlite')
+    now = utcnow()
+    db.execute('INSERT INTO users VALUES(?,?,?,?)', ('u', 'u@example.test', 'hash', now))
+    for chat in ('empty', 'mixed', 'buttons', 'other'):
+        db.execute('INSERT INTO conversations VALUES(?,?,?,?,?,?)',
+                   (chat, 'u', chat, None, now, now))
+    for rid, chat, prompt in (
+        ('site', 'mixed', 'Crie um site LOJA-ALFA.'),
+        ('api', 'mixed', 'Crie uma API ESTOQUE-BETA.'),
+        ('buttons', 'buttons', 'Crie uma tela com dois botões, comprar e cancelar.'),
+        ('foreign-api', 'other', 'Crie uma API FORA-DA-CONVERSA.'),
+    ):
+        db.execute('INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,'
+                   'created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                   (rid, 'u', chat, prompt, 'completed', 'team', '[]', '[]', now, now))
+    yield db
+    db.close()
+
+
+@pytest.mark.parametrize('prompt', ['arrume isso', 'faça igual', 'deixe isso azul', 'qual deles?'])
+def test_missing_reference_requires_clarification_without_edit_routing(short_request_history, prompt):
+    resolved = resolve_continuation_prompt(short_request_history, 'empty', prompt)
+    assert 'esclarecimento' in resolved
+    assert not is_implementation_request(resolved)
+    assert 'LOJA-ALFA' not in resolved and 'ESTOQUE-BETA' not in resolved
+
+
+@pytest.mark.parametrize('prompt', ['deixe maior', 'arrume isso', 'deixe igual'])
+def test_multiple_ui_targets_block_edit_until_clarified(short_request_history, prompt):
+    resolved = resolve_continuation_prompt(short_request_history, 'buttons', prompt)
+    assert 'esclarecimento' in resolved
+    assert 'Não altere arquivos' in resolved
+    assert not is_implementation_request(resolved)
+
+
+def test_explicit_named_continuation_selects_unique_brief_in_same_chat(short_request_history):
+    resolved = resolve_continuation_prompt(short_request_history, 'mixed', 'continue a API ESTOQUE-BETA')
+    assert 'Crie uma API ESTOQUE-BETA.' in resolved
+    assert 'LOJA-ALFA' not in resolved and 'FORA-DA-CONVERSA' not in resolved
+    assert is_implementation_request(resolved)
+
+
+@pytest.mark.parametrize('name', ['INEXISTENTE', 'FORA-DA-CONVERSA', 'BETA'])
+def test_named_continuation_never_guesses_or_crosses_conversations(short_request_history, name):
+    resolved = resolve_continuation_prompt(short_request_history, 'mixed', 'continue a API ' + name)
+    assert 'esclarecimento' in resolved
+    assert not is_implementation_request(resolved)
+    assert 'Pedido original que define o escopo' not in resolved
+
+
+def test_duplicate_named_targets_require_clarification_instead_of_recency(short_request_history):
+    from central.database import utcnow
+    now = utcnow()
+    short_request_history.execute(
+        'INSERT INTO runs(id,user_id,conversation_id,prompt,status,mode,agent_ids,plan,created_at,updated_at) '
+        'VALUES(?,?,?,?,?,?,?,?,?,?)',
+        ('api-conflict', 'u', 'mixed', 'Crie uma API ESTOQUE-BETA para outro banco.',
+         'completed', 'team', '[]', '[]', now, now))
+    # Distinct briefs with the same name must not be silently selected.
+    resolved = resolve_continuation_prompt(short_request_history, 'mixed', 'continue a API ESTOQUE-BETA')
+    assert 'esclarecimento' in resolved
+    assert not is_implementation_request(resolved)
+
+
+def test_read_only_named_followup_never_inherits_implementation(short_request_history):
+    prompt = 'continue a API ESTOQUE-BETA sem alterar arquivos'
+    assert resolve_continuation_prompt(short_request_history, 'mixed', prompt) == prompt
+    assert not is_implementation_request(prompt)
+
+
 def test_build_without_actual_edits_fails_evidence():
     db = FakeEvents()
     db.add('workspace_validation', passed=True, results=[])

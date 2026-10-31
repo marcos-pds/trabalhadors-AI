@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import GitIntegrationsPanel from './GitIntegrationsPanel'
+import MotionStudioPanel from './MotionStudioPanel'
 
 const status = {
   run_created: 'Tarefa iniciada',
@@ -54,6 +55,7 @@ export default function OperationalOverview({ api }) {
         {updated ? ' · ' + updated.toLocaleTimeString('pt-BR') : ''}
       </p>
     </div>
+    <MotionStudioPanel api={api} />
     {error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
     {!info ? <p className="py-5 text-xs text-muted">Carregando métricas…</p> : <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">

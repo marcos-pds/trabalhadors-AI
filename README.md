@@ -8,6 +8,8 @@
 
 **Versão 0.2.0 - MVP funcional, local e extensível.**
 
+Consulte a [auditoria das 11 etapas de autonomia](docs/ETAPAS-AUTONOMIA-20261031.md) para distinguir recursos implementados, ensaios reais e homologações pendentes.
+
 A área **Skills e integrações** importa Skills como contexto selecionado de agentes. VSIX são inspecionados e podem ser instalados/desinstalados no VS Code local após confirmação separada. O Chrome DevTools MCP oficial pode ser ativado separadamente; ferramentas de navegador são restritas a páginas locais e exigem aprovação por chamada. Consulte [RESOURCES.md](RESOURCES.md) para formatos, confirmações, limites e permissões.
 
 Para testar a importação de Skills, instalação VSIX e os limites atuais do MCP, siga o [guia de testes](docs/GUIA-TESTE-SKILLS-VSIX-MCP.md) e use a [Skill de exemplo](examples/skills/revisao-python-segura/SKILL.md).

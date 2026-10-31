@@ -4,7 +4,7 @@ import json
 import pytest
 
 from central import semantic_memory
-from central.context_evaluation import DEFAULT_CORPUS, evaluate, seed_fixture
+from central.context_evaluation import DEFAULT_CORPUS, evaluate, main, seed_fixture
 from central.database import Database, utcnow
 from central.memory import build_memory, matching_project_messages
 from central.task_contract import delivery_evidence
@@ -33,6 +33,7 @@ def test_versioned_portuguese_corpus_uses_actual_resolver(db, case):
     changes = db.conn.total_changes
     report = evaluate(db, [case])
     assert report['failed'] == 0, report['results']
+    assert report['success'] is True
     assert report['total'] == report['passed'] == 1
     assert report['live_inference'] is False
     assert report['benchmark_complete'] is False
@@ -46,6 +47,62 @@ def test_harness_fails_incorrect_expectations_and_is_repeatable(db):
     assert first['failed'] == 1
     assert len(first['results'][0]['errors']) == 2
     assert first['results'][0]['actual']['source_run_ids'] == []
+
+
+def test_full_corpus_reports_actual_results_and_gap_metadata_never_waives_failure(db):
+    report = evaluate(db, CORPUS['cases'])
+    assert report['status'] == 'passed' and report['success'] is True
+    assert report['failed'] == 0
+    assert report['total'] == sum(category['total'] for category in report['categories'].values())
+    assert report['passed'] == sum(category['passed'] for category in report['categories'].values())
+    assert report['pass_rate_percent'] == round(100 * report['passed'] / report['total'], 2)
+    # Metadata must never change whether the expectations passed.
+    bad = dict(CORPUS['cases'][0], expect={'expanded': True}, known_gap='Not a waiver')
+    assert evaluate(db, [bad])['failed'] == 1
+
+
+def test_category_percentages_are_case_weighted_and_count_failures(db):
+    good = dict(CORPUS['cases'][0], id='good', category='create')
+    bad = dict(good, id='bad', expect={'expanded': True})
+    other = dict(good, id='other', category='change')
+    report = evaluate(db, [good, bad, other])
+    assert report['pass_rate_percent'] == 66.67
+    assert report['categories'] == {
+        'create': {'total': 2, 'passed': 1, 'failed': 1, 'pass_rate_percent': 50.0},
+        'change': {'total': 1, 'passed': 1, 'failed': 0, 'pass_rate_percent': 100.0},
+    }
+    assert [case['category'] for case in report['results']] == ['create', 'create', 'change']
+
+
+def test_empty_evaluation_is_not_success_or_one_hundred_percent(db):
+    report = evaluate(db, [])
+    assert report['total'] == report['passed'] == report['failed'] == 0
+    assert report['status'] == 'empty' and report['success'] is False
+    assert report['evaluation_errors'] == ['empty_corpus']
+    assert report['pass_rate_percent'] is None
+    assert report['categories'] == {} and report['results'] == []
+    assert report['live_inference'] is False and report['benchmark_complete'] is False
+
+
+@pytest.mark.parametrize('cases_key,exit_code', [('empty', 1), ('failing', 1), ('passing', 0), ('corpus', 0)])
+def test_cli_exit_code_respects_empty_and_failing_reports(tmp_path, capsys, cases_key, exit_code):
+    cases = {'empty': [], 'corpus': CORPUS['cases'], 'passing': [CORPUS['cases'][0]],
+             'failing': [dict(CORPUS['cases'][0], expect={'expanded': True})]}[cases_key]
+    path = tmp_path / 'corpus.json'
+    path.write_text(json.dumps(dict(CORPUS, cases=cases)), encoding='utf-8')
+    assert main(['--corpus', str(path)]) == exit_code
+    report = json.loads(capsys.readouterr().out)
+    assert report['success'] is (exit_code == 0)
+    assert report['live_inference'] is False and report['benchmark_complete'] is False
+
+
+def test_uncategorized_compatibility_and_invalid_categories(db):
+    case = dict(CORPUS['cases'][0])
+    case.pop('category')
+    assert evaluate(db, [case])['categories']['uncategorized']['total'] == 1
+    for invalid in ('', ' ', None, []):
+        with pytest.raises(ValueError, match='Invalid category'):
+            evaluate(db, [dict(case, category=invalid)])
 
 
 def test_fixture_seeding_refuses_existing_database_and_corpus_is_broad(db):

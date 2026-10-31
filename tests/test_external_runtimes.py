@@ -240,6 +240,68 @@ def test_bounded_acp_failures_and_cleanup(launch, mode, status):
     assert 'SECRET' not in json.dumps(result)
 
 
+def test_blocked_write_cleanup_stress(launch):
+    launch('blocked_write')
+    for attempt in range(10):
+        result = runtimes.probe('acp', timeout=3)
+        assert result['status'] == 'output_limit', (attempt, result)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows directory sharing semantics')
+@pytest.mark.parametrize('mode,status', [('blocked_write', 'output_limit'),
+                                         ('normal', 'transport_ready')])
+def test_cleanup_retries_real_directory_sharing_violation(launch, monkeypatch, mode, status):
+    """Hold a real child cwd until the first cleanup attempt.
+
+    This deterministically recreates a terminating child's transient cwd lock;
+    no process, pipe, or filesystem exception is fabricated.
+    """
+    original = runtimes.tempfile.TemporaryDirectory
+    original_popen = subprocess.Popen
+    attempts, sharing_errors, directories, lockers = [], [], [], []
+
+    def release():
+        for child in lockers:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=3)
+            child.stdout.close()
+
+    class LockedDirectory(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            directories.append(self.name)
+            child = original_popen([sys.executable, '-u', '-c',
+                                    "import time; print('ready', flush=True); time.sleep(30)"],
+                                   cwd=self.name, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+            lockers.append(child)
+            assert child.stdout.readline() == b'ready\r\n'
+
+        def cleanup(self):
+            attempts.append(self.name)
+            try:
+                super().cleanup()
+            except PermissionError as exc:
+                sharing_errors.append(exc.winerror)
+                release()
+                raise
+
+    monkeypatch.setattr(runtimes.tempfile, 'TemporaryDirectory', LockedDirectory)
+    processes, _ = launch(mode)
+    try:
+        result = runtimes.probe('acp', timeout=3)
+        assert result['status'] == status
+        assert sharing_errors and set(sharing_errors) <= {5, 32, 33}
+        assert len(attempts) >= 2
+        assert all(not Path(path).exists() for path in directories)
+        assert all(child.poll() is not None and child.stdin.closed and child.stdout.closed
+                   for child in processes)
+    finally:
+        release()
+
+
 @pytest.mark.parametrize('mode,status', [
     ('version_bad', 'invalid_version'), ('version_huge', 'invalid_version'),
     ('version_exit', 'version_failed')])
