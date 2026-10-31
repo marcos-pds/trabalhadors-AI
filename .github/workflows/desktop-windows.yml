@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "desktop/**"
+      - "central/**"
+      - "frontend/**"
+      - "requirements.txt"
+      - "package-lock.json"
       - ".github/workflows/desktop-windows.yml"
   workflow_dispatch:
 
@@ -18,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.15"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -40,7 +44,7 @@ jobs:
           $env:CENTRAL_DEPLOYMENT_MODE = "local"
           $out = Join-Path $env:RUNNER_TEMP "central-desktop-smoke-stdout.txt"
           $err = Join-Path $env:RUNNER_TEMP "central-desktop-smoke-stderr.txt"
-          $proc = Start-Process -FilePath $binary -PassThru -WorkingDirectory (Split-Path $binary) -RedirectStandardOutput $out -RedirectStandardError $err
+          $proc = Start-Process -FilePath $binary -PassThru -WindowStyle Hidden -WorkingDirectory (Split-Path $binary) -RedirectStandardOutput $out -RedirectStandardError $err
           try {
             $url = $null
             for ($i = 0; $i -lt 150; $i++) {
@@ -88,5 +92,7 @@ jobs:
           path: |
             desktop/dist-installer/*.exe
             desktop/dist-installer/SHA256SUMS.txt
+            desktop/test-results/packaged.json
+            desktop/test-results/desktop-packaged.png
           if-no-files-found: error
           retention-days: 3

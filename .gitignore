@@ -61,5 +61,7 @@ build/
 # Artefatos da distribuicao desktop
 /desktop/dist/
 /desktop/dist-installer/
+/desktop/test-results/
+/desktop/dist-signed/
 /desktop/.pyinstaller-build/
 /desktop/*.spec

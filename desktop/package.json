@@ -1,15 +1,19 @@
 {
   "name": "central-ia-desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Central de Trabalhadores IA - Windows desktop shell",
+  "author": "Marcos Paulo",
   "main": "main.cjs",
   "scripts": {
+    "test": "node --test *.test.cjs",
+    "smoke:ui": "node smoke_ui.cjs",
     "start": "electron .",
     "pack:win": "electron-builder --win dir",
     "dist:win": "electron-builder --win nsis"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "electron": "45.1.0",
     "electron-builder": "26.18.0"
   },
@@ -22,6 +26,8 @@
       "dependency_inventory.cjs",
       "process_lifecycle.cjs",
       "setup_profiles.cjs",
+      "security_policy.cjs",
+      "assets/icon.png",
       "package.json"
     ],
     "extraResources": [
@@ -30,17 +36,30 @@
         "to": "backend"
       }
     ],
+    "extraFiles": [
+      {
+        "from": "../AUTORIA.md",
+        "to": "AUTORIA.md"
+      },
+      {
+        "from": "LEIA-ME.txt",
+        "to": "LEIA-ME.txt"
+      }
+    ],
     "directories": {
       "output": "dist-installer"
     },
     "win": {
       "target": "nsis",
+      "icon": "assets/icon.ico",
+      "signExecutable": false,
       "artifactName": "Central-IA-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true
     }
   }

@@ -15,6 +15,7 @@ const COMPONENTS = Object.freeze([
   { id: 'docker', label: 'Docker CLI', files: ['docker.exe'], category: 'isolation' },
   { id: 'ffmpeg', label: 'FFmpeg', files: ['ffmpeg.exe'], category: 'motion' },
   { id: 'node', label: 'Node.js', files: ['node.exe'], category: 'dev' },
+  { id: 'python', label: 'Python para projetos gerados', files: ['python.exe', 'python3.exe'], category: 'dev' },
 ])
 const OPTIONAL_UNVERIFIED = Object.freeze([
   { id: 'models', label: 'Modelos de IA locais', category: 'ai' },

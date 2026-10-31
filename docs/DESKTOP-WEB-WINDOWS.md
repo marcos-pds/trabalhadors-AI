@@ -7,9 +7,13 @@ A versão Desktop reaproveita o MESMO frontend React e o MESMO backend FastAPI;
 Electron apresenta a interface em uma janela e inicia um executável Python
 empacotado com PyInstaller. Duas versões sem duplicar a lógica de negócio.
 
-**Estado: MVP de empacotamento, não instalador final homologado.**
-Ainda faltam ensaio de binário em Windows limpo, assinatura, prova de
-atualização/rollback e distribuição oficial. Este primeiro alvo é Windows x64.
+**Estado: aplicativo Windows x64 empacotado e instalador local gerado.**
+Entrega mais recente: [desktop 0.2.1 e validacao](DESKTOP-0.2.1-VALIDACAO.md).
+Backend congelado e interface Electron foram exercitados no Windows real,
+incluindo conta, projeto, prévia, persistência e encerramento.
+Consulte [a validação de 31/10/2026](DESKTOP-VALIDACAO-20261031.md).
+Assinatura digital, homologação em VM limpa e atualização automática assinada
+continuam fora desta entrega local.
 
 ## O que entra no pacote (sem baixar na instalação)
 
@@ -52,9 +56,13 @@ credenciais, não instala modelos e não pede privilégios de administrador.
 - Web continua usando a porta configurável 8765.
 - Banco de dados desktop fica no diretório de dados do Electron por usuário,
   isolado do banco da versão web. Nenhuma migração automática de dados web.
+- Pasta padrão: `%APPDATA%\Central IA Desktop\data`. Um operador pode definir
+  `CENTRAL_DESKTOP_USER_DATA` com uma pasta local absoluta específica para modo
+  portátil; links, junções, raiz de unidade e pasta pessoal inteira são recusados.
 - Não há desabilitação de login, nem concessão automática de acesso ao PC.
-- Janela usa contextIsolation, sandbox, sem Node no renderer; popups,
-  permissões, navegação e requisições fora da origem local são bloqueados.
+- Janela usa contextIsolation, sandbox e nenhum Node no renderer. A prévia
+  autorizada pelo backend pode carregar em iframe sem receber os cookies ou
+  credenciais da Central; outras portas locais e origens são bloqueadas.
 - Um serviço local ainda pode ser atacado por software instalado no mesmo
   computador; a autorização do backend permanece essencial.
 - O instalador não executa downloads de IA automaticamente.
@@ -69,9 +77,9 @@ credenciais, não instala modelos e não pede privilégios de administrador.
 
     .\desktop\build_windows.ps1
 
-4. A saída, se a construção for aprovada, ficará na pasta
-   desktop/dist-installer. Esta versão não é assinada, portanto não
-   publique nem distribua como instalador confiável.
+4. A saída fica em `desktop/dist-installer`, com instalador, aplicativo
+   `win-unpacked` e `SHA256SUMS.txt`. O build falha se o backend ou a aceitação
+   real da interface empacotada falhar. Este instalador não tem assinatura digital.
 
 Este script de build instala ferramentas de desenvolvimento e
 empacotamento na máquina do programador. O instalador entregue ao

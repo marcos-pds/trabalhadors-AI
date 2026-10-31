@@ -1,0 +1,21 @@
+CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.1
+Criador: Marcos Paulo (@marcos-pds)
+
+Instale usando Central-IA-Setup-0.2.1.exe e abra Central IA pelo menu Iniciar.
+A interface e o servidor Python acompanham o aplicativo. Nao e necessario
+instalar Python ou Node para abrir a Central.
+
+No primeiro acesso, crie sua conta local e configure um provedor de IA.
+Codex, Ollama, Node, Git e ferramentas de projetos sao componentes opcionais,
+conforme o tipo de tarefa. Nenhum modelo ou servico pago e instalado sozinho.
+
+Dados: %APPDATA%\Central IA Desktop\data
+A versao web usa seus proprios dados e continua independente da desktop.
+Feche a Central antes de copiar a pasta de dados para backup; preserve tambem
+secret.key, necessaria para ler as credenciais criptografadas.
+
+A desinstalacao preserva os dados do usuario. Este pacote local nao possui
+assinatura digital nem atualizacao automatica. Nao foi homologado em VM limpa.
+
+Repositorio: https://github.com/marcos-pds/trabalhadors-AI
+Consulte AUTORIA.md, LICENSE.electron.txt e LICENSES.chromium.html no pacote.

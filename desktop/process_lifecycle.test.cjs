@@ -65,3 +65,37 @@ test('synchronous taskkill failure still closes the owned process', async () => 
   assert.equal(child.killed, true)
   assert.equal(report.method, 'fallback_process_handle')
 })
+
+test('concurrent shutdown reuses a single taskkill operation', async () => {
+  const child = fake()
+  let callback
+  let calls = 0
+  const options = { platform: 'win32', systemRoot: 'C:\\Windows', execFile(_cmd, _args, _opts, cb) {
+    calls++; callback = cb
+  } }
+  const first = stopOwnedBackend(child, options)
+  const second = stopOwnedBackend(child, options)
+  assert.equal(first, second)
+  assert.equal(calls, 1)
+  callback(null)
+  await first
+})
+
+test('UNC taskkill source is refused; only owned handle fallback is used', async () => {
+  const child = fake()
+  let calls = 0
+  const result = await stopOwnedBackend(child, { platform: 'win32', systemRoot: '\\\\server\\share',
+    execFile() { calls++ } })
+  assert.equal(calls, 0)
+  assert.equal(child.killed, true)
+  assert.equal(result.method, 'fallback_process_handle')
+})
+
+test('POSIX shutdown waits for exit and removes its listener', async () => {
+  const { EventEmitter } = require('node:events')
+  const child = Object.assign(new EventEmitter(), fake())
+  child.kill = signal => { queueMicrotask(() => { child.signalCode = signal; child.emit('exit') }) }
+  const report = await stopOwnedBackend(child, { platform: 'linux', waitMs: 20 })
+  assert.equal(report.stopped, true)
+  assert.equal(child.listenerCount('exit'), 0)
+})

@@ -236,6 +236,45 @@ def preview(folder, request):
     raise HTTPException(422, 'Ação desconhecida. Use list, read, mkdir, write, replace ou command.')
 
 
+def _usable_project_interpreter(candidate):
+    """The bundled desktop executable is an app, never a Python interpreter."""
+    try:
+        return (candidate.is_absolute() and candidate.is_file() and
+                os.access(candidate, os.X_OK) and
+                not candidate.samefile(sys.executable))
+    except OSError:
+        return False
+
+
+def _external_project_python():
+    # Only explicit absolute PATH directories; never the current directory or
+    # a shell/batch launcher. In particular do not fall back to sys.executable.
+    names = ('python.exe', 'python3.exe') if os.name == 'nt' else ('python3', 'python')
+    for directory in os.get_exec_path():
+        directory = Path(directory.strip('"'))
+        if not directory.is_absolute():
+            continue
+        for name in names:
+            candidate = directory / name
+            if _usable_project_interpreter(candidate):
+                return str(candidate.resolve())
+    raise HTTPException(
+        422, 'Python para projetos não encontrado. O aplicativo Central não exige Python externo; '
+        'para compilar/testar projetos Python ou criar .venv, instale Python e adicione-o ao PATH, '
+        'ou use uma .venv válida na pasta autorizada.')
+
+
+def _frozen_project_python(root, local_python):
+    if local_python.is_file():
+        for part in (local_python.parent.parent, local_python.parent, local_python):
+            if part.is_symlink() or (hasattr(part, 'is_junction') and part.is_junction()):
+                raise HTTPException(422, 'A .venv deve estar dentro da pasta autorizada, sem links ou junções.')
+        if not local_python.resolve().is_relative_to(root) or not _usable_project_interpreter(local_python):
+            raise HTTPException(422, 'O Python da .venv não é um interpretador de projeto válido.')
+        return str(local_python)
+    return _external_project_python()
+
+
 def command_spec(folder, request):
     code = request.get('command')
     if code not in COMMAND_LABELS:
@@ -251,8 +290,20 @@ def command_spec(folder, request):
     # another environment outside the granted workspace.
     if code in ('pip_requirements', 'pip_package') and not docker_mode and not local_python.is_file():
         raise HTTPException(422, 'Crie uma .venv dentro desta pasta antes de instalar pacotes Python.')
-    python_bin = ('python3' if docker_mode else
-                  str(local_python) if local_python.is_file() else sys.executable)
+    python_bin = venv_python = None
+    if code in ('python_test', 'python_compile', 'pip_requirements', 'pip_package', 'venv_create'):
+        if code == 'venv_create' and (root / '.venv').exists():
+            raise HTTPException(409, 'O ambiente virtual .venv já existe nesta pasta.')
+        if docker_mode:
+            python_bin = venv_python = 'python3'
+        elif getattr(sys, 'frozen', False):
+            if code == 'venv_create':
+                venv_python = _external_project_python()
+            else:
+                python_bin = _frozen_project_python(root, local_python)
+        else:
+            python_bin = str(local_python) if local_python.is_file() else sys.executable
+            venv_python = sys.executable
     if code.startswith('npm_') and not npm:
         raise HTTPException(422, 'npm não encontrado no PATH do Windows.')
     if code.startswith('git_') and not git:
@@ -264,7 +315,7 @@ def command_spec(folder, request):
         'python_test': [python_bin, '-m', 'pytest', '-q'],
         'python_compile': [python_bin, '-m', 'compileall', '-q', '.'],
         'pip_requirements': [python_bin, '-m', 'pip', 'install', '-r', 'requirements.txt'],
-        'venv_create': [sys.executable, '-m', 'venv', '.venv'],
+        'venv_create': [venv_python, '-m', 'venv', '.venv'],
         'git_status': [git, '-c', 'core.fsmonitor=false', 'status', '--short'],
         'git_diff': [git, '-c', 'core.fsmonitor=false', 'diff', '--no-ext-diff', '--no-textconv'],
         'git_log': [git, '-c', 'core.fsmonitor=false', 'log', '--no-show-signature', '--oneline', '-20'],
@@ -280,8 +331,6 @@ def command_spec(folder, request):
         argv = [python_bin, '-m', 'pip', 'install', package]
     else:
         argv = commands[code]
-    if code == 'venv_create' and (root / '.venv').exists():
-        raise HTTPException(409, 'O ambiente virtual .venv já existe nesta pasta.')
     if code in ('npm_build', 'npm_test', 'npm_ci', 'npm_install') and not (root / 'package.json').is_file():
         raise HTTPException(422, 'package.json não encontrado neste diretório.')
     if code == 'pip_requirements' and not (root / 'requirements.txt').is_file():

@@ -3,8 +3,8 @@
 // them. A detected executable is NOT proof of a usable installation.
 const PROFILES = Object.freeze([
   { id: 'essential', title: 'Essencial / desenvolvimento',
-    description: 'Git, VS Code e Node para projetos gerados pela Central.',
-    components: ['git', 'vscode', 'node'] },
+    description: 'Git, VS Code, Node e Python para projetos gerados pela Central.',
+    components: ['git', 'vscode', 'node', 'python'] },
   { id: 'local_ai', title: 'IA local',
     description: 'Ollama, um ou mais modelos aprovados e Codex opcional.',
     components: ['ollama', 'models', 'codex'] },
