@@ -22,6 +22,22 @@ selecao e do fallback. As configuracoes de provedores da producao nao mudam.
 O brief deste ensaio e detalhado e vem do protocolo de aceitacao. Ele nao e
 evidencia de criacao full-stack a partir de poucas palavras.
 
+Estado ao encerrar esta rodada: tres segmentos limitados a 600, 180 e 90 segundos,
+com checkpoints preservados. A arquitetura concluiu; o backend acumulou 70 ciclos,
+50 acoes e duas retomadas. Frontend e revisao continuam pendentes. Nenhuma
+promocao foi aprovada, nenhuma delegacao foi persistida e o gate do journal
+retornou `passed=false`. Nao foram executados HTTP/Playwright independentes
+porque o aplicativo integrado ainda nao estava disponivel. O banco do ensaio
+confirmou zero provedores Codex e zero credenciais de API persistidas.
+Evidencias locais: `latest.json`, `journal-acceptance.json` e journal SQLite
+no diretorio do laboratorio. Nao ha worker deste ensaio deixado em execucao.
+
+As APIs registraram HTTP 429, HTTP 413 e rejeicoes HTTP 400, alem de respostas
+que nao cumpriram o protocolo ou nao produziram progresso. Os erros foram
+preservados. A recuperacao de contexto 413 foi validada em testes controlados;
+nao houve evento de compactacao real no ultimo segmento, portanto nao se afirma
+que ela resolveu o bloqueio real neste ensaio.
+
 ## Correcoes implementadas
 
 - `Engine.finish_promoted_step` reconcilia uma promocao ja aprovada, confirma
