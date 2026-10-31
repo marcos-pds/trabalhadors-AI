@@ -852,6 +852,82 @@ class RunOrchestrator:
         self.db.execute("UPDATE steps SET status='failed',error=?,updated_at=? WHERE id=?",('; '.join(failures)[:400],utcnow(),sid))
         raise RuntimeError('Não foi possível concluir ' + agent['name'] + ': ' + '; '.join(failures)[:220])
 
+    def finish_promoted_step(self, run_id, step_id, *, user_id=None):
+        """Reconcile an approved filesystem promotion; never perform approval.
+
+        The receipt, completed status and dependency mail commit together. A
+        receipt permits replay after later workers legitimately edit the root;
+        an unreconciled promotion must still match its approved root hashes.
+        """
+        from pathlib import Path
+        from fastapi import HTTPException
+        from .isolated_workspaces import status, promotion_applied, _locked
+        from .worker_collaboration import publish_handoff
+
+        run = self.db.one('SELECT * FROM runs WHERE id=?', (run_id,))
+        if not run or (user_id is not None and run['user_id'] != user_id):
+            raise HTTPException(404, 'Execucao nao encontrada para esta conta.')
+        user = run['user_id']
+        # Recheck the current grant, immutable binding and organization before
+        # touching even the repository lock. This does not bind a new folder.
+        scope = status(self.db, user, run_id)
+        if not scope['enabled']:
+            raise HTTPException(409, 'Execucao nao usa isolamento por trabalhador.')
+        events = []
+        changed = False
+        with _locked(Path(scope['root'])), self.db.lock:
+            self.db.conn.execute('BEGIN IMMEDIATE')
+            try:
+                run = self.db.one('SELECT * FROM runs WHERE id=? AND user_id=?', (run_id, user))
+                status(self.db, user, run_id)  # authorization may have changed
+                step = self.db.one('SELECT * FROM steps WHERE id=? AND run_id=?', (step_id, run_id))
+                agent = (self.db.one('SELECT * FROM agents WHERE id=? AND user_id=?',
+                                    (step['agent_id'], user)) if step else None)
+                session = self.db.one('SELECT state FROM isolated_workspace_steps '
+                                      'WHERE run_id=? AND step_id=? AND user_id=?', (run_id, step_id, user))
+                if (not run or not run['autonomous'] or not step or step['kind'] != 'agent'
+                        or not agent or effective_specialty(agent) not in ('code', 'frontend', 'backend')
+                        or not session or session['state'] != 'approved'):
+                    raise HTTPException(409, 'Etapa nao possui promocao aprovada desta conta e execucao.')
+                receipts = self.db.all("SELECT payload FROM events WHERE run_id=? "
+                                       "AND event='isolated_step_reconciled'", (run_id,))
+                receipt = False
+                for row in receipts:
+                    try:
+                        payload = json.loads(row['payload'])
+                    except (TypeError, ValueError):
+                        continue
+                    if (isinstance(payload, dict) and payload.get('step_id') == step_id
+                            and payload.get('user_id') == user):
+                        receipt = True
+                if step['status'] == 'completed' and receipt:
+                    if run['status'] not in ('awaiting_integration', 'queued', 'running', 'completed'):
+                        raise HTTPException(409, 'Execucao interrompida; reconciliacao bloqueada.')
+                else:
+                    active = self.running.get(run_id)
+                    if (run['status'] != 'awaiting_integration' or step['status'] != 'awaiting_integration'
+                            or (active is not None and not active.done())):
+                        raise HTTPException(409, 'Aguarde o encerramento da etapa pendente de integracao.')
+                    if not promotion_applied(self.db, user, run_id, step_id):
+                        raise HTTPException(409, 'Arquivos principais nao correspondem a promocao aprovada.')
+                    if not isinstance(step['output'], str) or not step['output'].strip():
+                        raise HTTPException(409, 'Resultado persistido do trabalhador esta ausente.')
+                    self.db.execute("UPDATE steps SET status='completed',error=NULL,updated_at=? "
+                                    "WHERE id=? AND run_id=? AND status='awaiting_integration'",
+                                    (utcnow(), step_id, run_id))
+                    publish_handoff(self.db, run, step, step['output'], lambda *args: events.append(args))
+                    self.db.event(run_id, 'isolated_step_reconciled', {'step_id': step_id, 'user_id': user})
+                    changed = True
+                self.db.conn.execute('COMMIT')
+            except BaseException:
+                self.db.conn.execute('ROLLBACK')
+                raise
+        for event in events:
+            self.emit(*event)
+        if changed:
+            self.emit(run_id, 'step_status', {'id': step_id, 'name': step['name'], 'status': 'completed'})
+        return {'success': True, 'step_id': step_id, 'completed': True, 'changed': changed}
+
     def resume_run(self, run_id):
         from .workspace_tools import reset_run_commands
         from .computer_access import policy
@@ -860,6 +936,12 @@ class RunOrchestrator:
             raise ValueError('Somente tarefas pausadas, falhas ou canceladas podem ser retomadas.')
         if self.running.get(run_id) and not self.running[run_id].done():
             raise ValueError('A tarefa anterior ainda está encerrando. Tente novamente após a parada.')
+        if run['status'] == 'awaiting_integration':
+            # Recover a crash after promotion but before handoff/requeue without
+            # replaying a consumed approval or re-running the implementer.
+            for step in self.db.all("SELECT id FROM steps WHERE run_id=? AND status='awaiting_integration'",
+                                    (run_id,)):
+                self.finish_promoted_step(run_id, step['id'], user_id=run['user_id'])
         incomplete = self.db.one(
             "SELECT COUNT(*) AS n FROM steps WHERE run_id=? AND status!='completed'",
             (run_id,))['n']
@@ -881,7 +963,9 @@ class RunOrchestrator:
             if any(item['folder'] != checkpoint_folder(self.db, run['user_id'], run_id, item['step_id'])
                    for item in checkpoints):
                 raise ValueError('A pasta autorizada mudou. Restaure a pasta original para continuar.')
-        if any(item['resumes'] >= MAX_RESUMES for item in checkpoints):
+        if any(item['resumes'] >= MAX_RESUMES and self.db.one(
+                'SELECT status FROM steps WHERE id=? AND run_id=?',
+                (item['step_id'], run_id))['status'] != 'completed' for item in checkpoints):
             raise ValueError('Limite de continuações alcançado. Inicie nova tarefa com escopo menor.')
         for item in checkpoints:
             if self.db.one("SELECT status FROM steps WHERE id=? AND run_id=?",
