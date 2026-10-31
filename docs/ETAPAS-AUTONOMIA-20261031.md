@@ -37,6 +37,9 @@ Os ensaios anteriores continuam registrados, inclusive falhas e intervencoes.
 
 ## Ordem para concluir a homologacao
 
+Continuacao sem Codex: [laboratorio TaskLab com APIs configuradas](TASKLAB-APIS-20261031.md),
+incluindo correcao de reconciliacao de worktrees e evidencias reais parciais.
+
 1. Configurar os provedores e ferramentas reais autorizados no laboratorio,
    sem usar banco, credenciais ou projetos de producao.
 2. Executar pedidos curtos com modelos reais e medir acerto, esclarecimento,

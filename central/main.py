@@ -1320,10 +1320,17 @@ async def promote_isolated_worker(rid: str, sid: str, data: WorktreeApproveIn,
                                   request: Request, user=Depends(current_user)):
     require_csrf(request)
     local_only(request)
+    run = require_run_write(DB, rid, user['id'])
+    active = ENGINE.running.get(rid)
+    if run['status'] != 'awaiting_integration' or (active is not None and not active.done()):
+        raise HTTPException(409, 'Aguarde a execucao encerrar e ficar pendente de integracao.')
     from .isolated_workspaces import approve
     result = await asyncio.to_thread(approve, DB, user['id'], rid, sid, data.confirmation)
-    ENGINE.finish_promoted_step(rid, sid)
-    ENGINE.resume_run(rid)
+    ENGINE.finish_promoted_step(rid, sid, user_id=user['id'])
+    try:
+        ENGINE.resume_run(rid)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     ops_audit(DB, user['id'], 'isolated_worker_promoted', 'step', sid)
     return result
 
