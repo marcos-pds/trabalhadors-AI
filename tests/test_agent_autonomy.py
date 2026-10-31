@@ -621,3 +621,9 @@ def test_programming_agent_cannot_finish_from_generic_prose_without_edits(worksp
     assert checkpoint['rounds_total'] == 2
     assert checkpoint['last_action'] == 'finish_sem_alteracoes'
     assert 'repetiu a finalização' in checkpoint['last_result']
+
+
+def test_flat_python_tests_are_executed_instead_of_only_compiled(tmp_path):
+    (tmp_path / 'app.py').write_text('value = 1\n')
+    (tmp_path / 'test_app.py').write_text('def test_value(): assert False\n')
+    assert {'action': 'command', 'command': 'python_test'} in validation_commands(str(tmp_path))

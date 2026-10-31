@@ -628,6 +628,8 @@ def add_provider(data:ProviderIn,user=Depends(current_user)):
 @app.put('/api/providers/{pid}')
 def update_provider(pid:str,data:ProviderIn,user=Depends(current_user)):
     previous = require_owned(DB,'providers',pid,user['id'])
+    if previous['kind'] in ('claude_cli', 'gemini_cli', 'opencode_cli', 'acp'):
+        raise HTTPException(422, 'Gerencie esta conexao no painel de runtimes externos.')
     if previous['kind'] == 'codex_cli':
         raise HTTPException(422, 'Gerencie o Codex pelo painel de runtime local.')
     if previous.get('chatgpt_connection_id'):
@@ -661,6 +663,9 @@ def provider_attempts(pid: str, user=Depends(current_user)):
 @app.post('/api/providers/{pid}/test')
 async def test_provider(pid:str,request:Request,user=Depends(current_user)):
     p = require_owned(DB,'providers',pid,user['id'])
+    if p['kind'] in ('claude_cli', 'gemini_cli', 'opencode_cli', 'acp'):
+        require_csrf(request)
+        local_only(request)
     if p['kind'] == 'codex_cli':
         require_csrf(request)
         local_only(request)
@@ -1637,6 +1642,83 @@ def probe_external_runtime(runtime: str, request: Request, user=Depends(current_
     local_only(request)
     from .external_runtimes import probe
     return probe(runtime)
+
+
+@app.get('/api/runtimes/execution')
+def external_execution_inventory(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .runtime_execution import inventory
+    return inventory()
+
+
+class ExternalRuntimeConnectIn(BaseModel):
+    model: str = Field(min_length=1, max_length=120, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]*$')
+    api_key: str = Field(default='', max_length=16384)
+    source_provider_id: str | None = Field(default=None, max_length=80)
+    create_worker: bool = True
+
+
+@app.post('/api/runtimes/external/{runtime}/connect')
+def connect_external_runtime(runtime: str, data: ExternalRuntimeConnectIn,
+                             request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') != 'local':
+        raise HTTPException(403, 'Runtimes locais nao estao disponiveis no modo servidor.')
+    from .runtime_execution import KINDS, verify
+    from .external_runtimes import RuntimeBlocked
+    kind = next((kind for kind, name in KINDS.items() if name == runtime), None)
+    if kind is None:
+        raise HTTPException(422, 'Runtime nao suportado.')
+    if runtime == 'opencode' and data.model.split('/')[0] not in ('groq', 'google', 'anthropic', 'openai', 'openrouter'):
+        raise HTTPException(422, 'Informe o modelo com prefixo do provedor OpenCode suportado.')
+    if data.source_provider_id and data.api_key:
+        raise HTTPException(422, 'Selecione uma conexao existente ou informe uma chave.')
+    key = data.api_key
+    if data.source_provider_id:
+        source = require_owned(DB, 'providers', data.source_provider_id, user['id'])
+        expected = {'claude': {'anthropic'}, 'gemini': {'gemini'}, 'acp': {'gemini'},
+                    'opencode': {'groq', 'gemini', 'anthropic', 'openai', 'openrouter'}}[runtime]
+        if source['kind'] not in expected or not source['enabled']:
+            raise HTTPException(422, 'A conexao de origem nao corresponde ao runtime.')
+        if runtime == 'opencode':
+            prefix = 'google' if source['kind'] == 'gemini' else source['kind']
+            if not data.model.startswith(prefix + '/'):
+                raise HTTPException(422, 'O modelo OpenCode deve usar o prefixo do provedor de origem.')
+        key = SEC.decrypt(source['api_key_enc'])
+    if not key or any(ord(char) < 32 for char in key):
+        raise HTTPException(422, 'Informe uma chave API valida para este runtime.')
+    try:
+        version = verify(runtime)
+    except RuntimeBlocked as exc:
+        raise HTTPException(409, 'Runtime local indisponivel: ' + str(exc)) from None
+    worker = reviewer = None
+    with DB.lock, DB.conn:
+        DB.conn.execute('BEGIN IMMEDIATE')
+        provider = DB.one('SELECT id FROM providers WHERE user_id=? AND kind=? AND model=?',
+                          (user['id'], kind, data.model))
+        pid = provider['id'] if provider else uid()
+        if provider:
+            DB.execute('UPDATE providers SET api_key_enc=?,enabled=1,last_error=NULL WHERE id=?', (SEC.encrypt(key), pid))
+        else:
+            DB.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,api_key_enc,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                       (pid, user['id'], runtime + ' CLI', kind, 'runtime://' + runtime, data.model, SEC.encrypt(key), utcnow()))
+        if data.create_worker:
+            for role in ('code', 'review'):
+                existing = DB.one('SELECT id FROM agents WHERE user_id=? AND provider_id=? AND specialty=?',
+                                  (user['id'], pid, role))
+                aid = existing['id'] if existing else uid()
+                if not existing:
+                    DB.execute('INSERT INTO agents(id,user_id,name,specialty,instructions,provider_id,model,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                               (aid, user['id'], runtime + (' implementador' if role == 'code' else ' revisor'), role,
+                                'Use somente ferramentas da Central. Leia os arquivos, corrija falhas e valide com evidencias reais.',
+                                pid, data.model, utcnow()))
+                if role == 'code': worker = aid
+                else: reviewer = aid
+    ops_audit(DB, user['id'], 'external_runtime_connected', 'provider', pid)
+    return {'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
+            'agent_id': worker, 'reviewer_id': reviewer, 'version': version,
+            'generation_tested': False, 'native_tools': False}
 
 
 @app.get('/api/motion/capabilities')

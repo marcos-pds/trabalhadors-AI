@@ -1,8 +1,8 @@
-"""Local, discovery-only adapters; no certified external execution versions yet.
+"""Local runtime discovery and compatibility entrypoint for restricted planners.
 
 inventory() never starts a process. probe() runs only --version or ACP v1
-initialize in a disposable home/cwd. stream() fails closed before transmitting
-any prompt. No credentials are read, sessions created, or tools granted.
+initialize in a disposable home/cwd. Execution uses runtime_execution's fixed
+profiles, explicit API credentials and the Central gateway, never generic argv.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -48,11 +48,11 @@ _REGISTRY = MappingProxyType({
 
 
 def registry():
-    """Capabilities describe implemented discovery, never promised execution."""
+    """Implemented restricted planners; certification is a separate evidence gate."""
     return {name: {
         'version_probe': name != 'acp', 'acp_initialize': name == 'acp',
-        'text_stream': False, 'action_planner': False,
-        'tools_disable_certified': False, 'gateway_binding': False,
+        'text_stream': True, 'action_planner': True,
+        'tools_disable_certified': False, 'gateway_binding': True,
         'certified_versions': [],
     } for name in _REGISTRY}
 
@@ -183,8 +183,9 @@ class _Process:
     The child must be trusted admin/PATH software: this is lifecycle containment,
     not a sandbox for arbitrary binaries. No public API accepts a command array.
     """
-    def __init__(self, command, deadline, cancel_event, home):
+    def __init__(self, command, deadline, cancel_event, home, environment=None, max_messages=MAX_MESSAGES):
         self.deadline, self.cancel_event = deadline, cancel_event
+        self.max_messages = max_messages
         self.stop = threading.Event()
         self.events = queue.Queue(maxsize=16)
         self.outgoing = queue.Queue(maxsize=16)
@@ -196,7 +197,7 @@ class _Process:
         self.process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, shell=False, bufsize=0,
-            cwd=home, env=_isolated_environment(home), **options)
+            cwd=home, env=_isolated_environment(home) if environment is None else environment, **options)
         try:
             if os.name == 'nt':
                 self.job = _WindowsJob(self.process)
@@ -234,7 +235,7 @@ class _Process:
                 while b'\n' in pending:
                     line, pending = pending.split(b'\n', 1)
                     messages += 1
-                    if len(line) + 1 > MAX_LINE or messages > MAX_MESSAGES:
+                    if len(line) + 1 > MAX_LINE or messages > self.max_messages:
                         raise RuntimeBlocked('output_limit')
                     self._put(line + b'\n')
                 if len(pending) >= MAX_LINE:
@@ -251,6 +252,9 @@ class _Process:
                     value = self.outgoing.get(timeout=.025)
                 except queue.Empty:
                     continue
+                if value is None:
+                    self.process.stdin.close()
+                    return
                 pending = memoryview(value)
                 while pending and not self.stop.is_set():
                     count = os.write(self.process.stdin.fileno(), pending)
@@ -283,6 +287,14 @@ class _Process:
         except queue.Full:
             raise RuntimeBlocked('output_limit') from None
 
+    def send_text(self, text):
+        self.check()
+        raw = text.encode('utf-8')
+        if len(raw) > 256 * 1024:
+            raise RuntimeBlocked('input_limit')
+        self.outgoing.put_nowait(raw)
+        self.outgoing.put_nowait(None)
+
     def close(self):
         self.stop.set()
         if self.job is not None:
@@ -308,11 +320,15 @@ class _Process:
 
 
 @contextmanager
-def _connection(command, deadline, cancel_event):
+def _connection(command, deadline, cancel_event, *, prepare=None):
     directory = tempfile.TemporaryDirectory(prefix='central-runtime-')
     try:
         home = directory.name
-        process = _Process(command, deadline, cancel_event, home)
+        if prepare is None:
+            process = _Process(command, deadline, cancel_event, home)
+        else:
+            command, environment = prepare(home)
+            process = _Process(command, deadline, cancel_event, home, environment=environment, max_messages=4096)
         try:
             yield process
         finally:
@@ -433,7 +449,8 @@ def probe(runtime, timeout=5.0, cancel_event=None):
     name = runtime if isinstance(runtime, str) and runtime in _REGISTRY else 'unknown'
     result = {'runtime': name, 'present': False, 'version': None,
               'authenticated': None, 'auth_type': None, 'protocol_version': None,
-              'capabilities': registry().get(name, {}),
+              'capabilities': dict(registry().get(name, {}), text_stream=False,
+                                   action_planner=False, gateway_binding=False),
               'execution_blocker': 'native_tools_uncertified'}
     try:
         if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') != 'local':
@@ -460,13 +477,11 @@ def probe(runtime, timeout=5.0, cancel_event=None):
         return dict(result, status='unavailable')
 
 
-def stream(runtime, model, system, messages, *, timeout=60.0, cancel_event=None):
-    """Synchronous iterator interface reserved for certified text planners.
+def stream(runtime, model, system, messages, *, timeout=60.0, cancel_event=None, api_key=''):
+    """Execute a configured restricted profile, or reject legacy discovery-only binaries.
 
-    Always raises RuntimeBlocked today, before executing any CLI or serializing
-    model/system/messages. Caller must route validated action JSON through the
-    Central gateway when an actual certified planner is added. No fallback to
-    native tools, generic ACP prompting, API billing, login, or auto-install.
+    Output is text/action JSON; the caller must validate it through Central.
+    No automatic login, installation, native tools or arbitrary ACP agents.
     """
     if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') != 'local':
         raise RuntimeBlocked('server_mode_refused')
@@ -474,6 +489,11 @@ def stream(runtime, model, system, messages, *, timeout=60.0, cancel_event=None)
     _check(time.monotonic() + timeout, cancel_event)
     if not isinstance(runtime, str) or runtime not in _REGISTRY:
         raise RuntimeBlocked('unknown_runtime')
+    from .runtime_execution import inventory as execution_inventory, stream as execute_stream
+    if execution_inventory()[runtime]['status'] == 'configured':
+        yield from execute_stream(runtime, model, system, messages, api_key=api_key,
+                                  timeout=timeout, cancel_event=cancel_event)
+        return
     try:
         _resolve(runtime)
     except (OSError, ValueError):

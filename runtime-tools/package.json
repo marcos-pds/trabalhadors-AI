@@ -1,0 +1,10 @@
+{
+  "name": "central-external-runtime-tools",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.316",
+    "@google/gemini-cli": "0.66.0",
+    "opencode-ai": "1.19.5"
+  }
+}

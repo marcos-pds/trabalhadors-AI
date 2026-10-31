@@ -675,7 +675,8 @@ def validation_commands(folder, changed_files=None):
             commands.append(command)
 
     if ((root / 'tests').is_dir() or (root / 'pytest.ini').exists()
-            or (root / 'pyproject.toml').exists()):
+            or (root / 'pyproject.toml').exists()
+            or any(root.glob('test_*.py')) or any(root.glob('*_test.py'))):
         commands.append({'action': 'command', 'command': 'python_test'})
     if not commands:
         # Never claim a JavaScript app was validated by an empty compileall.

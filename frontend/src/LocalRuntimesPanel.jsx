@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ExternalRuntimesPanel from './ExternalRuntimesPanel'
 
 export default function LocalRuntimesPanel({ api, onConnected }) {
   const [result, setResult] = useState(null)
@@ -26,7 +27,7 @@ export default function LocalRuntimesPanel({ api, onConnected }) {
     } catch (e) { setError(e.message) }
     finally { setBusy(false) }
   }
-  return <section aria-label="Codex local" className="mb-5 rounded-2xl border border-white/10 bg-panel p-5">
+  return <><ExternalRuntimesPanel api={api} onConnected={onConnected}/><section aria-label="Codex local" className="mb-5 rounded-2xl border border-white/10 bg-panel p-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-sm font-semibold">Codex neste computador</h2>
         <p className="mt-1 text-xs text-muted">Confira o CLI e os modelos disponíveis na conta conectada.</p></div>
@@ -52,5 +53,5 @@ export default function LocalRuntimesPanel({ api, onConnected }) {
     <p className="mt-3 text-[11px] text-muted">O CLI gerencia seu login ChatGPT e suas cotas. O catálogo não comprova acesso a cada modelo; isso é verificado na tarefa. Arquivos e comandos passam pelas permissões da Central.</p>
     {connected && <p role="status" className="mt-2 text-xs text-emerald-200">{connected}</p>}
     {error && <p role="alert" className="mt-2 text-xs text-rose-200">{error}</p>}
-  </section>
+  </section></>
 }
