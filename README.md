@@ -872,4 +872,4 @@ O token OAuth e o refresh token ficam cifrados no banco local usando a chave Fer
 Referências oficiais: [Sign in with ChatGPT para apps open source/locais](https://developers.openai.com/siwc/token-sharing-open-source), [registro e autorização](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [modelos e inferência](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) e [limitações atuais](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 
-Runtimes opcionais: [execu??o de Claude Code, Gemini CLI, OpenCode e ACP](docs/RUNTIMES-EXECUCAO-20261031.md).
+Runtimes opcionais: [execucao de Claude Code, Gemini CLI, OpenCode e ACP](docs/RUNTIMES-EXECUCAO-20261031.md).

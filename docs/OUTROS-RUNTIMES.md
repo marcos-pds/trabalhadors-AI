@@ -1,4 +1,4 @@
-> Atualiza??o: [execu??o restrita e evid?ncias de 31/10/2026](RUNTIMES-EXECUCAO-20261031.md). O diagn?stico hist?rico abaixo n?o descreve toda a implementa??o atual.
+> Atualizacao: [execucao restrita e evidencias de 31/10/2026](RUNTIMES-EXECUCAO-20261031.md). O diagnostico historico abaixo nao descreve toda a implementacao atual.
 
 # Runtimes externos: descoberta e limites — 29/10/2026
 
