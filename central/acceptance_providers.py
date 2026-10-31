@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 from cryptography.fernet import Fernet
 
 from .providers import ProviderClient, ProviderError
+from .worker_checkpoint import WorkerPaused
 
 API_KINDS = frozenset({
     'openai', 'anthropic', 'gemini', 'deepseek', 'grok', 'mistral',
@@ -221,7 +222,7 @@ class _Bridge:
         item, outbound = self._request(provider, model)
         with self._lock:
             if self._calls >= self._limit:
-                raise ProviderError('acceptance_limit', 'Limite de chamadas do laboratorio atingido.', False)
+                raise WorkerPaused('Limite de chamadas do laboratorio atingido; retome em um novo segmento.')
             self._calls += 1  # failed/cancelled attempts also consume the finite budget
         credential = None
         stream = None

@@ -38,6 +38,26 @@ def h(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
+def test_client_budget_pause_is_checkpointed_without_provider_failover(workspace):
+    from central.agent_autonomy import autonomous_worker
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+
+    class Limited:
+        async def stream(self, *args):
+            raise WorkerPaused('Limite global do segmento')
+            yield ''
+
+    with pytest.raises(WorkerPaused, match='Limite global'):
+        asyncio.run(autonomous_worker(Limited(), db, 'user', 'run', 'step',
+            {'kind': 'groq'}, '', 'fixture', '', [{'role': 'user', 'content': 'Continue.'}],
+            lambda *args: None, validate_at_finish=False))
+    checkpoint = load_checkpoint(db, 'user', 'run', 'step', str(root))
+    assert checkpoint['state'] == 'paused_limit'
+    assert checkpoint['actions_total'] == 0
+    assert db.one('SELECT COUNT(*) n FROM provider_attempts')['n'] == 0
+
+
 def test_checkpoint_keeps_user_design_correction_after_many_tool_calls(workspace):
     from central.worker_checkpoint import save_checkpoint, MAX_TRANSCRIPT_CHARS
     db, folder = workspace

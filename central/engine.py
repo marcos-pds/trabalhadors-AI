@@ -296,8 +296,13 @@ class RunOrchestrator:
         agents = self.registry.enabled(user_id)
         if flow:
             nodes = validate_flow(flow, agents)
+            if not autonomous and any(node.get('required_actions') for node in nodes):
+                raise ValueError('Acoes obrigatorias exigem uma execucao autonoma.')
             plan = [dict(id=n['id'], agent_id=n.get('agent_id'), name=n.get('name','Etapa'),
                          kind=n['kind'], deps=n.get('deps',[]), instructions=n.get('instructions','')) for n in nodes]
+            for node, stage in zip(nodes, plan):
+                if node.get('required_actions'):
+                    stage['required_actions'] = list(node['required_actions'])
         else:
             chosen = self.registry.select(agents, prompt, mode, agent_ids)
             if autonomous and implementation and not agent_ids:
@@ -716,6 +721,8 @@ class RunOrchestrator:
                                     skill_client, self.db, user, run['id'], sid, provider,
                                     api_credential, model,
                                     system, messages, self.emit,
+                                    required_actions=next((node.get('required_actions', [])
+                                        for node in json.loads(run['plan']) if node['id'] == sid), []),
                                     validate_at_finish=(is_implementation_request(run['prompt']) and
                                                         specialty not in (
                                                             'architecture', 'design', 'research', 'coordination')),

@@ -111,6 +111,7 @@ async def prepare(args):
         for role in ('architecture', 'backend', 'frontend', 'review'):
             nodes.append({'id': role, 'kind': 'agent', 'agent_id': role, 'name': role,
                           'deps': [nodes[-1]['id']] if nodes else [], 'instructions': instructions[role]})
+        nodes[0]['required_actions'] = ['delegate_task']
         engine = Engine(db, security, client=source.client(max_calls=args.max_calls))
         rid = engine.create_run(user, chat, brief(), 'team', flow={'nodes': nodes},
                                 autonomous=True, isolate_workers=True, idempotency_key='tasklab-api-01')

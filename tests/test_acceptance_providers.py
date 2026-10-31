@@ -9,6 +9,7 @@ import pytest
 
 from central import acceptance_providers as ap
 from central.providers import ProviderError
+from central.worker_checkpoint import WorkerPaused
 
 
 SECRET = 'fixture-secret-not-a-real-key'
@@ -64,7 +65,7 @@ def test_bridge_uses_only_selected_api_redacts_echoes_and_enforces_call_limit(so
     async def exercise():
         output = ''.join([part async for part in client.stream(descriptor, 'ignored', descriptor['model'], '', [])])
         assert output == 'before [redacted] after'
-        with pytest.raises(ProviderError, match='Limite'):
+        with pytest.raises(WorkerPaused, match='Limite'):
             await anext(client.stream(descriptor, '', descriptor['model'], '', []))
         with pytest.raises(ProviderError, match='difere'):
             await anext(client.stream(dict(descriptor, kind='codex_cli'), '', descriptor['model'], '', []))
