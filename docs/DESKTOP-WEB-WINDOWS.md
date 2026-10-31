@@ -8,7 +8,7 @@ Electron apresenta a interface em uma janela e inicia um executável Python
 empacotado com PyInstaller. Duas versões sem duplicar a lógica de negócio.
 
 **Estado: aplicativo Windows x64 empacotado e instalador local gerado.**
-Entrega mais recente: [desktop 0.2.2 e validacao](DESKTOP-0.2.2-VALIDACAO.md).
+Entrega mais recente: [desktop 0.2.3 e validacao](DESKTOP-0.2.3-VALIDACAO.md).
 Backend congelado e interface Electron foram exercitados no Windows real,
 incluindo conta, projeto, prévia, persistência e encerramento.
 Consulte [a validação de 31/10/2026](DESKTOP-VALIDACAO-20261031.md).
