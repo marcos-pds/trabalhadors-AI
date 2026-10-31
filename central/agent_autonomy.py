@@ -169,15 +169,25 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                             model, system, messages, emit, validate_at_finish=True,
                             require_code_changes=False, require_observation=False,
                             require_document_read=False, planning_only=False,
-                            require_browser_validation=False, workspace_executor=None):
+                            require_browser_validation=False, workspace_executor=None,
+                            required_actions=()):
     """Requires an enabled scoped grant, returning only genuinely validated results."""
     perform_action = workspace_executor.action if workspace_executor is not None else agent_action
+    if set(required_actions) - {'delegate_task'}:
+        raise ValueError('Requisito de acao desconhecido.')
+    delegation_required = 'delegate_task' in required_actions
+    delegation_rejections = 0
     grant = policy(db, user_id)
     if grant['mode'] not in ('full', 'ask') or not grant['folder']:
         raise RuntimeError('Acesso ao workspace bloqueado. Configure Computador no chat.')
     system = system + '\n\n' + INSTRUCTIONS
     from .worker_collaboration import team_instruction, send, inbox, acknowledge, read_message
     system += team_instruction(db, run_id)
+    if delegation_required:
+        system += ('\nCONTRATO DESTA ETAPA: antes de finish, crie uma subtarefa real com '
+                   'delegate_task para um trabalhador habilitado. Um plano, promessa ou '
+                   'mensagem task_request nao substitui a delegacao persistida. '
+                   'Use os IDs e o formato descritos acima; nao invente destinatarios.')
     from .browser_mcp import worker_instruction
     system += worker_instruction(
         db, user_id, required=require_browser_validation)
@@ -337,6 +347,9 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             async for part in client.stream(dict(provider, _max_tokens=3000 if planning_only else 8192,
                                                   _structured_actions=True), key, model, system, transcript):
                 chunks.append(part)
+        except WorkerPaused:
+            checkpoint('paused_limit')
+            raise
         except ProviderError as error:
             reduced = (compact_tool_history(transcript, len(messages), 4 if context_compactions == 0 else 2)
                        if error.http_status == 413 and context_compactions < 2 else None)
@@ -392,6 +405,21 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 ])
                 continue
             finished = str(command.get('message', '')).strip()[:4000]
+            if delegation_required and not db.one(
+                    'SELECT step_id FROM dynamic_step_requests WHERE run_id=? AND requester_step_id=? LIMIT 1',
+                    (run_id, step_id)):
+                delegation_rejections += 1
+                transcript.extend([
+                    {'role': 'assistant', 'content': raw[:1000]},
+                    {'role': 'user', 'content': 'A etapa exige uma delegacao real registrada. '
+                     'Use delegate_task com um ID habilitado, title, instructions e request_id. '
+                     'Nao finalize apenas com um plano ou afirmacao de que delegou.'}])
+                emit(run_id, 'worker_contract_pending', {'step_id': step_id,
+                     'required_action': 'delegate_task', 'attempt': delegation_rejections})
+                checkpoint()
+                if delegation_rejections >= 2:
+                    raise ProviderError('response', 'Delegacao obrigatoria nao comprovada; tentando outro provedor.', False)
+                continue
             needed = {'read'} if require_document_read else {'read', 'list'}
             if require_observation and not observed_actions.intersection(needed):
                 transcript.extend([

@@ -20,6 +20,17 @@ def validate_flow(definition, agents):
     if len(ids) != len(nodes) or None in ids: raise ValueError('IDs de blocos duplicados/inválidos.')
     known_agents = {a['id'] for a in agents}
     for n in nodes:
+        required = n.get('required_actions', [])
+        if (not isinstance(required, list) or len(required) > 1
+                or any(action != 'delegate_task' for action in required)
+                or (required and n.get('kind') != 'agent')):
+            raise ValueError('required_actions deve listar somente delegate_task em uma etapa de agente.')
+        if required:
+            from .agent_registry import effective_specialty
+            from .dynamic_delegation import CAN_DELEGATE
+            agent = next((a for a in agents if a['id'] == n.get('agent_id')), None)
+            if not agent or effective_specialty(agent) not in CAN_DELEGATE:
+                raise ValueError('O papel desta etapa nao pode cumprir delegacao obrigatoria.')
         if n.get('kind') not in ('agent','approval'):
             raise ValueError('Somente blocos de agente e aprovação são executáveis nesta versão.')
         if n['kind']=='agent' and n.get('agent_id') not in known_agents:

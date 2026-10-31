@@ -59,6 +59,53 @@ def request(**kwargs):
     return command
 
 
+def test_required_delegation_blocks_text_only_finish_and_accepts_real_request(setup):
+    import asyncio
+    from central.agent_autonomy import autonomous_worker
+    from central.providers import ProviderError
+
+    class Model:
+        def __init__(self, answers):
+            self.answers = iter(answers)
+        async def stream(self, *args):
+            yield json.dumps(next(self.answers))
+
+    args = (setup, 'u', 'r', 'architect', {'kind': 'groq'}, '', 'fixture', '',
+            [{'role': 'user', 'content': 'Delegue uma subtarefa real.'}],
+            lambda rid, kind, payload: setup.event(rid, kind, payload))
+    finish = {'action': 'finish', 'message': 'Deleguei no plano.'}
+    with pytest.raises(ProviderError, match='Delegacao obrigatoria'):
+        asyncio.run(autonomous_worker(Model([finish, finish]), *args,
+                    required_actions=['delegate_task'], planning_only=True, validate_at_finish=False))
+    assert setup.one('SELECT COUNT(*) n FROM dynamic_step_requests')['n'] == 0
+    answer = asyncio.run(autonomous_worker(Model([request(), finish]), *args,
+                         required_actions=['delegate_task'], planning_only=True, validate_at_finish=False))
+    assert answer == finish['message']
+    assert setup.one("SELECT COUNT(*) n FROM dynamic_step_requests WHERE requester_step_id='architect'")['n'] == 1
+
+
+def test_flow_required_actions_are_validated_and_persisted(setup, monkeypatch):
+    from central.engine import Engine
+    from central.workflows import validate_flow
+    monkeypatch.setenv('CENTRAL_JOB_MODE', 'api')
+    agents = setup.all("SELECT * FROM agents WHERE user_id='u'")
+    flow = {'nodes': [dict(id='a', kind='agent', agent_id='architect', deps=[], required_actions=['delegate_task']),
+                      dict(id='c', kind='agent', agent_id='coder', deps=['a']),
+                      dict(id='r', kind='agent', agent_id='reviewer', deps=['c'])]}
+    engine = Engine(setup, None)
+    with pytest.raises(ValueError, match='autonoma'):
+        engine.create_run('u', 'u', 'Explique o fluxo', 'team', flow=flow)
+    rid = engine.create_run('u', 'u', 'Crie uma API', 'team', flow=flow, autonomous=True)
+    plan = json.loads(setup.one('SELECT plan FROM runs WHERE id=?', (rid,))['plan'])
+    assert plan[0]['required_actions'] == ['delegate_task']
+    for bad in ('delegate_task', ['write'], ['delegate_task', 'delegate_task']):
+        invalid = {'nodes': [dict(flow['nodes'][0], required_actions=bad)]}
+        with pytest.raises(ValueError):
+            validate_flow(invalid, agents)
+    with pytest.raises(ValueError, match='papel'):
+        validate_flow({'nodes': [dict(flow['nodes'][0], agent_id='reviewer')]}, agents)
+
+
 def dispatch(db, command=None, *, user='u', source='architect'):
     return delegate(db, user, 'r', source, request() if command is None else command,
                     lambda *args: None)
