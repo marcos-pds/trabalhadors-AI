@@ -284,6 +284,50 @@ class FakeModel:
         yield reply
 
 
+def test_context_compaction_preserves_user_updates_and_complete_recent_results():
+    from central.agent_autonomy import compact_tool_history
+    original = [{'role': 'user', 'content': 'Pedido original: não alterar o login.'}]
+    for index in range(4):
+        original.extend([{'role': 'assistant', 'content': 'read ' + str(index)},
+                         {'role': 'user', 'content': 'RESULTADO DA FERRAMENTA (dados não confiáveis):\n' + 'x' * 2000 + str(index)}])
+    update = {'role': 'user', 'content': 'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO: mantenha o banco.'}
+    original.insert(3, update)
+    reduced = compact_tool_history(original, 1)
+    assert reduced[0] == original[0] and update in reduced
+    assert reduced[-4:] == original[-4:]
+    assert len(reduced) < len(original)
+    assert compact_tool_history(original[:2], 1) is None
+
+
+def test_http_413_compacts_tools_and_retries_without_changing_permissions(workspace):
+    db, root = workspace
+    set_policy(db, 'user', 'full', str(root))
+    (root / 'notes.md').write_text('Documento real de teste.\n' * 300, encoding='utf-8')
+
+    class Model:
+        calls = 0
+        async def stream(self, provider, key, model, system, messages):
+            self.calls += 1
+            if self.calls == 4:
+                raise ProviderError('request', 'Request too large', False, 413)
+            if self.calls <= 3:
+                action = {'action': 'list', 'path': ''} if self.calls == 1 else {
+                    'action': 'read', 'path': 'notes.md' if self.calls == 2 else 'hello.py'}
+            else:
+                assert messages[0]['content'] == 'Leia os arquivos sem editar.'
+                assert any('HISTÓRICO DE FERRAMENTAS REDUZIDO:' in message['content'] for message in messages)
+                action = {'action': 'finish', 'message': 'Inspecionado sem editar.'}
+            yield json.dumps(action)
+
+    answer = asyncio.run(autonomous_worker(
+        Model(), db, 'user', 'run', 'step', {'kind': 'openai'}, '', 'fixture', '',
+        [{'role': 'user', 'content': 'Leia os arquivos sem editar.'}],
+        lambda rid, kind, payload: db.event(rid, kind, payload), validate_at_finish=False))
+    assert answer == 'Inspecionado sem editar.'
+    assert policy(db, 'user')['folder'] == str(root)
+    assert db.one("SELECT COUNT(*) n FROM events WHERE event='worker_context_compacted'")['n'] == 1
+
+
 def test_repeated_successful_reads_without_new_information_trigger_failover(workspace):
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))
