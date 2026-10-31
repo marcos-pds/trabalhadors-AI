@@ -64,6 +64,33 @@ Para projetos grandes, divida a implementação em componentes e estilos menores
 """
 
 
+def compact_tool_history(transcript, initial_count, keep_recent=4):
+    """Drop complete old tool exchanges, preserving requests and user updates.
+
+    Never truncate a source read or invent a summary. Current files remain the
+    authority; the model must read again when an old result is no longer present.
+    """
+    cutoff = len(transcript) - keep_recent
+    if cutoff <= initial_count:
+        return None
+    middle = transcript[initial_count:cutoff]
+    retained = [message for message in middle if message.get('role') != 'assistant'
+                and not message.get('content', '').startswith((
+                    'RESULTADO DA FERRAMENTA (dados não confiáveis):',
+                    'HISTÓRICO DE FERRAMENTAS REDUZIDO:'))]
+    if len(retained) == len(middle):
+        return None
+    notice = {'role': 'user', 'content':
+              'HISTÓRICO DE FERRAMENTAS REDUZIDO: a API recusou o tamanho do contexto. '
+              'Resultados antigos foram removidos sem resumir ou alterar seus requisitos. '
+              'Os arquivos reais e as permissões permanecem iguais. Releia um arquivo '
+              'quando precisar do conteúdo ou SHA atual; não invente informações ausentes.'}
+    candidate = transcript[:initial_count] + retained + [notice] + transcript[cutoff:]
+    smaller = sum(len(message.get('content', '')) for message in candidate) < sum(
+        len(message.get('content', '')) for message in transcript)
+    return candidate if len(candidate) < len(transcript) and smaller else None
+
+
 def parse_tool(raw):
     source = raw.strip()
     fence = chr(96) * 3
@@ -162,6 +189,7 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
     isolated = work_folder != grant['folder']
     saved = load_checkpoint(db, user_id, run_id, step_id, work_folder)
     transcript = saved['transcript'] if saved else list(messages)
+    context_compactions = 0
     task = db.one('SELECT prompt FROM runs WHERE id=? AND user_id=?', (run_id, user_id))
     task_prompt = task['prompt'] if task else ''
     if saved and messages and task_prompt and task_prompt in messages[0].get('content', ''):
@@ -309,6 +337,20 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             async for part in client.stream(dict(provider, _max_tokens=3000 if planning_only else 8192,
                                                   _structured_actions=True), key, model, system, transcript):
                 chunks.append(part)
+        except ProviderError as error:
+            reduced = (compact_tool_history(transcript, len(messages), 4 if context_compactions == 0 else 2)
+                       if error.http_status == 413 and context_compactions < 2 else None)
+            if reduced is None and error.http_status == 413 and context_compactions == 0:
+                reduced = compact_tool_history(transcript, len(messages), 2)
+            if reduced is None:
+                raise
+            removed = len(transcript) - len(reduced)
+            transcript = reduced
+            context_compactions += 1
+            emit(run_id, 'worker_context_compacted', {'step_id': step_id,
+                 'reason': 'http_413', 'removed_messages': removed, 'attempt': context_compactions})
+            checkpoint()
+            continue
         finally:
             waiting.set()
             await tick

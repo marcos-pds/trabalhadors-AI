@@ -47,11 +47,18 @@ evidencia de criacao full-stack a partir de poucas palavras.
   90 segundos. Isso permite failover mesmo se um stream continuar enviando
   keepalives. O primeiro segmento foi iniciado antes dessa ultima melhoria;
   ela passa a valer ao retomar com o codigo atualizado.
+- Respostas HTTP 413 acionam ate duas reducoes do historico de ferramentas,
+  mantendo o pedido inicial, atualizacoes do usuario e resultados recentes
+  completos. A reducao so e aplicada quando diminui o tamanho real do texto.
+  Nao resume codigo, nao altera permissoes e orienta releitura de dados ausentes.
+  Sem reducao segura, o erro segue para o failover normal.
 
 Validacao: 26 testes de reconciliacao com Git/SQLite/HTTP reais; regressao
 completa com 1.213 aprovados, 31 ignorados e dois avisos existentes.
 Apos as melhorias adicionais do adaptador, seus seis testes focados passaram,
 incluindo exclusao do Codex, isolamento, revogacao e fechamento por timeout.
+  Mais 131 testes de autonomia/delegacao/contexto e 11 de checkpoints passaram
+  apos a recuperacao de HTTP 413; a retomada cancelada teve regressao adicional.
 Esses testes controlados nao sao inferencia real nem substituem a aceitacao.
 
 ## Operar o laboratorio
