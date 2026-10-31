@@ -1,50 +1,52 @@
-# Execu??o de runtimes externos ? 31/10/2026
+﻿# Execução de runtimes externos — 31/10/2026
 
-Implementa??o local para web e desktop. N?o executa Codex como trabalhador.
+Implementação local para web e desktop. Nenhum ensaio usa Codex como trabalhador.
 
-## Instala??o opcional
+## Instalação e uso
 
-No PowerShell, na raiz do reposit?rio:
+Na raiz do repositório, execute `.\runtime-tools\install_windows.ps1` no PowerShell. Requer Node.js/npm. Instala versões fixadas em `%LOCALAPPDATA%\Central IA\runtime-tools`, separadas do instalador principal, sem alterar PATH ou instalação global. `CENTRAL_RUNTIME_TOOLS_DIR` permite uma pasta absoluta administrada pelo operador. Outras versões são recusadas até validação.
 
-```powershell
-.\runtime-tools\install_windows.ps1
-```
+Em **Provedores → Runtimes externos**, clique em **Verificar runtimes externos**, escolha o perfil, uma conexão API compatível (ou chave API) e o modelo. Conectar verifica a versão e cria implementador/revisor sem inferência. Não comprova saldo ou acesso ao modelo. O inventário não certifica contas ou modelos arbitrários.
 
-Requer Node.js/npm. Instala pacotes fixados em `%LOCALAPPDATA%\Central IA\runtime-tools`, sem instala??o global nem altera??o do PATH. N?o inclui esses execut?veis no instalador principal. `CENTRAL_RUNTIME_TOOLS_DIR` permite uma pasta absoluta administrada pelo operador. N?o use atualiza??es autom?ticas nesses pacotes: outras vers?es s?o recusadas at? valida??o.
+Esta integração usa **chaves API**, suas cotas e cobrança, sem reutilizar login ou assinatura pessoal dos CLIs. Claude exige Anthropic; Gemini e ACP exigem Gemini; OpenCode usa `provedor/modelo` compatível com a conexão. ACP usa Gemini por padrão; outro backend explícito é recusado. Agentes ACP genéricos continuam apenas em diagnóstico.
 
-| Perfil | Vers?o | Evid?ncia real nesta m?quina |
+| Perfil | Versão | Evidência real nesta máquina |
 |---|---|---|
-| Claude Code | 2.1.316 | Execut?vel e vers?o verificados; infer?ncia pendente de conex?o Anthropic |
-| Gemini CLI | 0.66.0 | Infer?ncia e corre??o/revis?o conclu?das; revis?o exigiu retomada expl?cita ap?s falha |
-| OpenCode | 1.19.5 | Infer?ncia simples e teste de recusa de escrita nativa; homologa??o completa em investiga??o |
-| ACP v1 / Gemini | 0.66.0 | Initialize, autentica??o API, sess?o, prompt e corre??o/revis?o conclu?dos |
-
-Em **Provedores ? Runtimes externos**, clique em **Verificar runtimes externos**, escolha o perfil e uma conex?o API compat?vel j? cadastrada (ou informe uma chave API), selecione o modelo e conecte. S?o criados implementador e revisor. Conectar verifica a vers?o, n?o faz infer?ncia nem comprova saldo/acesso ao modelo. O campo `inference_homologated=false` no invent?rio n?o atesta contas ou modelos arbitr?rios.
-
-Esta integra??o usa **chaves API**, cotas e cobran?a do provedor; n?o reutiliza login ou assinatura pessoal dos CLIs. Claude exige Anthropic; Gemini e ACP exigem Gemini; OpenCode usa modelo `provedor/modelo` compat?vel com a conex?o. ACP usa Gemini por padr?o; outro backend expl?cito ? recusado. Agentes ACP gen?ricos continuam apenas em diagn?stico.
+| Claude Code | 2.1.316 | Executável e versão verificados; inferência pendente de conexão Anthropic |
+| Gemini CLI | 0.66.0 | Correção e revisão concluídas; revisão precisou de retomada explícita após falha |
+| OpenCode | 1.19.5 | Correção e revisão concluídas com Google/Gemini; Groq falhou no ensaio completo |
+| ACP v1 / Gemini | 0.66.0 | Initialize, autenticação API, sessão, prompt, correção e revisão concluídos |
 
 ## Controle e limites
 
-Os CLIs recebem contexto e devolvem texto/JSON de a??es. A Central aplica permiss?es, leitura, altera??es com SHA, valida??o e auditoria. Ferramentas nativas, MCP, hooks, plugins e descoberta do perfil pessoal s?o desativados ou negados. Configura??o administrativa incompat?vel ? recusada. Diret?rio de execu??o e HOME descart?veis; chave apenas no ambiente do processo, sem argumento de linha de comando. Erros retornam c?digos, n?o o corpo potencialmente sens?vel do CLI.
+Os CLIs devolvem texto/JSON de ações; a Central aplica permissões, leitura, alterações com SHA, validação e auditoria. Ferramentas nativas, MCP, hooks, plugins e descoberta do perfil pessoal são desativados ou negados. Configuração administrativa incompatível é recusada. Diretório e HOME descartáveis; chave apenas no ambiente do processo, sem argumento de linha de comando. Erros retornam códigos sem o corpo potencialmente sensível do CLI.
 
-H? limite de entrada/sa?da, deadline, cancelamento e encerramento da ?rvore de processos pertencente ? execu??o. O perfil **n?o constitui sandbox de sistema operacional**: os bin?rios instalados pelo operador s?o software confi?vel. Execu??o recusada no modo servidor. Vers?es n?o fixadas e caminhos arbitr?rios n?o s?o aceitos.
+Há limites de entrada/saída, deadline, cancelamento e encerramento da árvore de processos pertencente à execução. O perfil **não constitui sandbox de sistema operacional**: os binários instalados são software confiável. Execução recusada no modo servidor. Caminhos arbitrários e versões não fixadas não são aceitos.
 
-## Ensaios reproduz?veis
+OpenCode usa agente dedicado de texto e ferramentas negadas. Groq/openai/gpt-oss-20b respondeu ao teste simples, mas no ciclo completo retornou erro de chamada de ferramenta com tool choice none. A negação foi preservada. Google/gemini-3.5-flash-lite concluiu o ciclo; isso não certifica outros modelos.
+
+## Reprodução e evidências
 
 ```powershell
 $env:PYTHONPATH = (Get-Location).Path
 python examples/validate_external_runtime.py gemini C:\Labs\gemini-novo --source-data .\data
+python examples/validate_external_runtime.py opencode C:\Labs\opencode-novo --source-data .\data --source-kind gemini
 ```
 
-A pasta de destino deve ser nova. O harness l? uma conex?o autorizada em modo somente leitura, mant?m a chave em mem?ria, injeta um defeito em uma fun??o Python e executa implementador e revisor. `--resume` retoma o mesmo laborat?rio sem reescrever os arquivos. N?o altera a base original. `report.json` e `attempts.jsonl` registram o resultado; uma verifica??o funcional independente confirma a soma. Compila??o sozinha n?o prova funcionalidade.
+A pasta de destino deve ser nova. O harness lê uma conexão autorizada em modo somente leitura, mantém a chave em memória, injeta um defeito Python e executa implementador/revisor. `--resume` retoma sem reescrever arquivos. Não altera a base original. `report.json` e `attempts.jsonl` registram resultados; uma verificação funcional independente confirma a soma. Compilação sozinha não prova funcionalidade.
 
-Evid?ncias locais: Gemini `e614c93d-6f75-47f6-ad34-68ff72e26b24` e ACP `948fa9b8-0b7b-4b2f-813f-5d9ef14b75df`. Ambos alteraram `app.py` pelas ferramentas da Central, passaram pela revis?o e pela verifica??o funcional independente. Nenhum reparo manual no aplicativo. A execu??o Gemini precisou de retomada pelo operador; n?o ? prova de recupera??o totalmente aut?noma. O primeiro OpenCode `406dea3d-8d1b-4cc3-85aa-a51fe8ce2711` falhou antes de editar e foi preservado.
+- Gemini `e614c93d-6f75-47f6-ad34-68ff72e26b24`: concluído após retomada explícita da revisão; compilação e verificação funcional independente passaram.
+- ACP `948fa9b8-0b7b-4b2f-813f-5d9ef14b75df`: concluído; compilação e verificação funcional independente passaram.
+- OpenCode/Google `0d0512ae-c3d4-48e5-8083-0a972b88c165`: concluído em 12 invocações CLI; pytest e verificação funcional independente passaram.
+- OpenCode/Groq `406dea3d-8d1b-4cc3-85aa-a51fe8ce2711`: falhou antes de editar; registros preservados.
 
-Isso comprova uma tarefa Python pequena. N?o substitui a aceita??o de um projeto maior, QA visual ou homologa??o de todos os provedores/modelos. O roteiro de autonomia e a etapa 11 continuam com pend?ncias.
+Os casos aprovados alteraram app.py pelas ferramentas da Central e passaram pela revisão, sem reparo manual no aplicativo. A retomada Gemini foi feita pelo operador; não comprova recuperação totalmente autônoma. OpenCode já inclui a correção da descoberta de testes Python na raiz.
 
-## Refer?ncias consultadas
+São tarefas Python pequenas. Não substituem aceitação de projeto maior, QA visual ou homologação de todos os modelos. A etapa 11 continua pendente.
+
+## Referências
 
 - [Claude CLI](https://code.claude.com/docs/en/cli-reference)
-- [Gemini configura??o](https://geminicli.com/docs/reference/configuration/) e [pol?ticas](https://geminicli.com/docs/reference/policy-engine/)
-- [OpenCode CLI](https://opencode.ai/docs/cli/) e [permiss?es](https://opencode.ai/docs/permissions/)
-- [ACP v1](https://agentclientprotocol.com/protocol/v1/session-setup) e [seguran?a](https://agentclientprotocol.com/protocol/v1/security)
+- [Gemini configuração](https://geminicli.com/docs/reference/configuration/) e [políticas](https://geminicli.com/docs/reference/policy-engine/)
+- [OpenCode CLI](https://opencode.ai/docs/cli/), [agentes](https://opencode.ai/docs/agents/) e [permissões](https://opencode.ai/docs/permissions/)
+- [ACP v1](https://agentclientprotocol.com/protocol/v1/session-setup) e [segurança](https://agentclientprotocol.com/protocol/v1/security)
