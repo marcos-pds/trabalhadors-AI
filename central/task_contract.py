@@ -199,6 +199,7 @@ def is_continuation_request(prompt):
     text = _plain(prompt).strip().rstrip('.!? ')
     return (len(text) <= 180 and CONTINUATION_ACTION.search(text) is not None
             and (any(target in text for target in CONTINUATION_TARGETS) or
+                 re.search(r'\b(?:api|site|app)\b', text) is not None or
                  re.fullmatch(r'(?:(?:por favor|agora|entao|vamos)\s+)*'
                               r'(?:continue|continuar|prossiga|retome|retomar)', text))
             and not re.search(r'\b(?:sem|nao|apenas|somente|so)\b', text))
@@ -206,36 +207,69 @@ def is_continuation_request(prompt):
 
 def resolve_continuation_prompt(db, conversation_id, prompt):
     """Expand a short continuation only from a prior implementation in this chat."""
+    text = _plain(prompt).strip()
+    continuation = is_continuation_request(prompt)
+    reference_question = bool(len(text) <= 180 and re.fullmatch(
+        r'(?:qual|quais)\s+(?:deles|delas|destes|destas)[?!. ]*', text))
     contextual_adjustment = (
         len(prompt or '') <= 180 and not is_implementation_request(prompt)
         and ACTION.search(_actionable_text(prompt))
         and re.search(r'\b(?:isso|esse|essa|este|esta|ele|ela|maior|menor|'
-                      r'azul|verde|vermelho|escuro|claro)\b', _plain(prompt)))
-    if not is_continuation_request(prompt) and not contextual_adjustment:
+                      r'azul|verde|vermelho|escuro|claro|igual)\b', text))
+
+    def clarify(reference=None, evidence=None):
+        result = (
+            'Pedido atual do usuário: ' + prompt.strip() + '\n'
+            'REFERÊNCIA AMBÍGUA OU AUSENTE: peça esclarecimento sobre o pedido e o alvo; '
+            'se houver mais de um alvo possível, peça esclarecimento em vez de adivinhar. '
+            'Não escolha apenas pelo pedido mais recente e não invente um alvo. '
+            'Não altere arquivos até receber esclarecimento.')
+        if reference is not None:
+            result += ('\nPedido anterior apenas como referência, sem autorização para editar:\n' +
+                       reference['prompt'][:1200] + '\nArquivos anteriormente alterados: ' +
+                       ', '.join(evidence['changed_files'][:12]))
+        return result
+
+    if not continuation and not contextual_adjustment and not reference_question:
         return prompt
+    conversation = db.one('SELECT user_id FROM conversations WHERE id=?', (conversation_id,))
+    if not conversation:
+        return prompt
+    if reference_question:
+        return clarify()
     previous_runs = db.all(
-        'SELECT id,prompt,status,output FROM runs WHERE conversation_id=? '
-        'ORDER BY created_at DESC,rowid DESC LIMIT 20', (conversation_id,))
+        'SELECT id,prompt,status,output FROM runs WHERE conversation_id=? AND user_id=? '
+        'ORDER BY created_at DESC,rowid DESC LIMIT 20', (conversation_id, conversation['user_id']))
     implementations = [run for run in previous_runs
                        if is_implementation_request(run['prompt'])]
+    # A named continuation may disambiguate a brief, but never fetches history
+    # from another chat. A missing or nonunique name still requires clarification.
+    named = re.search(r'\b(api|site|app)\b(?:\s+([a-z0-9][a-z0-9_-]{2,60}))?', text) if continuation else None
+    if named:
+        kind, identifier = named.groups()
+        if identifier in ('com', 'para', 'que', 'projeto'):
+            identifier = None
+        implementations = [run for run in implementations
+                           if re.search(r'\b' + kind + r'\b', _actionable_text(run['prompt'])) and
+                           (not identifier or re.search(r'(?<![a-z0-9_-])' + re.escape(identifier) +
+                                                        r'(?![a-z0-9_-])', _actionable_text(run['prompt'])))]
     previous = next(iter(implementations), None)
     if not previous:
-        return prompt
+        return clarify() if contextual_adjustment or named else prompt
 
     # Recency alone cannot disambiguate different implementation requests.
     # Expanded continuations contain their original request; those are one
     # scope, as are exact retries. Distinct briefs require user clarification.
     if any(run['prompt'] not in previous['prompt'] and
            previous['prompt'] not in run['prompt'] for run in implementations[1:]):
-        return (
-            'Pedido atual do usuário: ' + prompt.strip() + '\n'
-            'REFERÊNCIA AMBÍGUA: há pedidos de implementação diferentes nesta conversa. '
-            'Peça esclarecimento sobre qual pedido e alvo o usuário quer retomar ou ajustar. '
-            'Não escolha pelo pedido mais recente, não invente um alvo e não altere arquivos '
-            'até receber esclarecimento.')
+        return clarify()
 
     evidence = delivery_evidence(db, previous['id'])
     if contextual_adjustment:
+        if re.search(r'\b(?:dois|duas|tres|quatro|varios|varias|[2-9])\s+'
+                     r'(?:botoes|titulos|campos|menus|cards|formularios|paginas|telas|arquivos)\b',
+                     _plain(previous['prompt'])):
+            return clarify(previous, evidence)
         return (
             'Pedido atual do usuário (prioritário): ' + prompt.strip() + '\n'
             'AJUSTE NO PROJETO DESTA CONVERSA: implemente somente o ajuste atual. '

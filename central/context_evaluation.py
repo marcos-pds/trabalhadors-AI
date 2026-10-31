@@ -31,6 +31,9 @@ class _ObservedDatabase:
             self.source_run_ids.append(args[0])
         return rows
 
+    def one(self, query, args=()):
+        return self.db.one(query, args)
+
 
 def evaluate(db, cases):
     """Return per-case actual behavior, provenance and explicit failed checks.
@@ -52,6 +55,9 @@ def evaluate(db, cases):
         if case_id in ids or not case.get('expect') or set(case['expect']) - supported:
             raise ValueError('Duplicate case ID or invalid expectations: ' + case_id)
         ids.add(case_id)
+        category = case.get('category', 'uncategorized')
+        if not isinstance(category, str) or not category.strip():
+            raise ValueError('Invalid category: ' + case_id)
         observed = _ObservedDatabase(db)
         prompt = case['prompt']
         conversation = db.one('SELECT user_id,project_id FROM conversations WHERE id=?',
@@ -99,10 +105,24 @@ def evaluate(db, cases):
                 errors.extend('unexpected_text: ' + text for text in expected if text in resolved)
             elif actual[key] != expected:
                 errors.append(f'{key}: expected {expected!r}, got {actual[key]!r}')
-        results.append({'id': case_id, 'passed': not errors, 'errors': errors,
+        results.append({'id': case_id, 'category': category,
+                        'known_gap': case.get('known_gap'), 'passed': not errors, 'errors': errors,
                         'actual': actual, 'provenance': provenance, 'resolved_prompt': resolved})
     passed = sum(result['passed'] for result in results)
+    categories = {}
+    for result in results:
+        summary = categories.setdefault(result['category'], {'total': 0, 'passed': 0, 'failed': 0})
+        summary['total'] += 1
+        summary['passed'] += int(result['passed'])
+        summary['failed'] += int(not result['passed'])
+    for summary in categories.values():
+        summary['pass_rate_percent'] = round(100 * summary['passed'] / summary['total'], 2)
+    success = bool(results) and passed == len(results)
     return {'mode': 'deterministic_real_resolver', 'live_inference': False,
+            'success': success, 'status': 'empty' if not results else 'passed' if success else 'failed',
+            'evaluation_errors': [] if results else ['empty_corpus'],
+            'pass_rate_percent': round(100 * passed / len(results), 2) if results else None,
+            'categories': categories,
             'benchmark_complete': False, 'total': len(results), 'passed': passed,
             'failed': len(results) - passed, 'results': results}
 
@@ -143,7 +163,7 @@ def main(argv=None):
         finally:
             db.close()
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return int(bool(report['failed']))
+    return int(not report['success'])
 
 
 if __name__ == '__main__':
