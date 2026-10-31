@@ -337,7 +337,7 @@ def execution_folder(db, user, rid, sid):
 
 def checkpoint_folder(db, user, rid, sid):
     """Read-only path resolution for resume; does not authorize worker execution."""
-    root, config = _scope(db, user, rid, parked=_PARKED | {'failed', 'paused_limit'})
+    root, config = _scope(db, user, rid, parked=_PARKED | {'failed', 'paused_limit', 'cancelled'})
     step = db.one('SELECT * FROM steps WHERE id=? AND run_id=?', (sid, rid))
     if not step:
         _fail('Etapa nao pertence a tarefa.', 404)
@@ -501,7 +501,7 @@ def approve(db, user, rid, sid, confirmation):
 
 
 def status(db, user, rid, sid=None):
-    root, config = _scope(db, user, rid, parked=_PARKED | {'failed', 'paused_limit', 'completed'})
+    root, config = _scope(db, user, rid, parked=_PARKED | {'failed', 'paused_limit', 'completed', 'cancelled'})
     if sid is not None:
         step = db.one('SELECT id FROM steps WHERE id=? AND run_id=?', (sid, rid))
         if not step:
