@@ -74,6 +74,11 @@ class ProviderClient:
 
     async def stream(self, provider, api_key, model, system, messages):
         kind = provider['kind']
+        if kind in ('claude_cli', 'gemini_cli', 'opencode_cli', 'acp'):
+            from .runtime_execution import stream_response
+            async for token in stream_response(provider, api_key, model, system, messages, timeout=self.timeout):
+                yield token
+            return
         if kind == 'codex_cli':
             from .codex_bridge import stream_response
             async for token in stream_response(provider, model, system, messages, timeout=max(120, self.timeout)):

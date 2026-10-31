@@ -1,3 +1,5 @@
+> Atualiza??o: [execu??o restrita e evid?ncias de 31/10/2026](RUNTIMES-EXECUCAO-20261031.md). O diagn?stico hist?rico abaixo n?o descreve toda a implementa??o atual.
+
 # Runtimes externos: descoberta e limites — 29/10/2026
 
 Esta etapa adiciona apenas `central/external_runtimes.py`,

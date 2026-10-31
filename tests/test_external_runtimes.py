@@ -117,6 +117,7 @@ time.sleep(30)  # Client must close, never send session/new, authenticate or pro
 @pytest.fixture(autouse=True)
 def local_environment(monkeypatch):
     monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE', 'local')
+    monkeypatch.setenv('CENTRAL_RUNTIME_TOOLS_DIR', '')
     for key in ('CENTRAL_CLAUDE_EXECUTABLE', 'CENTRAL_GEMINI_EXECUTABLE',
                 'CENTRAL_OPENCODE_EXECUTABLE', 'CENTRAL_ACP_EXECUTABLE', 'CENTRAL_ACP_ARGS'):
         monkeypatch.delenv(key, raising=False)
@@ -152,8 +153,8 @@ def test_registry_is_detached_and_never_promises_execution():
     assert set(result) == {'claude', 'gemini', 'opencode', 'acp'}
     for capabilities in result.values():
         assert capabilities['certified_versions'] == []
-        assert not any(capabilities[key] for key in (
-            'text_stream', 'action_planner', 'tools_disable_certified', 'gateway_binding'))
+        assert all(capabilities[key] for key in ('text_stream', 'action_planner', 'gateway_binding'))
+        assert capabilities['tools_disable_certified'] is False
     result['claude']['certified_versions'].append('unsafe')
     assert runtimes.registry()['claude']['certified_versions'] == []
 

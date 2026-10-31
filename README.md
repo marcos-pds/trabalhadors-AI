@@ -870,3 +870,6 @@ Essa modalidade usa o fluxo oficial Sign in with ChatGPT para aplicações open 
 O token OAuth e o refresh token ficam cifrados no banco local usando a chave Fernet existente. Eles não são enviados ao React. A seleção de modelos usa o catálogo retornado pela conta autenticada e não presume que todos os modelos GPT estejam liberados. Cada teste e execução usa os limites e a cota elegível do plano ChatGPT; a API por chave continua separada e pode ter cobrança própria. O fluxo de assinatura usa Responses API com `store=false` e `stream=true`; ferramentas hospedadas pela OpenAI, áudio/vídeo e outros campos ainda indisponíveis nesse fluxo não são habilitados pela conexão.
 
 Referências oficiais: [Sign in with ChatGPT para apps open source/locais](https://developers.openai.com/siwc/token-sharing-open-source), [registro e autorização](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [modelos e inferência](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) e [limitações atuais](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+
+
+Runtimes opcionais: [execu??o de Claude Code, Gemini CLI, OpenCode e ACP](docs/RUNTIMES-EXECUCAO-20261031.md).
