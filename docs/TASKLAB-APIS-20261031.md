@@ -33,6 +33,10 @@ evidencia de criacao full-stack a partir de poucas palavras.
 - O endpoint verifica conta e encerramento da execucao antes da promocao.
   Esta era uma lacuna real: chamava um metodo inexistente depois de aplicar
   os arquivos. Nao foi tratado como problema do modelo.
+- A resolucao de checkpoints e a consulta de status aceitam uma tarefa cancelada
+  com isolamento, mantendo as verificacoes de conta, pasta e permissao atuais.
+  Ferramentas continuam bloqueadas ate a retomada explicita. Essa falha foi
+  reproduzida ao retomar o primeiro segmento e corrigida com teste real de Git.
 - O adaptador de APIs do laboratorio le o banco original com SQLite `mode=ro`,
   sem bootstrap/migracoes. Exige um unico proprietario ou selecao explicita.
   Credenciais sao decriptadas somente em memoria durante cada chamada; o

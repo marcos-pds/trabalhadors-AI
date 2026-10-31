@@ -206,6 +206,23 @@ def test_premature_resume_does_not_requeue_or_spend_checkpoint_budget(lab):
     assert db.one('SELECT * FROM job_queue') is None
 
 
+def test_cancelled_isolated_run_can_resolve_checkpoint_without_reviving_tools(lab):
+    db, _, worker, engine = lab
+    db.execute("UPDATE isolated_workspace_steps SET state='active'")
+    db.execute("UPDATE steps SET status='queued' WHERE id='implement'")
+    db.execute("UPDATE runs SET status='cancelled' WHERE id='run'")
+    with pytest.raises(HTTPException):
+        isolation.execution_folder(db, 'owner', 'run', 'implement')
+    assert isolation.checkpoint_folder(db, 'owner', 'run', 'implement') == str(worker)
+    assert isolation.status(db, 'owner', 'run')['enabled']
+    engine.resume_run('run')
+    assert db.one("SELECT status FROM runs WHERE id='run'")['status'] == 'queued'
+    assert db.one('SELECT folder FROM worker_checkpoints')['folder'] == str(worker)
+    set_policy(db, 'owner', 'blocked', '')
+    with pytest.raises(HTTPException):
+        isolation.checkpoint_folder(db, 'owner', 'run', 'implement')
+
+
 @pytest.mark.parametrize('recovery', [False, True], ids=['approve-endpoint', 'resume-after-promotion'])
 def test_http_uses_real_approval_reconciliation_and_queue(lab, monkeypatch, recovery):
     import central.main as main
