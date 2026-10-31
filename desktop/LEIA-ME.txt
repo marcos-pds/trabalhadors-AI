@@ -1,7 +1,7 @@
-CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.3
+CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.4
 Criador: Marcos Paulo (@marcos-pds)
 
-Instale usando Central-IA-Setup-0.2.3.exe e abra Central IA pelo menu Iniciar.
+Instale usando Central-IA-Setup-0.2.4.exe e abra Central IA pelo menu Iniciar.
 A interface e o servidor Python acompanham o aplicativo. Nao e necessario
 instalar Python ou Node para abrir a Central.
 
@@ -19,3 +19,8 @@ assinatura digital nem atualizacao automatica. Nao foi homologado em VM limpa.
 
 Repositorio: https://github.com/marcos-pds/trabalhadors-AI
 Consulte AUTORIA.md, LICENSE.electron.txt e LICENSES.chromium.html no pacote.
+
+Runtimes Claude Code, Gemini CLI, OpenCode e ACP sao opcionais.
+Instale os pacotes pelo script runtime-tools/install_windows.ps1 no repositorio.
+Depois use Provedores > Runtimes externos. Autenticacao por chave API,
+sem reutilizar assinaturas pessoais dos CLIs. Claude aguarda homologacao real.

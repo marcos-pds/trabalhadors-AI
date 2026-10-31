@@ -83,6 +83,28 @@ async function main() {
     await motion.screenshot({path:path.join(evidence,packaged?'motion-packaged.png':'motion-development.png')})
     report.checks.push('motion_real_capability_diagnostics_and_reload')
     await page.getByRole('button',{name:'Abrir menu'}).click()
+    await page.getByTitle('Provedores',{exact:true}).click()
+    const runtimes=page.getByRole('region',{name:'Runtimes externos'})
+    await runtimes.getByRole('button',{name:'Verificar runtimes externos'}).click()
+    await expect(runtimes.getByLabel('Runtime externo',{exact:true})).toBeVisible()
+    await expect(runtimes.getByLabel('Runtime externo',{exact:true}).locator('option')).toHaveCount(4)
+    await expect(runtimes.getByLabel('Chave API do runtime')).toHaveAttribute('type','password')
+    await expect(runtimes.getByRole('button',{name:/Conectar runtime/})).toBeDisabled()
+    await runtimes.screenshot({path:path.join(evidence,packaged?'runtimes-packaged.png':'runtimes-development.png')})
+    report.checks.push('external_runtime_profiles_and_explicit_connection')
+    const runtimeInventory=await api(page,'/runtimes/execution')
+    if(runtimeInventory.gemini.status==='configured') {
+      await runtimes.getByLabel('Chave API do runtime').fill('smoke-placeholder-not-a-real-api-key')
+      await runtimes.getByLabel('Modelo do runtime externo').fill('smoke-no-generation')
+      await runtimes.getByRole('button',{name:/Conectar runtime/}).click()
+      await expect(runtimes.getByRole('status')).toContainText('Gemini CLI conectado',{timeout:20000})
+      const providers=await api(page,'/providers')
+      if(!providers.some(p=>p.kind==='gemini_cli' && p.model==='smoke-no-generation'))throw new Error('Runtime provider not persisted')
+      report.checks.push('frozen_backend_real_cli_version_and_connection_without_inference')
+    }
+
+
+    await page.getByRole('button',{name:'Abrir menu'}).click()
     await page.getByTitle('Chat IA',{exact:true}).click()
     const project=await api(page,'/projects','POST',{name:'Desktop acceptance',description:'Scratch project'})
     if(!project.id)throw new Error('No persisted project')
