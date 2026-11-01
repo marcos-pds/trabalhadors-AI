@@ -46,14 +46,15 @@ export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 
 }
 
 const drawings = {
+  send: <><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></>,
   plus: <path d="M12 5v14M5 12h14"/>,
   message: <path d="M20 11a8 8 0 0 1-8 8 8 8 0 0 1-3-.6L4 20l1.5-5A8 8 0 1 1 20 11Z"/>,
-  sparkles: <><path d="m12 2 2.2 7.8L22 12l-7.8 2.2L12 22l-2.2-7.8L2 12l7.8-2.2L12 2Z"/></>,
-  play: <><path d="m9 6 10 6-10 6V6Z"/><rect x="3" y="3" width="18" height="18" rx="4"/></>,
+  sparkles: <><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></>,
+  play: <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>,
   brain: <><path d="M12 6a4 4 0 0 0-8 1v9a4 4 0 0 0 8 2m0-12a4 4 0 0 1 8 1v9a4 4 0 0 1-8 2V4m0 14v2"/></>,
   monitor: <><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6m-3-4v4"/></>,
   zap: <path d="m13 2-9 12h7l-1 8 10-12h-7V2Z"/>,
-  users: <><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2H3ZM16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1"/></>,
+  users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></>,
   git: <><circle cx="6" cy="3" r="2"/><circle cx="6" cy="21" r="2"/><circle cx="18" cy="6" r="2"/><path d="M6 5v14m0-10c0-3 3-3 6-3h4"/></>,
   layout: <><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M10 9v12"/></>,
   folder: <path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/>,
@@ -62,13 +63,13 @@ const drawings = {
   chart: <path d="M4 20V10m5 10V6m5 14v-7m5 7V3"/>,
   puzzle: <path d="M4 4h6v2a2 2 0 0 0 4 0V4h6v6h-2a2 2 0 0 0 0 4h2v6h-6v-2a2 2 0 0 0-4 0v2H4v-6h2a2 2 0 0 0 0-4H4V4Z"/>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M4 9 6 6l3 1 2-3h3l2 3 3-1 2 3-2 3 2 3-2 3-3-1-2 3h-3l-2-3-3 1-2-3 2-3-2-3Z"/></>,
-  menu: <path d="M4 6h16M4 12h16M4 18h16"/>,
+  menu: <path d="M4 5h16M4 12h16M4 19h16"/>,
   check: <path d="m4 12 5 5L20 6"/>,
   x: <path d="M5 5l14 14M19 5 5 19"/>,
 }
 export function CommandIcon({ name = 'sparkles', className = '' }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round"
     strokeLinejoin="round" className={'living-command-icon ' + className}>
     {drawings[name] || drawings.sparkles}
   </svg>
