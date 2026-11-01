@@ -267,6 +267,11 @@ async function main() {
     report.checks.push('preview_shutdown')
     // Controlled HTTP fixtures exercise presentation, not model inference.
     const flowConversation=await api(page,'/conversations','POST',{title:'Flow UI acceptance'})
+    let historyRevision=0
+    const historyRoute='**/api/conversations/'+flowConversation.id+'/messages'
+    await page.route(historyRoute,route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(
+      Array.from({length:18},(_,i)=>({role:i%2?'assistant':'user',content:'Registro de leitura '+i+' revisao '+historyRevision+'\n'+('Conteudo anterior para conferir a rolagem. '.repeat(20))}))
+    )}))
     const actualProviders=await api(page,'/providers')
     const actualAgents=await api(page,'/agents')
     const flowSteps=[
@@ -299,6 +304,28 @@ async function main() {
     const executionPanel=page.getByRole('complementary',{name:'Painel da execu\u00e7\u00e3o e pr\u00e9via'})
     if(await executionPanel.isVisible())await page.getByRole('button',{name:'Abrir pr\u00e9via',exact:true}).click()
     await expect(executionPanel).toHaveCount(0)
+    const tools=page.locator('.reference-tools')
+    await tools.locator('summary').click()
+    await expect(tools).toHaveAttribute('open','')
+    await tools.locator('.reference-tools-menu p').click()
+    await expect(tools).toHaveAttribute('open','')
+    await flowCard.locator('.flow-state').click()
+    await expect(tools).not.toHaveAttribute('open','')
+    await tools.locator('summary').click()
+    await page.keyboard.press('Escape')
+    await expect(tools).not.toHaveAttribute('open','')
+    const transcript=page.locator('div.scrollbar-soft').filter({has:flowCard})
+    await transcript.evaluate(el=>{el.scrollTop=200;el.dispatchEvent(new Event('scroll'))})
+    const readingPosition=await transcript.evaluate(el=>el.scrollTop)
+    flowSteps[1].name='Revisao atualizada 1'
+    await expect(page.getByText('Revisao atualizada 1',{exact:true})).toHaveCount(2,{timeout:10000})
+    expect(await transcript.evaluate(el=>el.scrollTop)).toBeCloseTo(readingPosition,0)
+    await transcript.evaluate(el=>{el.scrollTop=el.scrollHeight;el.dispatchEvent(new Event('scroll'))})
+    flowSteps[1].name='Revisao atualizada 2'
+    await expect(page.getByText('Revisao atualizada 2',{exact:true})).toHaveCount(2,{timeout:10000})
+    expect(await transcript.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThan(64)
+    report.checks.push('chat_preserves_reading_position_and_resumes_follow_at_bottom')
+    report.checks.push('tools_preserve_inside_click_and_dismiss_outside_and_escape')
     await expect(flowCard.getByText('Fixture: contrato da interface registrado para revisao.',{exact:true})).toBeVisible()
     await expect(flowCard.getByText('Entrega verificada',{exact:true})).toHaveCount(0)
     await flowCard.screenshot({path:path.join(evidence,'chat-worker-flow-fixture.png')})
@@ -324,6 +351,7 @@ async function main() {
     await page.unroute('**/api/agents')
     await page.unroute('**/api/runs')
     await page.unroute('**/api/runs/flow-fixture**')
+    await page.unroute(historyRoute)
 
     if(errors.length)throw new Error('Renderer errors: '+errors.join(';'))
     await app.close()
