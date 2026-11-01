@@ -79,11 +79,11 @@ def test_runtime_model_list_uses_owned_saved_key_without_cli_or_mutations(api, m
     seen = []
     async def discover(kind, key, **options):
         seen.append((kind, key, options))
-        return [{'id':'gemini-text','name':'Text'}]
+        return [{'id':'gemini-text','name':'Text'}, {'id':'x'*120,'name':'Too long after prefix'}, {'id':'bad?model','name':'Invalid'}]
     monkeypatch.setattr(main, 'discover_models', discover)
     response = asyncio.run(request({'source_provider_id':'source'}, action='models', runtime='opencode'))
     assert response.status_code == 200
-    assert response.json()['models'][0]['id'] == 'google/gemini-text'
+    assert [m['id'] for m in response.json()['models']] == ['google/gemini-text']
     assert response.json()['generation_tested'] is False
     assert seen == [('gemini','source-fixture-key',{'runtime':True})]
     assert 'source-fixture-key' not in response.text
