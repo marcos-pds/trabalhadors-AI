@@ -18,7 +18,8 @@ biblioteca compatível com navegadores.
 - Chat continua como tela principal; menu lateral permanece para acessibilidade
   e compatibilidade com a navegação por mouse.
 - Botão de estrela na barra insere "/" e abre a paleta real. Também funciona
-  digitando "/" diretamente; ↑ ↓ selecionam, Enter executa, Escape fecha.
+  digitando "/" diretamente; / fora de um campo ou Ctrl+K (Cmd+K no macOS)
+  também foca a paleta. ↑ ↓ selecionam, Enter executa, Escape fecha.
 - Comandos de navegação e ferramentas apenas chamam funções existentes:
   /chat, /novo, /previa, /memoria, /computador, /agentes, /provedores,
   /projetos, /fluxos, /monitoramento, /tokens, /integracoes, /github,
