@@ -94,8 +94,20 @@ async function main() {
     report.checks.push('external_runtime_profiles_and_explicit_connection')
     const runtimeInventory=await api(page,'/runtimes/execution')
     if(runtimeInventory.gemini.status==='configured') {
+      // Deterministic catalog fixture; real provider discovery is tested separately.
+      let catalogRequests=0
+      await page.route('**/api/runtimes/external/gemini/models',async route => {
+        catalogRequests++
+        await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({models:[{id:'smoke-no-generation',name:'Smoke'},{id:'smoke-alternative',name:'Alternative'}]})})
+      })
       await runtimes.getByLabel('Chave API do runtime').fill('smoke-placeholder-not-a-real-api-key')
-      await runtimes.getByLabel('Modelo do runtime externo').fill('smoke-no-generation')
+      await expect(runtimes.getByLabel('Modelo do runtime externo').locator('option')).toHaveCount(3,{timeout:10000})
+      await runtimes.getByLabel('Modelo do runtime externo').selectOption('smoke-no-generation')
+      if(catalogRequests!==1)throw new Error('Automatic catalog request duplicated or missing')
+      await runtimes.getByRole('button',{name:'Atualizar modelos'}).click()
+      await expect.poll(()=>catalogRequests).toBe(2)
+      await expect(runtimes.getByLabel('Modelo do runtime externo')).toBeEnabled()
+      report.checks.push('automatic_model_catalog_and_refresh_fixture')
       await runtimes.getByRole('button',{name:/Conectar runtime/}).click()
       await expect(runtimes.getByRole('status')).toContainText('Gemini CLI conectado',{timeout:20000})
       const providers=await api(page,'/providers')
