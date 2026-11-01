@@ -19,4 +19,6 @@ Nenhum arquivo da aplicação gerada foi escrito pelo avaliador. O banco do labo
 
 62 testes direcionados de conectores/saúde/autonomia/ponte de APIs passaram; 93 de checkpoints, recuperação, promoção, delegação e aceitação passaram; após as últimas mudanças de observabilidade/política, 13 testes direcionados passaram. Frontend: 77 testes e build Vite aprovados. Esses testes não substituem a aceitação de um projeto gerado.
 
+Regressão completa: **1.272 testes Python aprovados, 31 ignorados e dois avisos existentes**, em 266,80 segundos. Os 13 testes direcionados cobrem também as últimas mudanças do feed e da política do laboratório.
+
 As 11 etapas continuam parcialmente concluídas conforme a matriz de 31/10. Permanecem: entrega full-stack e QA visual com reparo pela Central, delegação executada e integrada, concorrência/controles e retomada comprovados no projeto maior, homologação Claude/ACP pendente, avaliação real de memória e pedidos curtos, ciclo autenticado/revogação de integrações e execução de mídia no Motion Studio. Esta rodada avança as etapas 6, 7 e 9; não conclui a etapa 11.
