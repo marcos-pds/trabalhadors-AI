@@ -56,18 +56,20 @@ class ProviderHealth:
         """Give strong preference to assigned models, except unhealthy/suspended ones.
 
         Requires >=5 observations for historical success rate to outweigh priority.
-        Cooldown-expired candidates remain eligible for a single half-open probe.
+        Cooldown-expired candidates remain eligible for a single half-open probe,
+        after candidates without an open breaker. Assignment cannot override
+        this recovery tier; a successful probe restores ordinary preference.
         """
         def score(provider):
             model = preferred_model if provider['id'] == preferred and preferred_model else provider['model']
             d = self.detail(provider['id'], model)
-            unavailable = d['state'] == 'suspended'
+            recovery_tier = {'recovering': 1, 'suspended': 2}.get(d['state'], 0)
             samples = d['samples']
             reliability_penalty = (100 - d['success_rate']) * 0.6 if samples >= 5 else 0
             latency_penalty = min((d['avg_latency_ms'] or 0) / 1000, 15)
             preferred_bonus = -50 if provider['id'] == preferred else 0
             recovery_penalty = 30 if d['state'] == 'recovering' else 0
-            return (int(unavailable), provider['priority'] * 3 + reliability_penalty + latency_penalty + preferred_bonus + recovery_penalty)
+            return (recovery_tier, provider['priority'] * 3 + reliability_penalty + latency_penalty + preferred_bonus + recovery_penalty)
         return sorted(providers, key=score)
 
     def acquire(self, provider_id, model):
