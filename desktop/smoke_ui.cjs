@@ -71,6 +71,12 @@ async function main() {
     await expect(page.getByRole('button',{name:'Abrir menu'})).toBeVisible({timeout:30000})
     report.checks.push('registration_and_authenticated_ui')
     await expect(page.locator('.central-root')).toHaveAttribute('data-theme','light')
+    await page.getByRole('button',{name:'Abrir menu'}).click()
+    await expect(page.getByText('Modelos de IA',{exact:true})).toHaveCount(0)
+    await page.locator('.central-drawer').screenshot({path:path.join(evidence,'minimal-sidebar.png')})
+    await page.getByRole('button',{name:'Fechar menu',exact:true}).click()
+    report.checks.push('minimal_sidebar_without_model_gallery')
+
     const composer=page.getByRole('textbox',{name:'Mensagem ou comando da Central'})
     await page.keyboard.press('Control+k')
     await expect(page.getByRole('listbox',{name:'Comandos',exact:true})).toBeVisible()
@@ -82,6 +88,13 @@ async function main() {
     await expect(page.getByRole('heading',{name:'Conecte sua equipe de IA'})).toBeVisible()
     const search=page.getByRole('textbox',{name:'Buscar servi\u00e7o no cat\u00e1logo'})
     await expect(search).toHaveCSS('background-color','rgb(255, 255, 255)')
+    await expect(page.locator('.provider-brand-icon svg').first()).toBeVisible()
+    const providerMotion=await page.getByRole('heading',{name:'Google AI Studio / Gemini',exact:true}).locator('..').locator('svg').evaluate(el=>({name:getComputedStyle(el).animationName,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches}))
+    if(!providerMotion.reduced && providerMotion.name==='none')throw new Error('Provider icon is not animated')
+
+    await page.screenshot({path:path.join(evidence,'animated-providers.png'),fullPage:true})
+    report.checks.push('provider_cards_with_brand_icons')
+
     await page.getByRole('button',{name:'Abrir menu'}).click()
     await page.getByTitle('Chat IA',{exact:true}).click()
     await page.screenshot({path:path.join(evidence,'ice-white-desktop.png'),fullPage:true})
@@ -94,6 +107,11 @@ async function main() {
     await composer.press('Escape')
     await expect(composer).toHaveCSS('outline-style','none')
     await expect(composer).toHaveCSS('resize','none')
+    await expect(page.locator('.liquid-chat-composer')).toHaveCSS('outline-style','none')
+    const rim=await page.locator('.liquid-chat-composer').evaluate(el=>getComputedStyle(el).borderTopColor)
+    if(!rim.includes('255, 255, 255'))throw new Error('Dark composer rim returned')
+    report.checks.push('transparent_composer_without_dark_rim')
+
     await page.screenshot({path:path.join(evidence,'ice-white-mobile.png'),fullPage:true})
     await page.emulateMedia({reducedMotion:'reduce'})
     await expect(page.locator('.reference-core-icon g').first()).toHaveCSS('animation-iteration-count','1')
