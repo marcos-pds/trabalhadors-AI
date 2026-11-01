@@ -70,3 +70,27 @@ navegador. Esta PR será testada sem alterar o estado do servidor principal.
 
 Os ícones de comandos seguem as formas SVG Lucide (https://lucide.dev),
 com licença ISC; o código de referência já utilizava lucide-react.
+
+## Correção de contraste do vidro no tema claro (captura do operador)
+
+A captura mostrou a barra sem distinção suficiente do fundo: borda branca
+sobre branco-gelo e pouca refração perceptível. O CSS agora usa bordas
+slate (rgba(43,57,79,.72), com hover/foco mais escuro), tonalidade azul-prata
+translúcida, sombra de profundidade, brilho interno nas bordas e
+`backdrop-filter` no fundo real. A camada React `LiquidGlass` mantém o
+mapa de deslocamento de pixels **no conteúdo pintado pela própria lente**;
+não afirmar que refrata os pixels arbitrários de toda a página.
+
+A intensidade do compositor é específica, não global: força 0.14, banda 14,
+brilho 0.24 e destaque na borda 0.52. Inputs e botões ficam fora da
+camada decorativa, com eventos de mouse preservados. Tema escuro,
+preferência por movimento reduzido e alto contraste mantêm fallback.
+
+Referência analisada: https://github.com/rit3zh/expo-liquid-glass-view
+(MIT). **Não instalada**: o README confirma iOS nativo apenas, com
+Android/Web em `View` simples sem o renderer liquid glass. O comportamento
+visual foi interpretado para a tecnologia existente React Web/Electron.
+
+Testes adicionados: `frontend/src/glassComposer.test.mjs`. Eles verificam
+cores, seletores, parâmetros da lente e acessibilidade estática. A
+fidelidade **ainda exige captura de navegador e teste manual de foco**.
