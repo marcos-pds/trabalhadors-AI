@@ -47,6 +47,31 @@ async function main() {
     })
     const page=await app.firstWindow({timeout:90000})
     await page.waitForLoadState('domcontentloaded')
+    const opening=page.locator('.cia-intro')
+    await expect(opening).toHaveCount(1,{timeout:10000})
+    await expect(page.locator('#root')).toHaveJSProperty('inert',true)
+    if(!report.checks.includes('opening_seven_seconds_and_return')) {
+      await page.waitForTimeout(2000)
+      await opening.screenshot({path:path.join(evidence,'glass-cascade-opening.png')})
+      await expect(opening).toHaveCount(0,{timeout:10000})
+      await expect(page.locator('#root')).toHaveJSProperty('inert',false)
+      report.checks.push('opening_seven_seconds_and_return')
+      await page.reload()
+      await expect(opening).toHaveCount(1)
+      await opening.getByRole('button',{name:/Pular abertura/}).click()
+      await expect(opening).toHaveCount(0)
+      await expect(page.locator('#root')).toHaveJSProperty('inert',false)
+      report.checks.push('opening_skip_restores_app')
+      await page.reload()
+      await expect(opening).toHaveCount(1)
+      await page.keyboard.press('Escape')
+      await expect(opening).toHaveCount(0)
+      report.checks.push('opening_escape_restores_app')
+    } else {
+      await opening.getByRole('button',{name:/Pular abertura/}).click()
+      await expect(opening).toHaveCount(0)
+      report.checks.push('opening_reappears_after_restart')
+    }
     return page
   }
   async function api(page,endpoint,method='GET',body) {

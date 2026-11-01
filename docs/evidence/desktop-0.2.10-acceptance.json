@@ -1,0 +1,30 @@
+{
+  "packaged": true,
+  "checks": [
+    "opening_seven_seconds_and_return",
+    "opening_skip_restores_app",
+    "opening_escape_restores_app",
+    "registration_and_authenticated_ui",
+    "white_draggable_native_caption_and_maximize_restore",
+    "minimal_sidebar_without_model_gallery",
+    "provider_cards_with_brand_icons",
+    "transparent_composer_without_dark_rim",
+    "reduced_motion_stops_repeated_core_animation",
+    "ice_white_slash_keyboard_light_controls_mobile_and_theme",
+    "motion_real_capability_diagnostics_and_reload",
+    "external_runtime_profiles_and_explicit_connection",
+    "automatic_model_catalog_and_refresh_fixture",
+    "frozen_backend_real_cli_version_and_connection_without_inference",
+    "workflow_required_delegation_saved_reloaded_and_reviewer_guarded",
+    "authenticated_project_creation",
+    "sandbox_context_isolation_no_node",
+    "authorized_preview_interaction_without_credentials",
+    "preview_shutdown",
+    "owned_backend_shutdown",
+    "opening_reappears_after_restart",
+    "login_and_project_persist_after_restart"
+  ],
+  "passed": true,
+  "final_backend_closed": true,
+  "final_preview_closed": true
+}
