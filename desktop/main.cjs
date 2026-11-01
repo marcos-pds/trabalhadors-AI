@@ -269,6 +269,11 @@ function showWindow(url) {
   win = new BrowserWindow({
     title: 'Central IA', icon: path.join(__dirname, 'assets', 'icon.png'), width: 1280, height: 830, minWidth: 860, minHeight: 580,
     show: false, autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden', accentColor: false,
+      titleBarOverlay: { color: '#ffffff', symbolColor: '#475569', height: 32 },
+    } : {}),
     webPreferences: { ...RENDERER_PREFERENCES, session: appSession },
   })
   win.webContents.on('page-title-updated', event => { event.preventDefault(); win.setTitle('Central IA') })

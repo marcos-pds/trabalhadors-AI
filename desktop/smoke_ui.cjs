@@ -70,6 +70,23 @@ async function main() {
     await page.getByRole('button',{name:/Criar conta grátis/}).click()
     await expect(page.getByRole('button',{name:'Abrir menu'})).toBeVisible({timeout:30000})
     report.checks.push('registration_and_authenticated_ui')
+    await expect(page.locator('.desktop-titlebar')).toBeVisible()
+    await expect(page.locator('.desktop-titlebar')).toHaveCSS('background-color','rgb(255, 255, 255)')
+    await expect(page.locator('.desktop-titlebar')).toHaveCSS('-webkit-app-region','drag')
+    const caption=await page.evaluate(()=>({visible:navigator.windowControlsOverlay?.visible,rect:navigator.windowControlsOverlay?.getTitlebarAreaRect().toJSON()}))
+    if(!caption.visible || caption.rect.height<30)throw new Error('Native window overlay missing')
+    const windowControls=await app.evaluate(({BrowserWindow})=>{
+      const w=BrowserWindow.getAllWindows()[0]
+      return {minimize:w.isMinimizable(),maximize:w.isMaximizable(),close:w.isClosable()}
+    })
+    if(!windowControls.minimize || !windowControls.maximize || !windowControls.close)throw new Error('Native caption controls disabled')
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].maximize())
+    await expect.poll(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMaximized())).toBe(true)
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].unmaximize())
+    await expect.poll(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMaximized())).toBe(false)
+    await page.locator('.desktop-titlebar').screenshot({path:path.join(evidence,'white-titlebar.png')})
+    report.checks.push('white_draggable_native_caption_and_maximize_restore')
+
     await expect(page.locator('.central-root')).toHaveAttribute('data-theme','light')
     await page.getByRole('button',{name:'Abrir menu'}).click()
     await expect(page.getByText('Modelos de IA',{exact:true})).toHaveCount(0)
