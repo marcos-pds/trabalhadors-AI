@@ -143,7 +143,41 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
     { id: 'avulsas', title: '◷ Conversas avulsas',
       conversations: data.conversations.filter(c => !c.project_id) },
   ].filter(group => group.conversations.length)
-  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-[#242528] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-8 w-8"/></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="liquid-navigation space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`liquid-menu-item flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><Icon className={page === key ? 'text-lilac' : 'text-muted'}>{glyph}</Icon>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav><div className="scrollbar-soft mt-5 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
+  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-[#242528] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-8 w-8"/></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="liquid-navigation space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`liquid-menu-item flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><Icon className={page === key ? 'text-lilac' : 'text-muted'}>{glyph}</Icon>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav>
+  <section className="reference-brand-list mt-4 border-t border-slate-200/65 pt-3" aria-label="Identidade visual dos provedores">
+    <div className="mb-2 flex items-center justify-between px-2">
+      <span className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Modelos de IA</span>
+      <span title="A presença do ícone não significa conexão ativa"
+        className="text-[9px] text-slate-400">Conexões reais</span>
+    </div>
+    <div className="grid grid-cols-2 gap-1 px-1">
+      {[
+        ['OpenAI', AIIcons.OpenAI, ['openai','openai_chatgpt','codex_cli']],
+        ['Claude', AIIcons.Claude, ['anthropic','claude_cli']],
+        ['Gemini', AIIcons.Gemini, ['gemini','gemini_cli']],
+        ['DeepSeek', AIIcons.DeepSeek, ['deepseek']],
+        ['Meta', AIIcons.Meta, ['ollama','meta']],
+        ['Mistral', AIIcons.Mistral, ['mistral']],
+      ].map(([name, Brand, kinds]) => {
+        const connected = data.providers.some(p => p.enabled && kinds.includes(p.kind))
+        return <button type="button" key={name}
+          onClick={() => onNavigate('providers')}
+          title={name + ' — ' + (connected ? 'Conexão habilitada' : 'Configurar conexão')}
+          className="reference-brand-item liquid-menu-item flex items-center gap-2 rounded-xl px-2 py-2 text-left">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/85 shadow-sm">
+            <Brand className="h-5 w-5" state="idle"/>
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[11px] font-semibold text-slate-700">{name}</span>
+            <span className={'block text-[9px] ' + (connected ? 'text-emerald-600' : 'text-slate-400')}>
+              {connected ? 'Habilitado' : 'Configurar'}
+            </span>
+          </span>
+        </button>
+      })}
+    </div>
+  </section>
+  <div className="scrollbar-soft mt-4 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
           <p title={group.title} className="truncate px-2.5 pb-1 pt-3 text-[10px] font-bold text-lilac">{group.title}</p>
           {group.conversations.map(convo => <button key={convo.id} onClick={() => onSwitch(convo.id)}
             title={convo.title} className={`mb-0.5 flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs transition ${convo.id === data.currentConvo ? 'bg-white/[.09] text-copy' : 'text-[#b8b5bd] hover:bg-white/[.05] hover:text-copy'}`}>
