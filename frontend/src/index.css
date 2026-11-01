@@ -59,3 +59,310 @@ select option { background: #242528; color: #e8eaed; }
   *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .chat-composer:hover, .chat-composer.is-typing { animation: none; }
 }
+
+
+/* Central IA vNext: real React liquid refraction, clear content on top.
+   Glass applies only to bounded local surfaces, never the full screen. */
+.central-root {
+  --glass-surface: rgba(26, 28, 41, .77);
+  --glass-edge: rgba(231, 222, 255, .31);
+  --glass-ink: #e8eaf4;
+  --glass-muted: #a4aac3;
+  --glass-accent: #a9a1ff;
+  --glass-ambient-a: rgba(114, 105, 242, .36);
+  --glass-ambient-b: rgba(63, 200, 211, .29);
+}
+.central-root[data-theme="light"] {
+  --glass-surface: rgba(255, 255, 255, .66);
+  --glass-edge: rgba(255, 255, 255, .87);
+  --glass-ink: #202b45;
+  --glass-muted: #62708a;
+  --glass-accent: #6357bd;
+  --glass-ambient-a: rgba(157, 120, 243, .25);
+  --glass-ambient-b: rgba(69, 181, 218, .19);
+}
+.central-root .central-main {
+  background:
+    radial-gradient(ellipse 58% 40% at 52% 42%, rgba(115, 113, 245, .16), transparent 90%),
+    radial-gradient(ellipse 50% 48% at 72% 78%, rgba(49, 172, 214, .10), transparent 90%),
+    #11151f;
+}
+.central-root[data-theme="light"] .central-main {
+  background:
+    radial-gradient(ellipse 42% 33% at 48% 38%, rgba(163, 145, 252, .20), transparent 85%),
+    radial-gradient(ellipse 40% 40% at 78% 76%, rgba(99, 191, 223, .17), transparent 90%),
+    linear-gradient(140deg, #f9fbff, #eef4fc 68%, #e6ebf7);
+}
+.central-root .central-header {
+  border-bottom: 1px solid rgba(255,255,255,.11);
+  background: rgba(19, 22, 33, .52);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+}
+.central-root[data-theme="light"] .central-header {
+  border-bottom-color: rgba(107, 124, 154, .14);
+  background: rgba(255,255,255,.44);
+}
+.central-root .central-chat-scene {
+  color: var(--glass-ink);
+}
+.central-root[data-page="chat"][data-theme="light"] {
+  --color-copy: #202b45;
+  --color-muted: #62708a;
+  --color-lilac: #6357bd;
+  --color-aqua: #3773ba;
+  --color-sidebar: #f5f7fd;
+  --color-panel: #fff;
+  --color-card: #eff2fa;
+}
+.central-root .central-drawer {
+  border-right: 1px solid rgba(255,255,255,.17);
+  background: rgba(30, 33, 48, .78);
+  -webkit-backdrop-filter: blur(30px) saturate(170%);
+  backdrop-filter: blur(30px) saturate(170%);
+}
+.central-root[data-theme="light"] .central-drawer {
+  border-color: rgba(255,255,255,.8);
+  background: rgba(247,249,255,.85);
+}
+.central-root .central-drawer aside { background: transparent; }
+.central-root .menu-drawer nav button,
+.central-root .liquid-menu-item {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: background .22s ease, transform .28s cubic-bezier(.17,.83,.21,1),
+    border-color .28s ease, box-shadow .28s ease;
+}
+.central-root .menu-drawer nav button::before,
+.central-root .liquid-menu-item::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at 25% 0%, rgba(244, 255, 255, .41), transparent 50%),
+    radial-gradient(ellipse at 95% 90%, rgba(151, 168, 255, .29), transparent 56%),
+    rgba(190, 194, 245, .09);
+  border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  backdrop-filter: blur(16px) saturate(170%);
+  box-shadow: inset 0 1px rgba(255,255,255,.33), 0 12px 25px rgba(22,19,46,.13);
+  transition: opacity .23s ease;
+}
+.central-root .menu-drawer nav button:hover::before,
+.central-root .menu-drawer nav button:focus-visible::before,
+.central-root .liquid-menu-item:hover::before,
+.central-root .liquid-menu-item:focus-visible::before,
+.central-root .liquid-menu-item[aria-selected="true"]::before { opacity: 1; }
+.central-root .menu-drawer nav button:hover,
+.central-root .liquid-menu-item:hover {
+  transform: translateX(3px) scale(1.008);
+  border-color: rgba(205, 203, 255, .22);
+}
+.liquid-underlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  pointer-events: none !important;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.liquid-refractor {
+  position: absolute !important;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.liquid-underpaint {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background:
+    radial-gradient(ellipse 85% 140% at 12% 5%, rgba(255,255,255,.58), transparent 72%),
+    radial-gradient(ellipse 65% 120% at 85% 80%, var(--glass-ambient-a), transparent 73%),
+    linear-gradient(125deg, var(--glass-surface), rgba(155,179,226,.13) 50%, var(--glass-surface));
+}
+.liquid-underpaint-shine {
+  display: block;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(112deg, transparent 13%, rgba(255,255,255,.20) 41%,
+    rgba(255,255,255,.03) 50%, transparent 76%);
+  animation: glass-sheen 9s ease-in-out infinite;
+}
+.liquid-chat-composer {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--glass-edge);
+  border-radius: 29px;
+  color: var(--glass-ink);
+  background: var(--glass-surface);
+  box-shadow:
+    0 22px 64px rgba(18,22,43,.20), inset 0 1.6px rgba(255,255,255,.52),
+    inset 0 -4px 13px rgba(112,130,212,.12);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
+  transition: transform .38s cubic-bezier(.17,.83,.21,1),
+    box-shadow .32s ease, border-color .32s ease;
+}
+.liquid-chat-composer:hover,
+.liquid-chat-composer:focus-within {
+  transform: translateY(-2px);
+  border-color: rgba(177, 178, 255, .68);
+  box-shadow:
+    0 27px 70px rgba(38,50,96,.23), 0 0 25px rgba(163,148,255,.13),
+    inset 0 2px 4px rgba(255,255,255,.42);
+}
+.liquid-chat-composer > .liquid-underlay { opacity: .83; }
+.liquid-chat-composer .composer-input-content { position: relative; z-index: 1; }
+.liquid-chat-composer textarea {
+  color: var(--glass-ink);
+  letter-spacing: -.01em;
+  resize: vertical;
+}
+.liquid-chat-composer textarea::placeholder { color: var(--glass-muted); }
+.liquid-command-trigger {
+  width: 43px;
+  height: 43px;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  color: #b6a0ff;
+  background: radial-gradient(circle at 20% 10%, rgba(191,166,255,.29), rgba(98,107,235,.12));
+  border: 1px solid rgba(198,185,255,.37);
+  display: grid;
+  place-items: center;
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+.liquid-command-trigger:hover, .liquid-command-trigger:focus-visible {
+  transform: scale(1.10) rotate(-6deg);
+  box-shadow: 0 7px 20px rgba(126,90,222,.27), inset 0 1px rgba(255,255,255,.45);
+}
+.living-command-icon { width: 20px; height: 20px; flex: 0 0 auto; }
+.liquid-command-trigger .living-command-icon { width: 23px; height: 23px; animation: breathe-icon 3.8s ease-in-out infinite; }
+.liquid-menu-item .living-command-icon { transition: transform .32s ease, filter .3s ease; }
+.liquid-menu-item:is(:hover,:focus-visible,[aria-selected="true"]) .living-command-icon {
+  transform: scale(1.17) rotate(-5deg);
+  filter: drop-shadow(0 0 8px rgba(190,166,255,.66));
+}
+.liquid-command-menu {
+  border: 1px solid var(--glass-edge);
+  border-radius: 25px;
+  background: var(--glass-surface);
+  color: var(--glass-ink);
+  -webkit-backdrop-filter: blur(34px) saturate(160%);
+  backdrop-filter: blur(34px) saturate(160%);
+  box-shadow: 0 26px 70px rgba(14,19,43,.28), inset 0 1px rgba(255,255,255,.34);
+  animation: glass-menu-open .26s cubic-bezier(.17,.83,.21,1) both;
+}
+.liquid-command-group {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--glass-muted);
+}
+.liquid-command-key { color: var(--glass-accent); }
+.liquid-command-highlight { opacity: .50; }
+.living-agent-orbit {
+  position: relative;
+  flex: 0 0 auto;
+  width: min(330px, 78vw);
+  height: min(330px, 78vw);
+  margin: 0 auto 12px;
+  display: grid;
+  place-items: center;
+}
+.living-orbit-halo {
+  position: absolute;
+  inset: 5%;
+  border-radius: 100%;
+  border: 1px solid rgba(167,160,241,.28);
+  box-shadow: 0 0 62px rgba(140,124,240,.07);
+  pointer-events: none;
+}
+.living-orbit-halo.halo-one { border-style: dashed; animation: orbit-rotate 42s linear infinite; }
+.living-orbit-halo.halo-two { inset: 21%; border-color: rgba(112,199,217,.36); animation: orbit-rotate 31s linear infinite reverse; }
+.living-core {
+  width: 42%;
+  height: 42%;
+  display: flex;
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 42%;
+  border: 1px solid rgba(255,255,255,.53);
+  background: linear-gradient(135deg, rgba(255,255,255,.38), rgba(140,144,226,.16));
+  box-shadow: 0 24px 60px rgba(88,97,158,.22), inset 0 2px rgba(255,255,255,.46);
+  animation: orbit-breathe 7s ease-in-out infinite;
+}
+.living-core-refraction { border-radius: inherit; }
+.living-core-mark { z-index: 1; font-size: clamp(48px, 9vw, 77px); line-height: 1; color: #998bfa; filter: drop-shadow(0 3px 10px rgba(122,100,241,.36)); }
+.living-core-caption { position: relative; z-index: 1; font-size: 9px; font-weight: 700; letter-spacing: .22em; color: var(--glass-muted); }
+.living-provider {
+  position: absolute;
+  left: calc(50% + var(--orbit-x));
+  top: calc(50% + var(--orbit-y));
+  transform: translate(-50%, -50%);
+  max-width: 97px;
+  min-width: 60px;
+  padding: 6px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 16px;
+  background: var(--glass-surface);
+  box-shadow: 0 9px 24px rgba(34,37,81,.13), inset 0 1px rgba(255,255,255,.36);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.3;
+  color: var(--glass-ink);
+  animation: orbit-satellite 5s ease-in-out infinite;
+  animation-delay: var(--orbit-delay);
+}
+.living-provider-dot { color: #a99bff; font-size: 19px; line-height: 1; }
+.living-orbit-hint { position: absolute; top: 88%; color: var(--glass-muted); font-size: 10px; }
+.living-agent-orbit.is-working .living-core-mark { animation: orbit-rotate 2.6s linear infinite; }
+.living-agent-orbit.is-working .living-orbit-halo.halo-one { animation-duration: 12s; }
+.central-root[data-theme="light"] .central-chat-scene .text-muted,
+.central-root[data-theme="light"] .central-chat-scene .text-copy { color: inherit; }
+.central-root[data-theme="light"] .central-chat-scene .border-white\/10 { border-color: rgba(95,103,145,.18); }
+.central-root[data-theme="light"] .central-chat-scene .bg-card { background: rgba(255,255,255,.67); }
+.central-root[data-theme="light"] .central-chat-scene .bg-white\/\[\.035\] { background: rgba(255,255,255,.4); }
+@keyframes breathe-icon { 0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.15);opacity:1} }
+@keyframes glass-sheen { 0%,100%{transform:translateX(-26%);opacity:.36}50%{transform:translateX(19%);opacity:.72} }
+@keyframes orbit-breathe { 0%,100%{border-radius:42% 49% 44% 52%;transform:scale(1)}50%{border-radius:50% 38% 52% 41%;transform:scale(1.045)} }
+@keyframes orbit-satellite { 0%,100% {translate:0 0}50% {translate:0 -7px} }
+@keyframes orbit-rotate {to{rotate:360deg}}
+@keyframes glass-menu-open {from{opacity:0;transform:translateY(8px) scale(.975)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media (max-width: 600px) {
+  .living-agent-orbit { width:min(260px,72vw);height:min(260px,72vw); }
+  .living-provider { font-size:8px; max-width:72px;min-width:52px;padding:4px; }
+  .liquid-chat-composer { border-radius:24px; }
+  .liquid-command-trigger {width:39px;height:39px}
+}
+@media (prefers-reduced-motion: reduce) {
+  .living-orbit-halo,.living-core,.living-provider,
+  .living-agent-orbit.is-working .living-core-mark,.liquid-underpaint-shine,
+  .liquid-command-trigger .living-command-icon { animation:none!important; }
+  .liquid-chat-composer:hover,.liquid-chat-composer:focus-within,
+  .liquid-command-trigger:hover,.liquid-menu-item:hover { transform:none!important; }
+}
+@media (forced-colors: active) {
+  .liquid-chat-composer,.liquid-command-menu { border:1px solid CanvasText;background:Canvas; }
+  .liquid-underlay,.liquid-menu-item::before { display:none; }
+}
