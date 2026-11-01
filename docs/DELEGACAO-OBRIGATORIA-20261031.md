@@ -67,3 +67,14 @@ falha de provedor.
 O [protocolo full-stack](ACEITACAO-FULLSTACK-INDEPENDENTE.md) continua sendo o
 gate de conclusao do projeto maior. O [ensaio anterior](TASKLAB-APIS-20261031.md)
 permanece documentado, inclusive suas falhas; esta evidencia nao o substitui.
+
+
+## Recuperacao de provedores
+
+O roteamento agora coloca candidatos sem circuito aberto antes dos que estao
+em recuperacao, mesmo quando o provedor em recuperacao era o preferido do
+trabalhador. O prazo de suspensao continua obrigatorio; depois dele, uma unica
+sondagem continua permitida se as alternativas nao concluirem. Uma resposta
+bem-sucedida restaura a preferencia normal. Nao concede acesso nem habilita
+provedores desativados. Testes de SQLite/relogio controlado cobrem essa ordem
+e o retorno apos recuperacao; nao comprovam que uma cota externa foi liberada.
