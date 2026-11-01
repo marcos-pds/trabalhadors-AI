@@ -175,6 +175,8 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
   const fileRef = useRef(null)
   const inputRef = useRef(null)
   const transcriptRef = useRef(null)
+  const followTranscriptRef = useRef(true)
+  const toolsRef = useRef(null)
   const sendLockRef = useRef(false)
   const [sending, setSending] = useState(false)
   const [activeCommand, setActiveCommand] = useState(0)
@@ -203,7 +205,28 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
   }, [setPrompt])
-  useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight }, [messages, steps])
+  useEffect(() => { followTranscriptRef.current = true }, [currentConvo])
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    if (transcript && followTranscriptRef.current) transcript.scrollTop = transcript.scrollHeight
+  }, [messages, steps, currentConvo])
+  useEffect(() => {
+    const dismissTools = event => {
+      const tools = toolsRef.current
+      if (!tools?.open) return
+      if (event.type === 'keydown') {
+        if (event.key !== 'Escape') return
+        tools.open = false
+        tools.querySelector('summary')?.focus()
+      } else if (!tools.contains(event.target)) tools.open = false
+    }
+    document.addEventListener('pointerdown', dismissTools, true)
+    document.addEventListener('keydown', dismissTools)
+    return () => {
+      document.removeEventListener('pointerdown', dismissTools, true)
+      document.removeEventListener('keydown', dismissTools)
+    }
+  }, [])
   async function attach(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -290,7 +313,10 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
         </details>
       </div>
     </header>
-    <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
+    <div ref={transcriptRef} onScroll={event => {
+      const node = event.currentTarget
+      followTranscriptRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+    }} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
       {!messages.length ? <ChatWelcome onSuggest={onSuggest} providers={data.providers} running={running}/> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-card' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <AIIcons.CentralCore className="h-6 w-6" />}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
       {activityRunId && <ConversationActivity key={activityRunId} api={api} runId={activityRunId} active={running} agents={data.agents} providers={data.providers} onOpenExecution={onOpenExecution}/>}
       {steps.length > 0 && <details open={steps.some(step => step.status === 'awaiting_approval')} className="mx-auto mb-5 max-w-3xl rounded-2xl border border-white/10 bg-white/[.035] p-4">
@@ -376,7 +402,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             {autonomous ? '● Autonomia ativa · acesso restrito à pasta autorizada' : '○ Autonomia desligada'}
             {files.length ? ' · ' + files.length + ' arquivo(s) anexado(s)' : ''}
           </span>
-          <details className="reference-tools">
+          <details ref={toolsRef} className="reference-tools">
             <summary aria-label="Abrir ferramentas e permissões">Ferramentas e permissões ▴</summary>
             <div className="reference-tools-menu">
               <input ref={fileRef} type="file" className="hidden"
