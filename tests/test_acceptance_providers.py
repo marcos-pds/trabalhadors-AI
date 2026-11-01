@@ -161,3 +161,33 @@ def test_total_stream_deadline_closes_upstream_for_provider_failover(source, mon
 
     asyncio.run(exercise())
     assert closed == [True]
+
+
+@pytest.mark.parametrize('category,status', [('context_limit',400),('model_unavailable',404)])
+def test_bridge_preserves_recovery_category_without_response_body(source, monkeypatch, category, status):
+    class Client:
+        async def stream(self, *args):
+            raise ProviderError(category, SECRET, False, status)
+            yield ''
+    monkeypatch.setattr(ap, 'ProviderClient', Client)
+    selected = ap.SourceProviders.load(source)
+    descriptor = selected.descriptors[0]
+    async def exercise():
+        with pytest.raises(ProviderError) as error:
+            await anext(selected.client().stream(descriptor, '', descriptor['model'], '', []))
+        assert error.value.category == category and error.value.http_status == status
+        assert SECRET not in str(error.value)
+    asyncio.run(exercise())
+
+
+def test_lab_denies_outside_preview_without_auto_approving_installs_or_promotion():
+    from examples.validate_api_tasklab import local_preview_decision
+    preview = {'status':'running', 'url':'http://127.0.0.1:5173/'}
+    browser = lambda url: {'action':'browser_tool','tool':'new_page','arguments':{'url':url}}
+    assert local_preview_decision(browser(preview['url']), preview) is True
+    assert local_preview_decision(browser(preview['url']), {'status':'stopped'}) is False
+    for url in ['http://localhost:5173/','http://127.0.0.1:8765/','https://example.com/',
+                'http://user:pass@127.0.0.1:5173/','http://127.0.0.1:bad/']:
+        assert local_preview_decision(browser(url), preview) is False
+    for action in ['command','write','promote']:
+        assert local_preview_decision({'action':action}, preview) is None

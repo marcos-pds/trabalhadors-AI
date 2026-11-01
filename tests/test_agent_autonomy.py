@@ -299,7 +299,8 @@ def test_context_compaction_preserves_user_updates_and_complete_recent_results()
     assert compact_tool_history(original[:2], 1) is None
 
 
-def test_http_413_compacts_tools_and_retries_without_changing_permissions(workspace):
+@pytest.mark.parametrize('category,status', [('request',413),('context_limit',400),('context_limit',422)])
+def test_context_rejection_compacts_tools_and_retries_without_changing_permissions(workspace, category, status):
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))
     (root / 'notes.md').write_text('Documento real de teste.\n' * 300, encoding='utf-8')
@@ -309,7 +310,7 @@ def test_http_413_compacts_tools_and_retries_without_changing_permissions(worksp
         async def stream(self, provider, key, model, system, messages):
             self.calls += 1
             if self.calls == 4:
-                raise ProviderError('request', 'Request too large', False, 413)
+                raise ProviderError(category, 'Request too large', False, status)
             if self.calls <= 3:
                 action = {'action': 'list', 'path': ''} if self.calls == 1 else {
                     'action': 'read', 'path': 'notes.md' if self.calls == 2 else 'hello.py'}

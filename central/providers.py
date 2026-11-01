@@ -52,6 +52,19 @@ def classify_http(code, response):
     if code == 402 or ('insufficient_quota' in response.lower()): return ProviderError('credits', 'Créditos insuficientes.', False, code)
     if code == 429: return ProviderError('rate_limit', 'Limite de requisições do provedor.', True, code)
     if code >= 500: return ProviderError('unavailable', f'Provedor indisponível (HTTP {code}).', True, code)
+    # Read only standardized identifiers, never infer recovery from arbitrary
+    # response prose (which may contain credentials or user-controlled text).
+    if code in (400, 404, 413, 422):
+        try:
+            detail = json.loads(response).get('error')
+            identifiers = {value for field in ('code', 'type')
+                           if isinstance(detail, dict) and isinstance(value := detail.get(field), str)}
+        except (ValueError, AttributeError):
+            identifiers = set()
+        if identifiers & {'context_length_exceeded', 'context_window_exceeded', 'max_context_length_exceeded'}:
+            return ProviderError('context_limit', 'O histórico excedeu o contexto do modelo.', False, code)
+        if identifiers & {'model_not_found', 'model_decommissioned', 'model_not_available'}:
+            return ProviderError('model_unavailable', 'Modelo indisponível para esta conexão.', False, code)
     return ProviderError('request', f'Erro HTTP {code}: {text}', False, code)
 
 

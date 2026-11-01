@@ -132,9 +132,36 @@ def snapshot(db, state):
             'workspaces': db.all('SELECT step_id,state FROM isolated_workspace_steps WHERE run_id=?', (rid,))}
 
 
+def local_preview_decision(request, preview):
+    """Return a concrete lab-policy decision, or None for operator review.
+
+    A browser request outside the active preview is denied, not left waiting
+    forever. Denial ends the attempt through the ordinary permission boundary;
+    it is not proof of worker recovery or permission to visit another service.
+    Installs, promotion and other approvals retain their ordinary review flow.
+    """
+    if request.get('action') == 'preview' and request.get('operation') == 'start':
+        return True
+    if request.get('action') != 'browser_tool':
+        return None
+    url = request.get('arguments', {}).get('url')
+    if not url:
+        return True  # The browser gateway separately checks page IDs and scope.
+    try:
+        parsed, expected = urlsplit(url), urlsplit(preview.get('url', ''))
+        return (preview.get('status') == 'running' and bool(preview.get('url'))
+                and not parsed.username and not parsed.password
+                and expected.scheme == 'http' and expected.hostname in ('127.0.0.1', 'localhost')
+                and expected.port is not None
+                and (parsed.scheme, parsed.hostname, parsed.port) == (expected.scheme, expected.hostname, expected.port))
+    except (ValueError, TypeError):
+        return False
+
+
 async def process(args):
     from central.engine import Engine
     from central.security import Security
+    from central.database import utcnow
     from central.approval_engine import decide
     from central import live_preview, browser_mcp, worker_preview
     state = state_at(args.destination)
@@ -148,25 +175,24 @@ async def process(args):
     original = engine.emit
     rid, user = state['run_id'], state['user_id']
 
+    def resolve_approval(approval_id):
+        row = db.one("SELECT request_json FROM workspace_action_approvals WHERE id=? AND run_id=? AND status='pending' AND expires_at>?", (approval_id, rid, utcnow()))
+        if not row:
+            return
+        decision = local_preview_decision(json.loads(row['request_json']), live_preview.info(user))
+        if decision is not None:
+            decide(db, user, rid, approval_id, decision)
+            original(rid, 'test_operator_approval', {'approval_id': approval_id,
+                     'policy': 'isolated_local_preview_browser_only', 'approved': decision})
+
     def emit(run_id, kind, payload):
         original(run_id, kind, payload)
         if kind in ('run_status', 'step_status', 'model_selected', 'workspace_approval_required', 'workspace_validation'):
             print(json.dumps({'event': kind, 'run_id': run_id, **payload}, ensure_ascii=False), flush=True)
         if kind != 'workspace_approval_required':
             return
-        row = db.one('SELECT request_json FROM workspace_action_approvals WHERE id=?', (payload['approval_id'],))
-        request = json.loads(row['request_json'])
-        allowed = run_id == rid and request['action'] == 'preview' and request.get('operation') == 'start'
-        if request['action'] == 'browser_tool' and run_id == rid:
-            allowed = True
-            url = request.get('arguments', {}).get('url')
-            if url:
-                base = live_preview.info(user).get('url', '')
-                parsed, expected = urlsplit(url), urlsplit(base)
-                allowed = bool(base) and (parsed.scheme, parsed.hostname, parsed.port) == (expected.scheme, expected.hostname, expected.port)
-        if allowed:
-            decide(db, user, rid, payload['approval_id'], True)
-            original(rid, 'test_operator_approval', {'approval_id': payload['approval_id'], 'policy': 'isolated_local_preview_browser_only', 'approved': True})
+        if run_id == rid:
+            resolve_approval(payload['approval_id'])
         # Other approvals stay pending for concrete operator review.
 
     engine.emit = emit
@@ -174,6 +200,8 @@ async def process(args):
         current = db.one('SELECT status FROM runs WHERE id=?', (rid,))['status']
         if current in ('failed', 'cancelled', 'paused_limit', 'paused_operator', 'awaiting_integration'):
             engine.resume_run(rid)
+        for pending in db.all("SELECT id FROM workspace_action_approvals WHERE run_id=? AND status='pending'", (rid,)):
+            resolve_approval(pending['id'])
         try:
             await asyncio.wait_for(engine.process(rid), timeout=args.timeout)
         except asyncio.TimeoutError:

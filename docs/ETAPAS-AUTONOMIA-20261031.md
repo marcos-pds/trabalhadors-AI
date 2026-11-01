@@ -4,6 +4,8 @@ Implementacao, testes de contrato e homologacao com ferramentas/modelos reais
 sao evidencias distintas. Esta matriz nao declara as 11 etapas concluidas.
 Os ensaios anteriores continuam registrados, inclusive falhas e intervencoes.
 
+Atualização posterior: [recuperação, monitoramento e ensaio real de 01/11](ETAPAS-AUTONOMIA-20261101.md).
+
 | Etapa | Estado | Evidencia e trabalho restante |
 | --- | --- | --- |
 | 1. QA visual e autocorrecao | Demonstrado em caso simples | `CICLO-AUTONOMO-20261029.md`: criacao e reparo pela Central com MCP, console e Lighthouse. Ampliar tipos de defeito e aplicar ao projeto full-stack. |
