@@ -19,7 +19,10 @@ def test_resource_worker_and_isolation_tables_are_created_by_database(tmp_path):
             assert record is not None, table
         versions = [row['version'] for row in db.all(
             "SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == list(range(1, 23))
+        from central.migrations import MIGRATIONS
+        assert versions == [version for version,_,_ in MIGRATIONS]
+        for table in ('motion_runs','motion_jobs','motion_tool_settings'):
+            assert db.one("SELECT name FROM sqlite_master WHERE type='table' AND name=?",(table,))
         assert db.one("PRAGMA integrity_check")['integrity_check'] == "ok"
     finally:
         db.close()

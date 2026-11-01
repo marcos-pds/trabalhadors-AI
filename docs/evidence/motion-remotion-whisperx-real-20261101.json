@@ -1,0 +1,61 @@
+{
+  "runs": [
+    {
+      "id": "a2be516b-7993-4a6f-8647-9cb1aa4cf702",
+      "state": "completed",
+      "error": null,
+      "created_at": "2026-11-01T20:05:52.889280+00:00",
+      "updated_at": "2026-11-01T20:06:28.739430+00:00",
+      "cancel_requested": 0,
+      "jobs": [
+        {
+          "id": "render",
+          "adapter": "remotion",
+          "state": "completed",
+          "artifact": {
+            "id": "result",
+            "kind": "video",
+            "path": "renders/scene.mp4",
+            "bytes": 5592,
+            "sha256": "465cd79d96296ea7fb662e3a89327f15407f12d6aaa263bfc89c4c64835baf13"
+          },
+          "error": null,
+          "started_at": "2026-11-01T20:05:53.039893+00:00",
+          "finished_at": "2026-11-01T20:06:28.737752+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ee05123f-cdc7-4517-8e1b-6f36acd91390",
+      "state": "completed",
+      "error": null,
+      "created_at": "2026-11-01T20:05:52.908417+00:00",
+      "updated_at": "2026-11-01T20:09:11.272737+00:00",
+      "cancel_requested": 0,
+      "jobs": [
+        {
+          "id": "render",
+          "adapter": "whisperx",
+          "state": "completed",
+          "artifact": {
+            "id": "result",
+            "kind": "captions",
+            "path": "renders/speech.json",
+            "bytes": 2406,
+            "sha256": "9841228ceb40f8830d18f73817a9b2f2dda985df71775bce76adaaa912b8e973"
+          },
+          "error": null,
+          "started_at": "2026-11-01T20:06:28.753053+00:00",
+          "finished_at": "2026-11-01T20:09:11.271568+00:00"
+        }
+      ],
+      "recognized_text": " this is a test of the central media studio. the transcription should preserve these spoken words.",
+      "aligned_word_count": 16
+    }
+  ],
+  "synthetic_fixtures": true,
+  "ai_app_generation_tested": false,
+  "independent_video_decode": true,
+  "speech_content_verified": true,
+  "passed": true
+}

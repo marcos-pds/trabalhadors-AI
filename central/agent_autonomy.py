@@ -282,6 +282,14 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                        'dos arquivos antes de alterar. Última ação: ' + last_action +
                        '. Último resultado: ' + last_result[:600] +
                        '. Complete a próxima parte verificável e conclua com finish.'})
+    recovered_browser = bool(saved and require_browser_validation and changed_files and
+                             any(action.startswith('browser:') for action in observed_actions))
+    if recovered_browser:
+        transcript.append({'role':'user','content':
+            'ESTADO DA PRÉVIA NA RETOMADA: processos e páginas do navegador não são '
+            'preservados pelo checkpoint. Antes de reutilizar uma URL ou pageId, '
+            'consulte preview status e, se necessário, preview start no cwd real. '
+            'Use somente a URL retornada; não presuma a porta 5173. Refaça o snapshot.'})
     max_rounds = min(PLANNING_ROUNDS, MAX_ROUNDS) if planning_only else MAX_ROUNDS
     stalled_rounds = 0
     successful_results = set()
@@ -603,7 +611,19 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
                 except ValueError as exc:
                     result = {'error': str(exc), 'success': False}
             else:
-                result = await perform_action(db, user_id, run_id, step_id, command, emit)
+                from .worker_preview import owned_status
+                preview_state=owned_status(db,user_id,run_id,step_id) if recovered_browser and command['action']=='browser_tool' else {}
+                if (recovered_browser and command['action'] == 'browser_tool' and
+                        preview_state.get('status') != 'running' and preview_state.get('api_status') != 'running'):
+                    result = {'success':False, 'error':
+                        'A prévia desta etapa não está ativa nesta sessão. Use preview status '
+                        'e preview start no cwd real antes do navegador. Abra a URL retornada '
+                        'e obtenha novos pageIds e snapshots; não reutilize os do checkpoint.'}
+                    emit(run_id, 'workspace_action_result', {'step_id':step_id,
+                         'action':'browser_tool','success':False,
+                         'output':result['error']})
+                else:
+                    result = await perform_action(db, user_id, run_id, step_id, command, emit)
         except (WorkerControlPaused, WorkerControlCancelled):
             control_boundary()
             raise

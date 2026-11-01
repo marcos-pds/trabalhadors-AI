@@ -111,7 +111,7 @@ def test_owned_lifecycle_and_audit_output(preview):
     assert first['success'] is True and first['status'] == 'running'
     assert first['url'].startswith('http://127.0.0.1:')
     assert first['cwd'] == 'client'
-    assert json.loads(first['output']) == {k: first[k] for k in ('status', 'url', 'cwd')}
+    assert json.loads(first['output']) == {k: first[k] for k in ('status', 'url', 'cwd','api_status')}
     assert 'folder' not in json.loads(first['output'])
     assert call(db, 'start', cwd='client')['url'] == first['url']
     assert call(db, 'status')['url'] == first['url']

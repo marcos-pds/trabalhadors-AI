@@ -88,7 +88,7 @@ def critical_action(request):
 
 def needs_explicit_approval(db,user_id,run_id,request):
     if request.get('action') == 'preview':
-        return request.get('operation') == 'start'
+        return request.get('operation') in ('start','start_api')
     if request.get('action') == 'browser_tool':
         return True
     if request.get('action') == 'reference_search':
@@ -483,7 +483,7 @@ def execute(folder, request, run_id=None):
 async def agent_action(db, user_id, run_id, step_id, request, emit, executor=None):
     preview_tool = request.get('action') == 'preview'
     requires_write = (request.get('action') in ('mkdir','write','replace','command')
-                      or (preview_tool and request.get('operation') == 'start'))
+                      or (preview_tool and request.get('operation') in ('start','start_api')))
     original_folder = enforce_run_scope(db,user_id,run_id,write=requires_write)
     from .step_scope import execution_folder
     from .worker_controls import check_control
@@ -504,7 +504,8 @@ async def agent_action(db, user_id, run_id, step_id, request, emit, executor=Non
         summary = {'action': 'preview', 'operation': request['operation'],
                    'cwd': request.get('cwd', ''),
                    'description': 'Prévia local — ' + request['operation'] +
-                   (' (executa npm run dev no projeto autorizado).' if request['operation'] == 'start' else '.')}
+                   (' (executa npm run dev no projeto autorizado).' if request['operation'] == 'start' else
+                    ' (inicia FastAPI main:app na .venv do projeto, somente loopback).' if request['operation']=='start_api' else '.')}
     else:
         summary = preview(folder, request)
     emit(run_id, 'workspace_action_requested', {'step_id': step_id, 'summary': summary})

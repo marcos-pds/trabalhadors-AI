@@ -11,3 +11,4 @@ _TEST_ROOT = Path(__file__).resolve().parents[1]
 _TEST_DATA = Path(tempfile.mkdtemp(prefix='.pytest-data-', dir=_TEST_ROOT))
 atexit.register(shutil.rmtree, _TEST_DATA, ignore_errors=True)
 os.environ['CENTRAL_DATA_DIR'] = str(_TEST_DATA)
+os.environ['CENTRAL_MOTION_WORKER'] = '0'

@@ -140,7 +140,7 @@ def local_preview_decision(request, preview):
     it is not proof of worker recovery or permission to visit another service.
     Installs, promotion and other approvals retain their ordinary review flow.
     """
-    if request.get('action') == 'preview' and request.get('operation') == 'start':
+    if request.get('action') == 'preview' and request.get('operation') in ('start','start_api'):
         return True
     if request.get('action') != 'browser_tool':
         return None
@@ -148,12 +148,15 @@ def local_preview_decision(request, preview):
     if not url:
         return True  # The browser gateway separately checks page IDs and scope.
     try:
-        parsed, expected = urlsplit(url), urlsplit(preview.get('url', ''))
-        return (preview.get('status') == 'running' and bool(preview.get('url'))
-                and not parsed.username and not parsed.password
-                and expected.scheme == 'http' and expected.hostname in ('127.0.0.1', 'localhost')
-                and expected.port is not None
-                and (parsed.scheme, parsed.hostname, parsed.port) == (expected.scheme, expected.hostname, expected.port))
+        parsed=urlsplit(url)
+        if parsed.username or parsed.password:return False
+        for field,state in (('url','status'),('api_url','api_status')):
+            expected=urlsplit(preview.get(field,''))
+            if (preview.get(state)=='running' and expected.scheme=='http'
+                and expected.hostname in ('127.0.0.1','localhost') and expected.port is not None
+                and (parsed.scheme,parsed.hostname,parsed.port)==(expected.scheme,expected.hostname,expected.port)):
+                return True
+        return False
     except (ValueError, TypeError):
         return False
 
@@ -176,10 +179,12 @@ async def process(args):
     rid, user = state['run_id'], state['user_id']
 
     def resolve_approval(approval_id):
-        row = db.one("SELECT request_json FROM workspace_action_approvals WHERE id=? AND run_id=? AND status='pending' AND expires_at>?", (approval_id, rid, utcnow()))
+        row = db.one("SELECT request_json,folder FROM workspace_action_approvals WHERE id=? AND run_id=? AND status='pending' AND expires_at>?", (approval_id, rid, utcnow()))
         if not row:
             return
-        decision = local_preview_decision(json.loads(row['request_json']), live_preview.info(user))
+        from central.api_preview import status as api_status
+        preview=dict(live_preview.info(user),**api_status(db,user,rid,row['folder']))
+        decision = local_preview_decision(json.loads(row['request_json']), preview)
         if decision is not None:
             decide(db, user, rid, approval_id, decision)
             original(rid, 'test_operator_approval', {'approval_id': approval_id,

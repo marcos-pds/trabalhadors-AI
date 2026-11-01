@@ -1,0 +1,54 @@
+{
+  "id": "81df7bdb-4389-4716-bda9-1720b89d7011",
+  "state": "completed",
+  "error": null,
+  "created_at": "2026-11-01T19:46:36.540367+00:00",
+  "updated_at": "2026-11-01T19:46:37.198348+00:00",
+  "cancel_requested": 0,
+  "jobs": [
+    {
+      "id": "encode",
+      "adapter": "ffmpeg",
+      "state": "completed",
+      "artifact": {
+        "id": "video",
+        "kind": "video",
+        "path": "renders/final.mp4",
+        "bytes": 16278,
+        "sha256": "00d0e4e316b7f7b387e5851b846a33d129e5cf9d3217996f24a86961d4a396cd"
+      },
+      "error": null,
+      "started_at": "2026-11-01T19:46:36.651276+00:00",
+      "finished_at": "2026-11-01T19:46:36.880833+00:00"
+    },
+    {
+      "id": "extract",
+      "adapter": "ffmpeg",
+      "state": "completed",
+      "artifact": {
+        "id": "audio",
+        "kind": "audio",
+        "path": "renders/final.wav",
+        "bytes": 65614,
+        "sha256": "279ef013d1d15d0c0a653224e1e7b1683debdc5d77511f0927c921da8e37f698"
+      },
+      "error": null,
+      "started_at": "2026-11-01T19:46:36.976378+00:00",
+      "finished_at": "2026-11-01T19:46:37.196794+00:00"
+    }
+  ],
+  "ffmpeg_version": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "synthetic_source": true,
+  "ai_generation_tested": false,
+  "independent_decodes": [
+    {
+      "artifact": "video",
+      "decode_exit_code": 0
+    },
+    {
+      "artifact": "audio",
+      "decode_exit_code": 0
+    }
+  ],
+  "passed": true
+}

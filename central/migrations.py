@@ -19,6 +19,8 @@ from .scoped_worker_reviews import SCHEMA as SCOPED_WORKTREE_REVIEW_SCHEMA
 from .resource_versions import SCHEMA as RESOURCE_VERSION_SCHEMA
 from .worker_controls import SCHEMA as WORKER_CONTROL_SCHEMA
 from .isolated_workspaces import SCHEMA as ISOLATED_WORKSPACE_SCHEMA
+from .motion_schema import SCHEMA as MOTION_SCHEMA
+from .motion_schema import SETTINGS_SCHEMA as MOTION_SETTINGS_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -103,6 +105,8 @@ MIGRATIONS = (
     (20, 'resource_version_history', RESOURCE_VERSION_SCHEMA),
     (21, 'worker_control_decisions', WORKER_CONTROL_SCHEMA),
     (22, 'run_step_isolated_workspaces', ISOLATED_WORKSPACE_SCHEMA),
+    (23, 'durable_motion_jobs', MOTION_SCHEMA),
+    (24, 'owned_motion_tool_settings', MOTION_SETTINGS_SCHEMA),
 )
 
 

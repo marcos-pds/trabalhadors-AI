@@ -52,6 +52,8 @@ DB = Database(DATA_DIR/'central.sqlite3')
 from .semantic_memory import preference as memory_preference
 SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
+from .motion_queue import MotionQueue
+MOTION = MotionQueue(DB)
 
 
 async def knowledge_retention():
@@ -79,9 +81,17 @@ async def lifespan(app):
                       if ENGINE.dispatch_task and ENGINE.dispatch_task.get_loop() is loop
                       else None)
     retention_task = asyncio.create_task(knowledge_retention())
+    import threading
+    motion_stop = threading.Event()
+    motion_task = (asyncio.create_task(MOTION.dispatch(motion_stop))
+                   if os.environ.get('CENTRAL_DEPLOYMENT_MODE','local') == 'local'
+                   and os.environ.get('CENTRAL_MOTION_WORKER','1') == '1' else None)
     try:
         yield
     finally:
+        motion_stop.set()
+        if motion_task:
+            await asyncio.gather(motion_task, return_exceptions=True)
         retention_task.cancel()
         await asyncio.gather(retention_task, return_exceptions=True)
         ENGINE.shutting_down = True
@@ -1775,7 +1785,76 @@ def connect_external_runtime(runtime: str, data: ExternalRuntimeConnectIn,
 def motion_capabilities(request: Request, user=Depends(current_user)):
     local_only(request)
     from .motion_contracts import capability_inventory
-    return capability_inventory()
+    return capability_inventory(MOTION._config(user['id']))
+
+
+class MotionPlanIn(BaseModel):
+    manifest: dict
+    directory: str = Field(default='', max_length=240)
+    request_id: str = Field(default='',max_length=80)
+
+
+class MotionToolsIn(BaseModel):
+    executables: dict[str,str] = Field(default_factory=dict)
+    comfy_endpoint: str | None = Field(default=None,max_length=512)
+    comfy_root: str | None = Field(default=None,max_length=512)
+
+
+def motion_call(operation):
+    from .motion_contracts import ContractError
+    try:
+        return operation()
+    except (ContractError,ValueError,TypeError,OSError):
+        raise HTTPException(422,'Plano, arquivo ou configuração Motion inválidos.') from None
+
+
+@app.get('/api/motion/tools')
+def motion_tools(request: Request,user=Depends(current_user)):
+    local_only(request)
+    return motion_call(lambda:MOTION.settings(user['id']))
+
+
+@app.post('/api/motion/tools')
+def motion_tools_save(data:MotionToolsIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    return motion_call(lambda:MOTION.settings(user['id'],data.model_dump()))
+
+
+@app.post('/api/motion/plan')
+def motion_plan(data:MotionPlanIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    return motion_call(lambda:MOTION.preview(user['id'],data.manifest,data.directory))
+
+
+@app.post('/api/motion/runs')
+def motion_enqueue(data:MotionPlanIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    return motion_call(lambda:MOTION.enqueue(user['id'],data.manifest,data.request_id,data.directory))
+
+
+@app.get('/api/motion/runs')
+def motion_runs(request:Request,user=Depends(current_user)):
+    local_only(request)
+    return MOTION.list(user['id'])
+
+
+@app.get('/api/motion/runs/{rid}')
+def motion_run(rid:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    return MOTION.get(user['id'],rid)
+
+
+@app.post('/api/motion/runs/{rid}/cancel')
+def motion_cancel(rid:str,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    return MOTION.cancel(user['id'],rid)
+
+
+@app.get('/api/motion/runs/{rid}/artifacts/{aid}')
+def motion_artifact(rid:str,aid:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    path=motion_call(lambda:MOTION.artifact_path(user['id'],rid,aid))
+    return FileResponse(path,filename=path.name)
 
 
 @app.post('/api/runtimes/codex/probe')

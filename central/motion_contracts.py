@@ -113,8 +113,19 @@ class MotionConfig:
     comfy_endpoint: str | None = None
     allow_remote: bool = False
     comfy_root: str | None = None
+    executables: dict | None = None
 
     def __post_init__(self):
+        if self.executables is not None:
+            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','remotion','whisperx'}:
+                raise ContractError('invalid executable configuration')
+            for value in self.executables.values():
+                if not isinstance(value, str):
+                    raise ContractError('invalid executable path')
+                path = Path(value)
+                if not path.is_absolute() or not path.is_file() or _reparse(path):
+                    raise ContractError('runtime must be an existing regular absolute file')
+                _root(path.parent)
         if type(self.allow_remote) is not bool:
             raise ContractError('invalid remote policy')
         if self.comfy_root is not None:
@@ -149,7 +160,7 @@ def capability_inventory(config=None):
     config = config or MotionConfig()
     result = {}
     for adapter, (stage, _, _) in ADAPTERS.items():
-        executable = shutil.which(adapter) if adapter != 'comfyui_wan' else None
+        executable = runtime_path(adapter, config) if adapter != 'comfyui_wan' else None
         version = None
         if adapter == 'whisperx' and executable:
             try:
@@ -165,10 +176,22 @@ def capability_inventory(config=None):
             'contract_implemented': True, 'stage': stage,
             'installed': installed, 'version': version,
             'version_source': 'package_metadata' if version else None,
-            'service_status': 'pending', 'execution_supported': False,
+            'service_status': 'pending', 'execution_supported': adapter != 'comfyui_wan',
             'endpoint_configured': bool(config.comfy_endpoint) if adapter == 'comfyui_wan' else False,
         }
     return result
+
+
+def runtime_path(adapter, config):
+    return (config.executables or {}).get(adapter) or shutil.which(adapter)
+
+
+def configured_motion():
+    """Administrator-owned paths, never a path submitted by a model or browser."""
+    paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','remotion','whisperx')
+             if os.environ.get('CENTRAL_MOTION_'+name.upper())}
+    return MotionConfig(comfy_endpoint=os.environ.get('CENTRAL_MOTION_COMFY_ENDPOINT'),
+                        comfy_root=os.environ.get('CENTRAL_MOTION_COMFY_ROOT'), executables=paths)
 
 
 def _bounded_manifest(manifest):
@@ -353,7 +376,7 @@ def plan_jobs(manifest, project_root, config=None):
         command = None
         paths = [str(root / artifacts[i]['path']) for i in job['inputs']]
         output = str(root / artifacts[job['outputs'][0]]['path'])
-        executable = shutil.which(adapter) if adapter != 'comfyui_wan' else None
+        executable = runtime_path(adapter, config) if adapter != 'comfyui_wan' else None
         if status == 'planned' and adapter != 'comfyui_wan':
             if not executable:
                 status, reason = 'unavailable', 'runtime_missing_or_unconfigured'
@@ -363,11 +386,17 @@ def plan_jobs(manifest, project_root, config=None):
                     args += ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if params['profile'] == 'h264' else ['-vn', '-c:a', 'pcm_s16le']
                     args += [output]
                 elif adapter == 'whisperx':
-                    args = [paths[0], '--language', params['language'], '--model', params['model'], '--output_format', 'json', '--output_dir', str(Path(output).parent)]
+                    args = [paths[0], '--language', params['language'], '--model', params['model'], '--output_format', 'json', '--output_dir', str(Path(output).parent), '--device', 'cpu', '--compute_type', 'int8', '--vad_method', 'silero']
                 else:
                     entry = next(str(root / artifacts[i]['path']) for i in job['inputs'] if artifacts[i]['kind'] == 'composition')
-                    args = ['render', entry, params['composition'], output, '--codec', 'h264', '--fps', str(params['fps'])]
-                command = CommandPlan(tuple([executable, *args]), str(root))
+                    args = ['render', entry, params['composition'], output, '--codec', 'h264', '--fps', str(params['fps']), '--concurrency', '1']
+                prefix = [executable]
+                if adapter == 'remotion' and Path(executable).suffix == '.js':
+                    node = shutil.which('node')
+                    if not node:
+                        raise ContractError('node runtime missing for remotion')
+                    prefix = [node, executable]
+                command = CommandPlan(tuple([*prefix, *args]), str(root))
         plans.append(JobPlan(job['id'], adapter, status, reason, tuple(job['inputs']),
                              tuple(job['outputs']), command,
                              'enqueue_workflow' if adapter == 'comfyui_wan' and status == 'planned' else None,

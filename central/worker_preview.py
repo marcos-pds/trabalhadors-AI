@@ -16,6 +16,18 @@ from .workspace_tools import target
 
 _LOCK = threading.RLock()
 _OWNED = {}
+
+
+def owned_status(db, user_id, run_id, step_id=None):
+    """Read only process-owned preview metadata; never start or adopt a server."""
+    folder = _authorize(db, user_id, run_id, step_id=step_id)
+    from . import api_preview
+    api=api_preview.status(db,user_id,run_id,folder)
+    with _LOCK:
+        owned = _OWNED.get((id(db), user_id, run_id))
+        if not owned or owned['folder'] != folder:
+            return dict(status='stopped',**api)
+        return dict(live_preview.info(user_id, expected=owned['entry']),**api)
 _COMPONENT = re.compile(r'[A-Za-z0-9_. -]{1,64}\Z')
 _DEVICES = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(1, 10)),
             *(f'lpt{i}' for i in range(1, 10))}
@@ -27,8 +39,8 @@ def validate_request(request):
             or set(request) - {'action', 'operation', 'cwd'}
             or request.get('action') != 'preview'
             or not isinstance(request.get('operation'), str)
-            or request['operation'] not in ('start', 'status', 'stop')):
-        raise ValueError('Use preview com operation start, status ou stop.')
+            or request['operation'] not in ('start', 'start_api', 'stop_api', 'status', 'stop')):
+        raise ValueError('Use preview com operation start, start_api, stop_api, status ou stop.')
     if 'cwd' in request:
         cwd = request['cwd']
         if not isinstance(cwd, str) or len(cwd) > 240:
@@ -41,7 +53,7 @@ def validate_request(request):
                 or part.split('.')[0].lower() in _DEVICES for part in parts):
             raise ValueError('cwd fora do workspace ou reservado.')
     result = dict(request)
-    if result['operation'] == 'start':
+    if result['operation'] in ('start','start_api'):
         result.setdefault('cwd', '')
     return result
 
@@ -64,7 +76,12 @@ def _execute(db, user_id, run_id, request, cancelled, step_id=None):
     with _LOCK:
         if cancelled.is_set():
             return {'status': 'stopped'}
-        folder = _authorize(db, user_id, run_id, start=operation == 'start', step_id=step_id)
+        folder = _authorize(db, user_id, run_id, start=operation in ('start','start_api'), step_id=step_id)
+        from . import api_preview
+        if operation=='start_api':
+            return api_preview.start(db,user_id,run_id,folder,request['cwd'],cancelled,
+                lambda:_authorize(db,user_id,run_id,start=True,step_id=step_id)==folder)
+        if operation=='stop_api':return api_preview.stop_owned(db,user_id,run_id,folder)
         key = (id(db), user_id, run_id)
         owned = _OWNED.get(key)
         if owned:
@@ -107,7 +124,7 @@ def _execute(db, user_id, run_id, request, cancelled, step_id=None):
                 _OWNED[key] = owned
         if not owned:
             # Never inspect/adopt/stop a UI preview or another database/run.
-            return {'status': 'stopped'}
+            return dict(status='stopped',**api_preview.status(db,user_id,run_id,folder))
         target(folder, owned['cwd'], directory=True)
         if operation == 'stop':
             result = live_preview.stop(user_id, expected=owned['entry'])
@@ -119,7 +136,7 @@ def _execute(db, user_id, run_id, request, cancelled, step_id=None):
                 raise HTTPException(409, 'Informacao da previa fora do workspace.')
         else:
             _OWNED.pop(key, None)
-        return result
+        return dict(result,**api_preview.status(db,user_id,run_id,folder))
 
 
 async def execute(db, user_id, run_id, request, *, step_id=None):
@@ -129,9 +146,8 @@ async def execute(db, user_id, run_id, request, *, step_id=None):
     try:
         result = await asyncio.to_thread(_execute, db, user_id, run_id, request, cancelled, step_id)
         result = dict(result, success=True)
-        result['output'] = json.dumps(
-            {key: result[key] for key in ('status', 'url', 'cwd') if key in result},
-            ensure_ascii=False)
+        result['output'] = result.get('output') or json.dumps(
+            {key: result[key] for key in ('status', 'url', 'cwd', 'api_status','api_url') if key in result},ensure_ascii=False)
         return result
     except asyncio.CancelledError:
         cancelled.set()
@@ -141,6 +157,8 @@ async def execute(db, user_id, run_id, request, *, step_id=None):
 
 
 def _close_run(run_id):
+    from .api_preview import stop_run
+    stop_run(run_id)
     with _LOCK:
         for key, owned in list(_OWNED.items()):
             if key[2] == run_id:
@@ -166,4 +184,11 @@ def worker_instruction():
             '"operation":"stop"} apenas antes de reiniciar a previa ou quando solicitado '
             'explicitamente. Mantenha a previa ativa para verificacao independente; '
             'o motor encerra a previa no fim do run. Nao execute shell para iniciar servidores. '
+            'Para FastAPI use {"action":"preview","operation":"start_api","cwd":"backend"}: '
+            'exige backend/main.py, app FastAPI e .venv criada/instalada nesse cwd por '
+            'venv_create e pip_requirements. O retorno traz api_url com porta livre; '
+            'configure o proxy /api do Vite para essa URL antes de testar login/CRUD. '
+            'Uma prévia Vite não inicia a API automaticamente. Não adivinhe localhost:8000. '
+            'preview status também informa api_status/api_url. stop encerra só o frontend; '
+            'stop_api encerra só a API desta etapa. '
             'Estas acoes continuam sujeitas a autorizacao do gateway.')

@@ -340,6 +340,34 @@ def test_repeated_successful_reads_without_new_information_trigger_failover(work
     assert len(model.seen) == 7
 
 
+def test_recovered_browser_gets_restart_feedback_before_requesting_stale_approval(workspace, monkeypatch):
+    from central.worker_checkpoint import save_checkpoint, WorkerPaused
+    from central.workspace_guard import bind_run
+    db, root = workspace
+    set_policy(db,'user','full',str(root))
+    bind_run(db,'user','run')
+    save_checkpoint(db,'user','run','step',str(root),[{'role':'user','content':'Corrija a interface'}],
+                    changed_files=['hello.py'],observed_actions=['browser:new_page'],
+                    validation_failures=0,rounds_total=3,actions_total=3)
+    class Model:
+        calls=0
+        async def stream(self, provider, key, model, system, messages):
+            self.calls+=1
+            if self.calls==1:
+                yield json.dumps({'action':'browser_tool','tool':'new_page','arguments':{'url':'http://localhost:5173/'}})
+            else:
+                assert any('A prévia desta etapa não está ativa' in m['content'] for m in messages)
+                raise WorkerPaused('test boundary')
+    async def must_not_run(*args):
+        pytest.fail('Stale browser request must not reach the approval gateway')
+    monkeypatch.setattr('central.agent_autonomy.agent_action',must_not_run)
+    with pytest.raises(WorkerPaused):
+        asyncio.run(autonomous_worker(Model(),db,'user','run','step',{'kind':'openai'},'',
+                    'fixture','',[{'role':'user','content':'Corrija a interface'}],lambda *a:None,
+                    require_browser_validation=True))
+    assert db.one('SELECT COUNT(*) n FROM workspace_action_approvals')['n']==0
+
+
 def test_large_source_read_preserves_ending_and_sha_in_model_feedback(workspace):
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))

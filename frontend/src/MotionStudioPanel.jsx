@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadMotionCapabilities } from './motionStudio.mjs'
+import MotionJobs from './MotionJobs.jsx'
 
 export default function MotionStudioPanel({ api }) {
   const [rows, setRows] = useState(null)
@@ -37,8 +38,8 @@ export default function MotionStudioPanel({ api }) {
       </button>
     </div>
     <p className="mt-3 text-xs leading-5 text-muted">
-      A detecção confirma presença no servidor. A verificação de funcionamento e os serviços de renderização estão pendentes.
-      Esta consulta não gera mídia nem instala ferramentas.
+      O diagnóstico confirma presença no servidor. Use a produção abaixo para executar e acompanhar os arquivos gerados.
+      Consultar o diagnóstico não gera mídia nem instala ferramentas.
     </p>
     <div role="status" aria-live="polite" className="mt-3 text-[11px] text-muted">
       {loading ? 'Consultando capacidades locais…' : updated
@@ -74,5 +75,6 @@ export default function MotionStudioPanel({ api }) {
         </details>
       </article>)}
     </div>}
+    <MotionJobs api={api} onToolsSaved={()=>setReload(value=>value+1)}/>
   </section>
 }

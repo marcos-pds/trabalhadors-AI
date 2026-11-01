@@ -5,7 +5,7 @@ ACTION_RESPONSE_SCHEMA = {
     'properties': {
         'action': {'type': 'string', 'enum': ['list', 'read', 'mkdir', 'write', 'replace',
                   'command', 'preview', 'browser_tool', 'reference_search', 'agent_message', 'agent_message_read', 'delegate_task', 'finish']},
-        'operation': {'type': 'string', 'enum': ['start', 'status', 'stop']},
+        'operation': {'type': 'string', 'enum': ['start', 'start_api', 'stop_api', 'status', 'stop']},
         'message_id': {'type': 'string', 'maxLength': 80},
         'offset': {'type': 'integer', 'minimum': 0, 'maximum': 500000},
         'path': {'type': 'string', 'maxLength': 300},

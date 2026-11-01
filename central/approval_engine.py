@@ -47,7 +47,7 @@ def decide(db, user_id, run_id, approval_id, approved):
                 not needs_explicit_approval(db,user_id,run_id,requested))):
         raise HTTPException(409, 'Permissão alterada ou revogada.')
     enforce_run_scope(db,user_id,run_id,write=(requested.get('action') in ('mkdir','write','replace','command')
-                      or (requested.get('action') == 'preview' and requested.get('operation') == 'start')))
+                      or (requested.get('action') == 'preview' and requested.get('operation') in ('start','start_api'))))
     if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
         raise HTTPException(409, 'Autorização expirada.')
     changed = db.execute("UPDATE workspace_action_approvals SET status=? WHERE id=? AND status='pending'",
