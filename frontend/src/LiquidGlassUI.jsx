@@ -102,10 +102,10 @@ export function LiveAgentOrbit({ providers = [], running = false }) {
     {ORBIT_BRANDS.map((brand, index) => {
       const connected = enabled.some(p => brand.kinds.includes(String(p.kind || '').toLowerCase()))
       const angle = (index * 360) / ORBIT_BRANDS.length
-      const x = Math.cos(angle * Math.PI / 180) * 150
-      const y = Math.sin(angle * Math.PI / 180) * 150
+      const x = Math.cos(angle * Math.PI / 180) * 46.875
+      const y = Math.sin(angle * Math.PI / 180) * 46.875
       return <div key={brand.key} className="reference-orbit-satellite"
-        style={{ '--satellite-x': x + 'px', '--satellite-y': y + 'px', '--satellite-index': index }}
+        style={{ '--satellite-x': x + '%', '--satellite-y': y + '%', '--satellite-index': index }}
         title={brand.title + ' · ' + (connected ? 'conexão habilitada' : 'ícone de referência; não conectado')}>
         <span className="reference-orbit-satellite-glass">
           <brand.Icon className="h-5 w-5" state="idle"/>
