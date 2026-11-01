@@ -1605,14 +1605,16 @@ def run_activity(rid: str, user=Depends(current_user)):
             'native_sessions': DB.all('SELECT step_id,model,state,updated_at FROM codex_step_sessions WHERE run_id=? AND user_id=?',
                                       (rid, user['id'])),
             'agent_messages': DB.all(
-                'SELECT m.id,m.message_type,m.state,substr(m.content,1,800) content,'
+                'SELECT m.id,m.message_type,m.state,m.sender_agent_id,m.recipient_agent_id,substr(m.content,1,800) content,'
                 'a.name sender_name,b.name recipient_name FROM agent_messages m '
                 'JOIN agents a ON a.id=m.sender_agent_id JOIN agents b ON b.id=m.recipient_agent_id '
                 'WHERE m.run_id=? AND m.user_id=? ORDER BY m.created_at DESC,m.id DESC LIMIT 8',
                 (rid, user['id'])),
             'steps': [{'id':step['id'],'name':step['name'],'status':step['status'],
-                       'error':step['error']} for step in DB.all(
-                           'SELECT id,name,status,error FROM steps WHERE run_id=?', (rid,))],
+                       'error':step['error'],'agent_id':step['agent_id'],
+                       'provider_id':step['provider_id'],'model':step['model'],
+                       'deps':json.loads(step['deps'])} for step in DB.all(
+                           'SELECT id,name,status,error,agent_id,provider_id,model,deps FROM steps WHERE run_id=? ORDER BY created_at,id', (rid,))],
             'last_activity_at': last_event['created_at'] if last_event else run['created_at'],
             'events': entries[-55:]}
 
