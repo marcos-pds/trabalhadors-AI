@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LiquidGlass } from 'liquid-glass-web-react'
+import { AIIcons } from './ReferenceIcons.jsx'
 
 // Refraction decorates the background; interactive content stays sharp.
 export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 28 }) {
@@ -31,7 +32,7 @@ export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 
     query.addEventListener?.('change', sync)
     return () => query.removeEventListener?.('change', sync)
   }, [])
-  return <span ref={ref} aria-hidden="true" className={'liquid-underlay ' + className}>
+  return <div ref={ref} aria-hidden="true" className={'liquid-underlay ' + className}>
     {reduced ? <span className="liquid-underpaint"/> : (
       <LiquidGlass className="liquid-refractor" x={0.5} y={0.5}
         width={Math.max(48, bounds.width)} height={Math.max(36, bounds.height)}
@@ -41,7 +42,7 @@ export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 
         <span className="liquid-underpaint"><span className="liquid-underpaint-shine"/></span>
       </LiquidGlass>
     )}
-  </span>
+  </div>
 }
 
 const drawings = {
@@ -73,45 +74,43 @@ export function CommandIcon({ name = 'sparkles', className = '' }) {
   </svg>
 }
 
-const providerVisuals = {
-  gemini: ['sparkles', '#8b81fa'],
-  openai: ['brain', '#13ad86'],
-  anthropic: ['sparkles', '#d69d76'],
-  codex_cli: ['monitor', '#26b8bb'],
-  groq: ['zap', '#f59e70'],
-  ollama: ['monitor', '#4ebec6'],
-  deepseek: ['activity', '#428ef0'],
-  mistral: ['chart', '#f6ae56'],
-  openrouter: ['git', '#a89fe8'],
-}
+
+// The home illustration preserves the EXACT four brand marks and positions
+// of the supplied showcase. It is an illustration, not a provider health claim.
+const ORBIT_BRANDS = [
+  { key: 'openai', title: 'OpenAI', Icon: AIIcons.OpenAI, kinds: ['openai', 'openai_chatgpt', 'codex_cli'] },
+  { key: 'claude', title: 'Claude', Icon: AIIcons.Claude, kinds: ['anthropic', 'claude_cli'] },
+  { key: 'gemini', title: 'Gemini', Icon: AIIcons.Gemini, kinds: ['gemini', 'gemini_cli'] },
+  { key: 'deepseek', title: 'DeepSeek', Icon: AIIcons.DeepSeek, kinds: ['deepseek'] },
+]
 
 export function LiveAgentOrbit({ providers = [], running = false }) {
-  const enabled = providers.filter(item => item.enabled).slice(0, 5)
-  return <div className={'living-agent-orbit' + (running ? ' is-working' : '')}
-    aria-label={enabled.length + ' provedores configurados; ' +
-      (running ? 'execução em andamento' : 'sem execução em andamento')}>
-    <div aria-hidden="true" className="living-orbit-halo halo-one"/>
-    <div aria-hidden="true" className="living-orbit-halo halo-two"/>
-    <div className="living-core">
-      <LiquidGlassUnderlay radius={80} className="living-core-refraction"/>
-      <div className="living-core-mark" aria-hidden="true">✳</div>
-      <span className="living-core-caption">CENTRAL</span>
+  const enabled = providers.filter(p => p.enabled)
+  return <div className={'reference-orbit' + (running ? ' is-working' : '')}
+    aria-label={'Representação visual de provedores de IA. ' + enabled.length +
+      ' conexão(ões) habilitada(s).'}>
+    <div className="reference-orbit-blur reference-orbit-blur-green" aria-hidden="true" />
+    <div className="reference-orbit-blur reference-orbit-blur-blue" aria-hidden="true" />
+    <div className="reference-orbit-halo reference-orbit-halo-outer" aria-hidden="true" />
+    <div className="reference-orbit-halo reference-orbit-halo-inner" aria-hidden="true" />
+    <div className="reference-glass-core">
+      <LiquidGlassUnderlay className="reference-glass-refraction" strength={0.075} radius={85}/>
+      <AIIcons.CentralCore className="reference-core-icon relative z-10" isWorking={running}/>
+      <div className="reference-core-shine" aria-hidden="true"/>
     </div>
-    {enabled.map((provider, index) => {
-      const angle = index * 2 * Math.PI / enabled.length - Math.PI / 2
-      const [icon, color] = providerVisuals[provider.kind] || ['sparkles', '#a99bff']
-      return <div key={provider.id} className="living-provider"
-        title={provider.name + ' — configuração salva'}
-        style={{
-          '--orbit-x': Math.cos(angle) * 46 + '%',
-          '--orbit-y': Math.sin(angle) * 46 + '%',
-          '--orbit-delay': -(index * 0.6) + 's',
-          '--provider-color': color,
-        }}>
-        <span className="living-provider-dot" aria-hidden="true"><CommandIcon name={icon}/></span>
-        <span>{provider.name}</span>
+    {ORBIT_BRANDS.map((brand, index) => {
+      const connected = enabled.some(p => brand.kinds.includes(String(p.kind || '').toLowerCase()))
+      const angle = (index * 360) / ORBIT_BRANDS.length
+      const x = Math.cos(angle * Math.PI / 180) * 150
+      const y = Math.sin(angle * Math.PI / 180) * 150
+      return <div key={brand.key} className="reference-orbit-satellite"
+        style={{ '--satellite-x': x + 'px', '--satellite-y': y + 'px', '--satellite-index': index }}
+        title={brand.title + ' · ' + (connected ? 'conexão habilitada' : 'ícone de referência; não conectado')}>
+        <span className="reference-orbit-satellite-glass">
+          <brand.Icon className="h-5 w-5" state="idle"/>
+        </span>
       </div>
     })}
-    {!enabled.length && <span className="living-orbit-hint">Conecte um modelo para começar</span>}
+    {running && <div className="reference-orbit-pulse" aria-hidden="true"/>}
   </div>
 }
