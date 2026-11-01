@@ -265,6 +265,66 @@ async function main() {
     await api(page,'/preview/stop','POST',{})
     await expect.poll(()=>closedPort(previewPort),{timeout:10000}).toBe(true)
     report.checks.push('preview_shutdown')
+    // Controlled HTTP fixtures exercise presentation, not model inference.
+    const flowConversation=await api(page,'/conversations','POST',{title:'Flow UI acceptance'})
+    const actualProviders=await api(page,'/providers')
+    const actualAgents=await api(page,'/agents')
+    const flowSteps=[
+      {id:'flow-architecture',agent_id:delegator.id,provider_id:'ui-flow-gemini',model:'fixture-gemini',name:'Arquitetura',status:'completed',deps:[]},
+      {id:'flow-review',agent_id:reviewer.id,provider_id:'ui-flow-claude',model:'fixture-claude',name:'Revisao',status:'running',deps:['flow-architecture']},
+    ]
+    const flowData={run_id:'flow-fixture',status:'running',delivery_verified:false,steps:flowSteps,
+      agent_messages:[{id:'fixture-message',sender_agent_id:delegator.id,recipient_agent_id:reviewer.id,sender_name:delegator.name,recipient_name:reviewer.name,content:'Fixture: contrato da interface registrado para revisao.'}],
+      events:[{seq:1,event:'workspace_action_result',step_id:'flow-architecture',action:'write',path:'exemplo/App.tsx',success:true},
+        {seq:2,event:'step_status',step_id:'flow-architecture',status:'completed'},
+        {seq:3,event:'workspace_validation',step_id:'flow-review',success:false}],checkpoints:[],native_sessions:[]}
+    const flowRun=()=>({id:'flow-fixture',conversation_id:flowConversation.id,status:flowData.status,prompt:'Fixture de apresentacao do fluxo',created_at:new Date().toISOString(),steps:flowSteps})
+    const jsonRoute=(route,value)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)})
+    await page.route('**/api/providers',route=>jsonRoute(route,[...actualProviders,
+      {id:'ui-flow-gemini',kind:'gemini',name:'Gemini fixture',model:'fixture',enabled:true},
+      {id:'ui-flow-claude',kind:'anthropic',name:'Claude fixture',model:'fixture',enabled:true}]))
+    await page.route('**/api/agents',route=>jsonRoute(route,actualAgents.map(a=>a.id===delegator.id?{...a,provider_id:'ui-flow-gemini'}:a.id===reviewer.id?{...a,provider_id:'ui-flow-claude'}:a)))
+    await page.route('**/api/runs',route=>jsonRoute(route,[flowRun()]))
+    await page.route('**/api/runs/flow-fixture**',route=>{
+      const endpoint=new URL(route.request().url()).pathname
+      return jsonRoute(route,endpoint.endsWith('/activity')?flowData:endpoint.endsWith('/approvals')?[]:endpoint.endsWith('/flow-fixture')?flowRun():{enabled:false,steps:[],controls:[]})
+    })
+    await page.reload()
+    await expect(page.locator('.cia-intro')).toHaveCount(1)
+    await page.locator('.cia-intro').getByRole('button',{name:/Pular abertura/}).click()
+    await page.getByRole('button',{name:'Abrir menu'}).click()
+    await page.getByTitle('Flow UI acceptance',{exact:true}).click()
+    const flowCard=page.getByRole('region',{name:'Fluxo dos trabalhadores no chat'})
+    await expect(flowCard).toBeVisible({timeout:15000})
+    const executionPanel=page.getByRole('complementary',{name:'Painel da execu\u00e7\u00e3o e pr\u00e9via'})
+    if(await executionPanel.isVisible())await page.getByRole('button',{name:'Abrir pr\u00e9via',exact:true}).click()
+    await expect(executionPanel).toHaveCount(0)
+    await expect(flowCard.getByText('Fixture: contrato da interface registrado para revisao.',{exact:true})).toBeVisible()
+    await expect(flowCard.getByText('Entrega verificada',{exact:true})).toHaveCount(0)
+    await flowCard.screenshot({path:path.join(evidence,'chat-worker-flow-fixture.png')})
+    await page.setViewportSize({width:390,height:844})
+    await flowCard.scrollIntoViewIfNeeded()
+    await expect(flowCard).toBeVisible()
+    await flowCard.evaluate(el=>{el.parentElement.scrollTop=el.offsetTop-20})
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
+    await page.screenshot({path:path.join(evidence,'chat-worker-flow-mobile-fixture.png')})
+    const flowWidth=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+    if(flowWidth.scroll>flowWidth.width+1)throw new Error('Flow card mobile overflow')
+    flowData.status='paused_operator'
+    flowSteps[1].status='paused_operator'
+    await expect(flowCard).toHaveAttribute('data-status','paused_operator',{timeout:10000})
+    await expect(flowCard.locator('.flow-cursor')).toHaveCount(0)
+    await page.setViewportSize({width:1440,height:900})
+    report.checks.push('chat_worker_flow_messages_logs_and_mobile_fixture')
+    report.checks.push('paused_flow_stops_animation_without_claiming_delivery')
+    await page.getByRole('textbox',{name:'Mensagem ou comando da Central'}).fill('/novo')
+    await page.getByRole('textbox',{name:'Mensagem ou comando da Central'}).press('Enter')
+    await expect(flowCard).toHaveCount(0)
+    await page.unroute('**/api/providers')
+    await page.unroute('**/api/agents')
+    await page.unroute('**/api/runs')
+    await page.unroute('**/api/runs/flow-fixture**')
+
     if(errors.length)throw new Error('Renderer errors: '+errors.join(';'))
     await app.close()
     app=null

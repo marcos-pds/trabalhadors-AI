@@ -1,7 +1,7 @@
 {
   "name": "central-ia-desktop",
   "private": true,
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Central de Trabalhadores IA - Windows desktop shell",
   "author": "Marcos Paulo",
   "main": "main.cjs",
