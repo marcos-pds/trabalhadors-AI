@@ -663,3 +663,6 @@ body:has(.desktop-frame) > .cia-intro {top:32px;}
 .flow-activity[data-status="failed"] .flow-state {color:#be123c;background:rgba(225,29,72,.07);}
 .flow-activity:is([data-status="paused_limit"],[data-status="paused_operator"],[data-status="awaiting_approval"],[data-status="awaiting_integration"]) .flow-state {color:#92400e;background:rgba(245,158,11,.08);}
 .flow-activity[data-stale="true"] .flow-state {color:var(--color-muted);background:rgba(148,163,184,.08);}
+.central-root[data-theme="dark"] .flow-state {color:#6ee7b7;}
+.central-root[data-theme="dark"] .flow-activity[data-status="failed"] .flow-state {color:#fda4af;}
+.central-root[data-theme="dark"] .flow-activity:is([data-status="paused_limit"],[data-status="paused_operator"],[data-status="awaiting_approval"],[data-status="awaiting_integration"]) .flow-state {color:#fcd34d;}
