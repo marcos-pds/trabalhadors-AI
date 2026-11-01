@@ -334,7 +334,18 @@ select option { background: #242528; color: #e8eaed; }
   animation: orbit-satellite 5s ease-in-out infinite;
   animation-delay: var(--orbit-delay);
 }
-.living-provider-dot { color: #a99bff; font-size: 19px; line-height: 1; }
+.living-provider-dot {
+  display: grid;
+  place-items: center;
+  color: var(--provider-color, #a99bff);
+  filter: drop-shadow(0 3px 8px color-mix(in srgb, var(--provider-color, #a99bff) 35%, transparent));
+}
+.living-provider-dot .living-command-icon {
+  width: 23px;
+  height: 23px;
+  animation: breathe-icon 4.2s ease-in-out infinite;
+  animation-delay: var(--orbit-delay);
+}
 .living-orbit-hint { position: absolute; top: 88%; color: var(--glass-muted); font-size: 10px; }
 .living-agent-orbit.is-working .living-core-mark { animation: orbit-rotate 2.6s linear infinite; }
 .living-agent-orbit.is-working .living-orbit-halo.halo-one { animation-duration: 12s; }
@@ -356,7 +367,8 @@ select option { background: #242528; color: #e8eaed; }
 @media (prefers-reduced-motion: reduce) {
   .living-orbit-halo,.living-core,.living-provider,
   .living-agent-orbit.is-working .living-core-mark,.liquid-underpaint-shine,
-  .liquid-command-trigger .living-command-icon { animation:none!important; }
+  .liquid-command-trigger .living-command-icon,
+  .living-provider-dot .living-command-icon { animation:none!important; }
   .liquid-chat-composer:hover,.liquid-chat-composer:focus-within,
   .liquid-command-trigger:hover,.liquid-menu-item:hover { transform:none!important; }
 }
