@@ -341,28 +341,57 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             })}
           </div>
         </div>}
-        <div className="liquid-chat-composer">
-          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.075} radius={28}/>
+        <div className="liquid-chat-composer" role="group" aria-label="Escrever mensagem ou comando">
+          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.08} radius={48}/>
           <div className="composer-input-content">
-            <div className="flex items-start gap-2 px-3 pt-3">
-              <button type="button" aria-label="Abrir comandos" title="Digite / para navegar"
-                onClick={openCommandPalette} className="liquid-command-trigger"
-                disabled={sending}><CommandIcon name="sparkles"/></button>
-              <textarea ref={inputRef} value={prompt} disabled={sending}
-                onChange={e => {setPrompt(e.target.value);setActiveCommand(0)}}
-                onKeyDown={handleKeyDown} rows={2}
-                aria-label="Mensagem ou comando da Central"
-                aria-controls={matchingCommands.length ? 'central-command-menu' : undefined}
-                placeholder={sending ? 'Enviando para a Central…' :
-                  running ? 'Peça ajustes aos trabalhadores enquanto executam…' :
-                  'Digite / para ver comandos ou escreva sua tarefa…'}
-                className="block max-h-40 min-h-[67px] min-w-0 flex-1 resize-y bg-transparent px-2 pt-2 text-sm outline-none disabled:opacity-70" />
-            </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 flex-wrap items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><label title="Autorizar agentes a editar e testar dentro da pasta configurada" className="flex cursor-pointer items-center gap-1 rounded-lg border border-lilac/25 px-2 py-1.5 text-[11px] text-lilac"><input type="checkbox" checked={autonomous} disabled={computerAccess?.mode === 'blocked' || running} onChange={e => {
-        if(e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
-        setAutonomous(e.target.checked)
-      }} className="accent-violet-400"/> Autonomia      </label><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : submitMessage()} disabled={!prompt.trim() || sending}>{sending ? 'Enviando…' : running ? 'Enviar ajuste ↑' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
+            <button type="button" aria-label="Abrir comandos" title="Comandos /"
+              onClick={openCommandPalette} className="liquid-command-trigger"
+              disabled={sending}><CommandIcon name="sparkles"/></button>
+            <textarea ref={inputRef} value={prompt} disabled={sending}
+              onChange={e => {setPrompt(e.target.value);setActiveCommand(0)}}
+              onKeyDown={handleKeyDown} rows={1}
+              aria-label="Mensagem ou comando da Central"
+              aria-controls={matchingCommands.length ? 'central-command-menu' : undefined}
+              placeholder={sending ? 'Enviando para a Central…' :
+                running ? 'Peça ajustes aos trabalhadores…' :
+                'Comandos com / ou digite sua mensagem…'}
+              className="reference-composer-input"/>
+            <button type="button" aria-label={matchingCommands.length ? 'Executar comando' : 'Enviar mensagem'}
+              title={running ? 'Enviar ajuste' : 'Enviar'}
+              className="reference-send-button"
+              onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand,matchingCommands.length - 1)].command) : submitMessage()}
+              disabled={!prompt.trim() || sending}>
+              <CommandIcon name={sending ? 'activity' : 'send'}/>
+            </button>
           </div>
+        </div>
+        <div className="reference-composer-footer">
+          <span role="status" title={autonomous ? computerAccess?.folder || 'Pasta não configurada' : 'Autonomia desligada'}>
+            {autonomous ? '● Autonomia ativa · acesso restrito à pasta autorizada' : '○ Autonomia desligada'}
+            {files.length ? ' · ' + files.length + ' arquivo(s) anexado(s)' : ''}
+          </span>
+          <details className="reference-tools">
+            <summary aria-label="Abrir ferramentas e permissões">Ferramentas e permissões ▴</summary>
+            <div className="reference-tools-menu">
+              <input ref={fileRef} type="file" className="hidden"
+                accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"
+                onChange={attach}/>
+              <Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar arquivo</Button>
+              <Button small quiet type="button" onClick={onOpenComputer}>🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button>
+              <label title="Autorizar agentes a editar e testar somente na pasta configurada"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs">
+                <input type="checkbox" checked={autonomous}
+                  disabled={computerAccess?.mode === 'blocked' || running}
+                  onChange={e => {
+                    if (e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
+                    setAutonomous(e.target.checked)
+                  }} className="accent-slate-700"/> Autonomia
+              </label>
+              <p className="w-full text-[10px] text-slate-500">
+                {computerAccess?.folder || 'Selecione uma pasta autorizada antes de permitir ações no computador.'}
+              </p>
+            </div>
+          </details>
         </div>
       </div>
       <p className="mx-auto mt-2 max-w-[690px] text-center text-[10px] text-muted">Tarefas usam suas próprias chaves de provedor e podem gerar cobranças.</p>
