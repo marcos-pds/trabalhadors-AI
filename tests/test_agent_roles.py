@@ -166,3 +166,18 @@ def test_explicit_repair_preserves_custom_settings_and_requires_authorized_user(
         assert next(a for a in restored if a['name']=='Programador IA')['specialty'] == 'architecture'
         assert next(a for a in restored if a['name']=='Programador IA')['instructions'] == 'Instruções personalizadas mantidas'
         assert client.post('/api/agents/restore-default-specialties', headers=headers).json()['repaired_count'] == 0
+
+
+def test_list_agents_reports_delegation_from_server_roles_and_owner(tmp_path, monkeypatch):
+    import central.main as main
+    db=Database(tmp_path/'roles.sqlite')
+    try:
+        for owner in ('u','foreign'):
+            db.execute('INSERT INTO users VALUES(?,?,?,?)',(owner,owner+'@test.local','hash',utcnow()))
+        for ident,role,enabled,owner in [('architect','architecture',1,'u'),('reviewer','review',1,'u'),('disabled','code',0,'u'),('outsider','code',1,'foreign')]:
+            db.execute('INSERT INTO agents(id,user_id,name,specialty,instructions,enabled,created_at) VALUES(?,?,?,?,?,?,?)',(ident,owner,ident,role,'Custom',enabled,utcnow()))
+        monkeypatch.setattr(main,'DB',db)
+        rows=main.list_agents({'id':'u'})
+        assert {r['id']:r['can_delegate'] for r in rows}=={'architect':True,'reviewer':False,'disabled':False}
+    finally:
+        db.close()
