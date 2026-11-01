@@ -48,3 +48,23 @@ def test_429_triggers_immediate_cooldown():
         assert health.detail('p','m')['last_http_status']==429
         assert health.acquire('p','m')==(False,False)
         db.close()
+
+
+def test_recovering_preferred_provider_waits_for_unbroken_alternatives_and_recovers(tmp_path):
+    db=make_db(tmp_path/'rank.sqlite')
+    try:
+        db.execute('INSERT INTO providers(id,user_id,name,kind,base_url,model,priority,created_at) VALUES(?,?,?,?,?,?,?,?)',('fallback','u','Fallback','compatible','https://example.com','other',100,'now'))
+        t=[1000.0];health=ProviderHealth(db,clock=lambda:t[0])
+        providers=db.all('SELECT * FROM providers')
+        health.record('p','m',success=False,latency_ms=5,error=ProviderError('rate_limit','429',True,429))
+        assert health.rank(providers,preferred='p')[0]['id']=='fallback'
+        t[0]+=121
+        assert health.detail('p','m')['state']=='recovering'
+        assert health.rank(providers,preferred='p')[0]['id']=='fallback'
+        # A probe remains possible when the normal candidate cannot finish.
+        assert health.acquire('p','m')==(True,True)
+        assert health.acquire('p','m')==(False,False)
+        health.record('p','m',success=True,latency_ms=10)
+        assert health.rank(providers,preferred='p')[0]['id']=='p'
+    finally:
+        db.close()
