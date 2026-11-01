@@ -102,3 +102,9 @@ A revisao em checkout isolado preservou o desenho que ja existia nesta branch e 
 Navegador real: cadastro de conta descartavel, abertura de comandos, navegacao por /provedores e confirmacao de campo branco com texto slate. Nenhuma chave de producao foi usada para o teste visual. O browser-act foi utilizado em navegador dedicado; a sessao foi encerrada.
 
 A validacao Electron cobre Ctrl+K, setas, Escape, Enter, lista de comandos real, layout de 390px sem overflow horizontal, troca de tema e paleta clara dos controles. As validacoes restantes de Windows e o hash do pacote ficam no relatorio desktop correspondente. Nao se afirma homologacao em Safari, Firefox, Ubuntu ou iOS.
+
+## Simplificacao do menu e vidro transparente - 0.2.8
+
+A pedido do usuario, a galeria Modelos de IA foi removida do menu lateral, junto com o subtitulo e o selo redundante do chat. Os icones animados das marcas passam a aparecer nos cartoes do catalogo e nas conexoes salvas em Provedores. O menu permanece dedicado a navegacao e conversas.
+
+A borda slate escura descrita na secao historica anterior foi substituida por uma borda branca translucida, com tonalidade mais transparente e foco difuso. Nao ha contorno preto no hover ou foco. Movimento reduzido e fallback de alto contraste continuam preservados; icones decorativos nao afirmam conectividade nem processamento real.
