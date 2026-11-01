@@ -1686,7 +1686,9 @@ async def external_runtime_models(runtime: str, data: ExternalRuntimeModelsIn,
         # Do not expose upstream bodies or credentials.
         raise HTTPException(422, 'Nao foi possivel listar modelos: ' + exc.category) from None
     prefix = ('google' if kind == 'gemini' else kind) + '/' if runtime == 'opencode' else ''
-    return {'models': [dict(item, id=prefix + item['id']) for item in models],
+    from .runtime_execution import MODEL
+    return {'models': [dict(item, id=prefix + item['id']) for item in models
+                       if MODEL.fullmatch(prefix + item['id'])],
             'provider_kind': kind, 'generation_tested': False}
 
 
