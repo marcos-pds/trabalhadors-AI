@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const field = 'w-full rounded-xl border border-white/15 bg-[#19191e] px-3 py-2 text-xs text-copy outline-none focus:border-violet-400'
+const field = 'w-full rounded-xl border border-white/15 bg-panel px-3 py-2 text-xs text-copy outline-none focus:border-violet-400'
 const button = 'rounded-xl border border-white/15 px-3 py-2 text-xs text-copy hover:bg-white/[.08] disabled:opacity-40'
 
 export default function OrganizationPanel({ api, onProjectCreate, onUpdated }) {

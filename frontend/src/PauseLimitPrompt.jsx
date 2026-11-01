@@ -41,10 +41,10 @@ export default function PauseLimitPrompt({ api, runId, onResume }) {
     finally { lock.current = false; setBusy(false) }
   }
   if (!pause) return null
-  if (!open) return <button type="button" onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-40 rounded-xl border border-violet-300/25 bg-[#252132] px-4 py-2 text-xs text-violet-100 shadow-lg">↻ Continuar execução pausada</button>
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-40 rounded-xl border border-violet-300/25 bg-card px-4 py-2 text-xs text-violet-100 shadow-lg">↻ Continuar execução pausada</button>
   const worker = pause.steps?.find(step => step.status === 'paused_limit')
   return <div className="fixed inset-0 z-[70] grid place-items-center bg-black/65 p-4 backdrop-blur-sm">
-    <section ref={dialog} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby="pause-limit-title" aria-describedby="pause-limit-description" className="w-full max-w-md rounded-2xl border border-violet-300/20 bg-[#202024] p-6 text-copy shadow-2xl outline-none"
+    <section ref={dialog} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby="pause-limit-title" aria-describedby="pause-limit-description" className="w-full max-w-md rounded-2xl border border-violet-300/20 bg-panel p-6 text-copy shadow-2xl outline-none"
       onKeyDown={event => {
         if (event.key === 'Escape' && !busy) { event.preventDefault(); setOpen(false) }
         if (event.key === 'Tab') {

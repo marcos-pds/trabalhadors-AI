@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { chatCommands, matchingChatCommands } from './commandPalette.mjs'
+import { CommandIcon, LiquidGlassUnderlay, LiveAgentOrbit } from './LiquidGlassUI.jsx'
+import { AIIcons } from './ReferenceIcons.jsx'
 import ProviderCatalog from './ProviderCatalog'
 import WorkflowStages from './WorkflowStages'
 import LocalRuntimesPanel from './LocalRuntimesPanel'
@@ -18,24 +21,7 @@ import TokenUsagePanel from './TokenUsagePanel'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
-const chatCommands = [
-  { command: '/skills', label: 'Ativar skills no chat', description: 'Listar skills ou usar /skill ativar nome' },
-  { command: '/plugins', label: 'Ativar plugins no chat', description: 'Listar integrações ou usar /plugin ativar nome' },
-  { command: '/ajuda', label: 'Ver comandos', description: 'Mostrar os comandos disponíveis' },
-  { command: '/novo', label: 'Nova conversa', description: 'Começar uma conversa limpa' },
-  { command: '/menu', label: 'Abrir menu', description: 'Acessar as áreas da Central IA' },
-  { command: '/agentes', label: 'Trabalhadores', description: 'Gerenciar agentes de IA' },
-  { command: '/provedores', label: 'Provedores', description: 'Gerenciar conexões e modelos' },
-  { command: '/projetos', label: 'Projetos', description: 'Organizar conversas por projeto' },
-  { command: '/fluxos', label: 'Fluxos', description: 'Abrir fluxos de trabalho' },
-  { command: '/historico', label: 'Histórico', description: 'Ver execuções anteriores' },
-  { command: '/monitoramento', label: 'Monitoramento', description: 'Ver saúde e métricas' },
-  { command: '/tokens', label: 'Uso de tokens', description: 'Acompanhar o consumo de tokens' },
-  { command: '/configuracoes', label: 'Configurações', description: 'Preferências e conta' },
-  { command: '/aprovar', label: 'Aprovar etapa', description: 'Autorizar a etapa que aguarda aprovação' },
-  { command: '/rejeitar', label: 'Rejeitar etapa', description: 'Recusar a etapa que aguarda aprovação' },
-]
-const navGroups = [['WORKSPACE', [['chat','▣'],['dashboard','◫'],['agents','◈'],['workflows','⌁'],['projects','▤']]], ['GERENCIAR', [['history','◷'],['monitoring','⌁'],['tokens','◉'],['providers','⬡'],['resources','+'],['settings','⚙']]]]
+const navGroups = [['WORKSPACE', [['chat','message'],['dashboard','layout'],['agents','users'],['workflows','git'],['projects','folder']]], ['GERENCIAR', [['history','clock'],['monitoring','activity'],['tokens','chart'],['providers','sparkles'],['resources','puzzle'],['settings','settings']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
   {id:'zai',name:'Z.ai / GLM',kind:'zai',model:'glm-4.7-flash',base_url:'https://api.z.ai/api/paas/v4',group:'Grátis limitado',badge:'Modelos Flash gratuitos com limites',note:'Use glm-4.7-flash ou glm-4.5-flash e uma chave API padrão. Outros modelos podem ser pagos; confira as cotas da conta.'},
@@ -129,10 +115,10 @@ function Field({ label, name, value, onChange, type = 'text', required = false, 
   const editableValueProps = onChange
     ? { value: value ?? '', onChange }
     : { defaultValue: value ?? '' }
-  return <label className="mb-4 block text-xs font-medium text-muted">{label}<input name={name} type={type} {...editableValueProps} required={required} placeholder={placeholder} min={type!=='password'?min:undefined} minLength={type==='password'?min:undefined} step={step} autoComplete={autoComplete} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-[#1b1b1b] px-3.5 text-sm text-copy outline-none transition placeholder:text-[#6f6c75] focus:border-lilac/60 focus:ring-2 focus:ring-lilac/10" /></label>
+  return <label className="mb-4 block text-xs font-medium text-muted">{label}<input name={name} type={type} {...editableValueProps} required={required} placeholder={placeholder} min={type!=='password'?min:undefined} minLength={type==='password'?min:undefined} step={step} autoComplete={autoComplete} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-panel px-3.5 text-sm text-copy outline-none transition placeholder:text-[#6f6c75] focus:border-lilac/60 focus:ring-2 focus:ring-lilac/10" /></label>
 }
 function Modal({ title, description, children, onClose, onSubmit, submit = 'Salvar alterações', busy = false, error = '' }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onMouseDown={e => e.target === e.currentTarget && onClose()}><section role="dialog" aria-modal="true" aria-labelledby="dialog-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#1f1f1f] p-6 shadow-2xl shadow-black/40"><div className="mb-6 flex items-start justify-between gap-4"><div><h2 id="dialog-title" className="text-xl font-semibold tracking-tight text-copy">{title}</h2><p className="mt-1 text-sm leading-6 text-muted">{description}</p></div><button onClick={onClose} aria-label="Fechar" className="rounded-lg px-2 py-1 text-muted hover:bg-white/5 hover:text-copy">×</button></div><form onSubmit={onSubmit}><div>{children}</div>{error && <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p>}<div className="mt-6 flex justify-end gap-2 border-t border-white/10 pt-4"><Button type="button" quiet onClick={onClose}>Cancelar</Button><Button type="submit" primary disabled={busy}>{busy ? 'Salvando…' : submit}</Button></div></form></section></div>
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onMouseDown={e => e.target === e.currentTarget && onClose()}><section role="dialog" aria-modal="true" aria-labelledby="dialog-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-panel p-6 shadow-2xl shadow-black/40"><div className="mb-6 flex items-start justify-between gap-4"><div><h2 id="dialog-title" className="text-xl font-semibold tracking-tight text-copy">{title}</h2><p className="mt-1 text-sm leading-6 text-muted">{description}</p></div><button onClick={onClose} aria-label="Fechar" className="rounded-lg px-2 py-1 text-muted hover:bg-white/5 hover:text-copy">×</button></div><form onSubmit={onSubmit}><div>{children}</div>{error && <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p>}<div className="mt-6 flex justify-end gap-2 border-t border-white/10 pt-4"><Button type="button" quiet onClick={onClose}>Cancelar</Button><Button type="submit" primary disabled={busy}>{busy ? 'Salvando…' : submit}</Button></div></form></section></div>
 }
 
 function Auth({ onLogin, notify }) {
@@ -146,7 +132,7 @@ function Auth({ onLogin, notify }) {
     catch (ex) { setError(ex.message); notify(ex.message) }
     finally { setBusy(false) }
   }
-  return <main className="relative grid min-h-screen place-items-center overflow-hidden bg-ink px-5 py-10 text-copy"><div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-700/15 blur-[110px]" /><section className="relative w-full max-w-md rounded-[28px] border border-white/10 bg-[#1f1f1f]/90 p-8 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-10"><div className="mb-6 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-[#1b1d22] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-10 w-10"/></div><p className="mb-2 text-[10px] font-bold tracking-[.17em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p><h1 className="text-3xl font-semibold tracking-tight">{mode === 'register' ? 'Crie sua central.' : 'Bem-vindo de volta.'}</h1><p className="mb-7 mt-3 text-sm leading-6 text-muted">Uma plataforma para trabalhar com múltiplos agentes e modelos em um só lugar.</p><form onSubmit={submit}><Field label="E-mail" name="email" type="email" placeholder="voce@empresa.com" autoComplete="email" required /><Field label="Senha" name="password" type="password" placeholder="No mínimo 10 caracteres" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required min={10} />{error && <p className="mb-3 text-sm text-rose-300">{error}</p>}<Button primary className="w-full" disabled={busy}>{busy ? 'Aguarde…' : mode === 'register' ? 'Criar conta grátis' : 'Entrar na central'} <span>→</span></Button></form><p className="mt-6 text-center text-xs text-muted">{mode === 'register' ? 'Já possui conta?' : 'Ainda não possui conta?'} <button onClick={() => { setMode(mode === 'register' ? 'login' : 'register'); setError('') }} className="ml-1 font-medium text-lilac hover:underline">{mode === 'register' ? 'Fazer login' : 'Criar conta'}</button></p></section></main>
+  return <main className="relative grid min-h-screen place-items-center overflow-hidden bg-ink px-5 py-10 text-copy"><div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-700/15 blur-[110px]" /><section className="relative w-full max-w-md rounded-[28px] border border-white/10 bg-panel/90 p-8 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-10"><div className="mb-6 grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-panel shadow-lg shadow-blue-900/20"><AIIcons.CentralCore className="h-10 w-10" /></div><p className="mb-2 text-[10px] font-bold tracking-[.17em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p><h1 className="text-3xl font-semibold tracking-tight">{mode === 'register' ? 'Crie sua central.' : 'Bem-vindo de volta.'}</h1><p className="mb-7 mt-3 text-sm leading-6 text-muted">Uma plataforma para trabalhar com múltiplos agentes e modelos em um só lugar.</p><form onSubmit={submit}><Field label="E-mail" name="email" type="email" placeholder="voce@empresa.com" autoComplete="email" required /><Field label="Senha" name="password" type="password" placeholder="No mínimo 10 caracteres" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required min={10} />{error && <p className="mb-3 text-sm text-rose-300">{error}</p>}<Button primary className="w-full" disabled={busy}>{busy ? 'Aguarde…' : mode === 'register' ? 'Criar conta grátis' : 'Entrar na central'} <span>→</span></Button></form><p className="mt-6 text-center text-xs text-muted">{mode === 'register' ? 'Já possui conta?' : 'Ainda não possui conta?'} <button onClick={() => { setMode(mode === 'register' ? 'login' : 'register'); setError('') }} className="ml-1 font-medium text-lilac hover:underline">{mode === 'register' ? 'Fazer login' : 'Criar conta'}</button></p></section></main>
 }
 
 function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) {
@@ -158,7 +144,41 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
     { id: 'avulsas', title: '◷ Conversas avulsas',
       conversations: data.conversations.filter(c => !c.project_id) },
   ].filter(group => group.conversations.length)
-  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-[#242528] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-8 w-8"/></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><Icon className={page === key ? 'text-lilac' : 'text-muted'}>{glyph}</Icon>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav><div className="scrollbar-soft mt-5 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
+  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-card shadow-lg shadow-blue-900/20"><AIIcons.CentralCore className="h-8 w-8" /></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="liquid-navigation space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`liquid-menu-item flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><CommandIcon name={glyph} className={page === key ? 'text-slate-700' : 'text-slate-500'}/>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav>
+  <section className="reference-brand-list mt-4 border-t border-slate-200/65 pt-3" aria-label="Identidade visual dos provedores">
+    <div className="mb-2 flex items-center justify-between px-2">
+      <span className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Modelos de IA</span>
+      <span title="A presença do ícone não significa conexão ativa"
+        className="text-[9px] text-slate-400">Conexões reais</span>
+    </div>
+    <div className="grid grid-cols-2 gap-1 px-1">
+      {[
+        ['OpenAI', AIIcons.OpenAI, ['openai','openai_chatgpt','codex_cli']],
+        ['Claude', AIIcons.Claude, ['anthropic','claude_cli']],
+        ['Gemini', AIIcons.Gemini, ['gemini','gemini_cli']],
+        ['DeepSeek', AIIcons.DeepSeek, ['deepseek']],
+        ['Meta', AIIcons.Meta, ['ollama','meta']],
+        ['Mistral', AIIcons.Mistral, ['mistral']],
+      ].map(([name, Brand, kinds]) => {
+        const connected = data.providers.some(p => p.enabled && kinds.includes(p.kind))
+        return <button type="button" key={name}
+          onClick={() => onNavigate('providers')}
+          title={name + ' — ' + (connected ? 'Conexão habilitada' : 'Configurar conexão')}
+          className="reference-brand-item liquid-menu-item flex items-center gap-2 rounded-xl px-2 py-2 text-left">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/85 shadow-sm">
+            <Brand className="h-5 w-5" state="idle"/>
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[11px] font-semibold text-slate-700">{name}</span>
+            <span className={'block text-[9px] ' + (connected ? 'text-emerald-600' : 'text-slate-400')}>
+              {connected ? 'Habilitado' : 'Configurar'}
+            </span>
+          </span>
+        </button>
+      })}
+    </div>
+  </section>
+  <div className="scrollbar-soft mt-4 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
           <p title={group.title} className="truncate px-2.5 pb-1 pt-3 text-[10px] font-bold text-lilac">{group.title}</p>
           {group.conversations.map(convo => <button key={convo.id} onClick={() => onSwitch(convo.id)}
             title={convo.title} className={`mb-0.5 flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs transition ${convo.id === data.currentConvo ? 'bg-white/[.09] text-copy' : 'text-[#b8b5bd] hover:bg-white/[.05] hover:text-copy'}`}>
@@ -167,13 +187,15 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
         </div>) : <p className="px-2.5 py-2 text-[11px] leading-5 text-muted">Suas conversas aparecem aqui.</p>}</div><div className="border-t border-white/[.08] pt-3"><button type="button" onClick={() => onNavigate('git')} title="Conectar GitHub" className={`mb-3 flex min-h-10 w-full items-center gap-3 rounded-xl border border-white/10 px-3 text-left text-[12px] text-[#c0bec5] transition hover:border-white/20 hover:bg-white/[.06] hover:text-copy ${page === 'git' ? 'border-white/20 bg-white/[.08] text-copy' : ''}`}><GitHubMark className="h-[18px] w-[18px]"/><span>Conectar GitHub</span><span className="ml-auto text-[10px] text-muted">Git</span></button><p className="mb-2 flex items-center gap-2 px-2 text-[10px] text-muted"><span className={`h-2 w-2 rounded-full ${data.providers.some(p=>p.enabled) ? 'bg-emerald-300' : 'bg-amber-300'}`} />{data.providers.some(p=>p.enabled) ? `${data.providers.filter(p=>p.enabled).length} provedor(es) ativo(s)` : 'Nenhum provedor conectado'}</p><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-cyan-700 to-violet-700 text-xs font-bold text-white">{me.email[0]?.toUpperCase()}</span><span className="min-w-0 flex-1 truncate text-xs text-copy">{me.email.split('@')[0]}<small className="mt-0.5 block text-[10px] text-muted">Minha conta</small></span><button onClick={onLogout} title="Sair" className="rounded-lg p-2 text-muted hover:bg-white/[.06] hover:text-copy">⎋</button></div></div></aside>
 }
 
-function ChatWelcome({ onSuggest }) {
-  return <div className="absolute inset-x-3 top-[33%] flex -translate-y-1/2 flex-col items-center px-3 text-center max-sm:top-[28%]"><div aria-hidden="true" className="orb mb-5 grid h-14 w-14 place-items-center rounded-[18px] border border-white/15 bg-[#1b1d22] shadow-xl shadow-blue-500/20"><BrandOrbit className="h-12 w-12"/></div><p className="mb-2 text-[10px] font-bold tracking-[.17em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p><h1 className="text-[clamp(31px,4vw,44px)] font-medium tracking-[-.06em] text-copy">Por onde começamos?</h1><p className="mt-2 max-w-md text-sm text-muted">Peça ajuda a um especialista ou coloque sua equipe para trabalhar.</p><div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => onSuggest('Crie uma interface de dashboard responsiva e elegante')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">✦</span>Criar uma interface</button><button onClick={() => onSuggest('Desenvolva uma API com autenticação e persistência')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">⌘</span>Desenvolver uma API</button><button onClick={() => onSuggest('Analise e melhore a arquitetura de um aplicativo')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">◎</span>Revisar arquitetura</button></div></div>
+function ChatWelcome({ providers = [], running = false }) {
+  return <div className="reference-welcome relative mx-auto h-full min-h-[335px] w-full max-w-2xl">
+    <LiveAgentOrbit providers={providers} running={running}/>
+  </div>
 }
 
 function RichText({ text }) {
   const blocks = String(text || '').split(/```/g)
-  return <div className="space-y-2 text-[13px] leading-7 text-copy">{blocks.map((block, i) => i % 2 ? <pre key={i} className="overflow-x-auto rounded-xl border border-white/10 bg-[#121214] p-4 text-xs leading-6 text-aqua"><code>{block.replace(/^[\w+#.-]+\n/, '')}</code></pre> : block.split('\n').filter(line => line.trim()).map((line, j) => {
+  return <div className="space-y-2 text-[13px] leading-7 text-copy">{blocks.map((block, i) => i % 2 ? <pre key={i} className="overflow-x-auto rounded-xl border border-white/10 bg-ink p-4 text-xs leading-6 text-aqua"><code>{block.replace(/^[\w+#.-]+\n/, '')}</code></pre> : block.split('\n').filter(line => line.trim()).map((line, j) => {
     if (line.startsWith('### ')) return <h3 key={`${i}-${j}`} className="pt-3 text-base font-semibold">{line.slice(4)}</h3>
     if (line.startsWith('## ')) return <h3 key={`${i}-${j}`} className="pt-3 text-lg font-semibold">{line.slice(3)}</h3>
     const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
@@ -183,13 +205,29 @@ function RichText({ text }) {
 
 function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, autonomous, setAutonomous, workspaceApprovals, onWorkspaceApproval, onOpenExecution, onMenu, onCommand, activityRunId }) {
   const fileRef = useRef(null)
+  const inputRef = useRef(null)
   const transcriptRef = useRef(null)
   const sendLockRef = useRef(false)
   const [sending, setSending] = useState(false)
   const [activeCommand, setActiveCommand] = useState(0)
-  const matchingCommands = prompt.startsWith('/')
-    ? chatCommands.filter(item => item.command.startsWith(prompt.trim().toLowerCase()) || item.label.toLowerCase().includes(prompt.trim().slice(1).toLowerCase()))
-    : []
+  const matchingCommands = matchingChatCommands(prompt)
+  const openCommandPalette = () => { setPrompt('/'); setActiveCommand(0); inputRef.current?.focus() }
+  useEffect(() => {
+    const shortcut = event => {
+      const node = event.target
+      const tag = node?.tagName?.toLowerCase()
+      const typing = node?.isContentEditable || ['input','textarea','select'].includes(tag)
+      if ((event.key === '/' && !typing && !event.altKey && !event.ctrlKey && !event.metaKey) ||
+          (event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey) && !event.altKey)) {
+        event.preventDefault()
+        setPrompt('/')
+        setActiveCommand(0)
+        inputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [setPrompt])
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight }, [messages, steps])
   async function attach(e) {
     const file = e.target.files?.[0]
@@ -230,19 +268,55 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     }
   }
   const activeProject = data.projects.find(p => p.id === (data.conversations.find(c => c.id === currentConvo)?.project_id || selectedProject))
-  return <div className="relative flex h-full min-h-0 flex-col">
-    <header className="flex min-h-[62px] shrink-0 items-center justify-between gap-3 border-b border-white/[.07] px-5 py-2 max-sm:px-3">
-      <div className="min-w-0"><strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong><small className="mt-1 block text-[11px] text-muted">{activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}</small></div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={onOpenExecution} title="Abrir prévia do projeto" className="rounded-xl border border-emerald-300/25 px-3 py-2 text-[11px] text-emerald-200 hover:bg-emerald-400/10">◫ Prévia</button>
-        {running && <button type="button" onClick={onCancel} className="rounded-xl border border-rose-300/40 px-3 py-2 text-[11px] font-bold text-rose-200 hover:bg-rose-400/10">■ Parar</button>}
-        <button type="button" onClick={onOpenMemory} title="Buscar conversas e configurar memória" className="rounded-xl border border-lilac/30 px-3 py-2 text-[11px] text-lilac hover:bg-lilac/10">⌕ Memória</button>
-        <select value={mode} onChange={e => {setMode(e.target.value);if(e.target.value!=='manual')setSelectedAgent('')}} aria-label="Modo de trabalho" className="max-w-[150px] rounded-xl border border-white/10 bg-card px-3 py-2 text-[11px] text-copy outline-none focus:border-lilac/50"><option value="auto">✦ Automático</option><option value="manual">◇ Um trabalhador</option><option value="team">▣ Equipe</option></select>
-        <select value={selectedAgent} onChange={e => { setSelectedAgent(e.target.value); if(e.target.value) setMode('manual'); else if(mode==='manual') setMode('auto') }} aria-label="Trabalhador preferido" className="max-w-[155px] rounded-xl border border-white/10 bg-card px-3 py-2 text-[11px] text-copy outline-none focus:border-lilac/50"><option value="">Qualquer trabalhador</option>{data.agents.filter(a => a.enabled).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+  return <div className="central-chat-scene relative flex h-full min-h-0 flex-col">
+    <header className="central-chat-toolbar relative z-20 flex min-h-[61px] shrink-0 items-center justify-between gap-3 border-b border-white/[.09] px-5 py-2 max-sm:px-3">
+      <div className="min-w-0 flex-1">
+        <strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong>
+        <small className="mt-1 block truncate text-[11px] text-muted">
+          {activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}
+        </small>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button type="button" onClick={openCommandPalette} aria-label="Abrir paleta de comandos"
+          title="Comandos / · Ctrl+K" className="liquid-toolbar-action">
+          <CommandIcon name="sparkles"/><span className="max-sm:hidden">Comandos</span><kbd>/</kbd>
+        </button>
+        <button type="button" onClick={onOpenExecution} aria-label="Abrir prévia"
+          title="Prévia e execução" className="liquid-toolbar-action">
+          <CommandIcon name="play"/><span className="max-sm:hidden">Prévia</span>
+        </button>
+        {running && <button type="button" onClick={onCancel} className="liquid-toolbar-action is-danger"
+          aria-label="Parar execução"><CommandIcon name="x"/><span className="max-sm:hidden">Parar</span></button>}
+        <button type="button" onClick={onOpenMemory} aria-label="Abrir memória" title="Memória"
+          className="liquid-toolbar-action max-sm:hidden"><CommandIcon name="brain"/></button>
+        <details className="liquid-mode-menu relative">
+          <summary className="liquid-toolbar-action" aria-label="Configurar modo e trabalhador">
+            <CommandIcon name="users"/><span className="max-sm:hidden">
+              {mode === 'team' ? 'Equipe' : mode === 'manual' ? 'Individual' : 'Auto'}
+            </span>
+          </summary>
+          <div className="liquid-command-menu absolute right-0 top-[calc(100%+10px)] z-40 w-[min(300px,85vw)] p-4 shadow-2xl">
+            <label className="mb-3 block text-xs text-muted">Modo de trabalho
+              <select value={mode} onChange={e => {setMode(e.target.value);if(e.target.value!=='manual')setSelectedAgent('')}}
+                aria-label="Modo de trabalho" className="mt-2 w-full rounded-xl border border-white/20 bg-card px-3 py-2.5 text-xs text-copy">
+                <option value="auto">✦ Automático</option><option value="manual">◇ Um trabalhador</option><option value="team">▣ Equipe</option>
+              </select>
+            </label>
+            <label className="block text-xs text-muted">Trabalhador preferido
+              <select value={selectedAgent}
+                onChange={e => {setSelectedAgent(e.target.value);if(e.target.value)setMode('manual');else if(mode==='manual')setMode('auto')}}
+                aria-label="Trabalhador preferido" className="mt-2 w-full rounded-xl border border-white/20 bg-card px-3 py-2.5 text-xs text-copy">
+                <option value="">Qualquer trabalhador</option>
+                {data.agents.filter(agent => agent.enabled).map(agent =>
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              </select>
+            </label>
+          </div>
+        </details>
       </div>
     </header>
     <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
-      {!messages.length ? <ChatWelcome onSuggest={onSuggest} /> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
+      {!messages.length ? <ChatWelcome onSuggest={onSuggest} providers={data.providers} running={running}/> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-card' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <AIIcons.CentralCore className="h-6 w-6" />}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
       {activityRunId && <ConversationActivity key={activityRunId} api={api} runId={activityRunId} active={running}/>}
       {steps.length > 0 && <section aria-live="polite" className="mx-auto mb-5 max-w-3xl rounded-2xl border border-white/10 bg-white/[.035] p-4">
         <div className="mb-3 flex items-center justify-between"><strong className="text-xs font-semibold">Etapas da execução</strong><span className="text-[10px] text-muted">{steps.filter(step => step.status === 'completed').length}/{steps.length} concluídas</span></div>
@@ -253,13 +327,8 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
         </div>)}</div>
       </section>}
     </div>
-    <div className="shrink-0 border-t border-white/[.06] px-6 pb-4 pt-4 max-sm:px-3">
+    <div className="reference-bottom-dock shrink-0 px-6 pb-4 pt-4 max-sm:px-3">
       <div className="relative mx-auto max-w-[690px]">
-        <div className="mb-2 text-[11px] text-muted" role="status">
-          {autonomous
-            ? <>Autonomia ativa · pasta autorizada: <strong className="break-all text-lilac">{computerAccess?.folder || 'nenhuma'}</strong> · as alterações ficam limitadas ao workspace escolhido</>
-            : <>Autonomia desligada · tarefas que exigem edição real de código precisarão de uma pasta autorizada e de Autonomia ativada</>}
-        </div>
         {workspaceApprovals.length > 0 && <div className="mb-3 space-y-3" aria-live="polite">
           {workspaceApprovals.map(item => <div key={item.approval_id} className="rounded-2xl border border-amber-300/25 bg-amber-300/[.04] p-3">
             <strong className="text-xs text-amber-200">Trabalhador solicita permissão</strong>
@@ -274,15 +343,86 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             </div>
           </div>)}
         </div>}
-        {matchingCommands.length > 0 && <div role="listbox" aria-label="Comandos" className="absolute bottom-[calc(100%+9px)] left-0 right-0 z-30 max-h-72 overflow-y-auto rounded-2xl border border-white/10 bg-[#202024] p-1.5 shadow-2xl shadow-black/50">
-          {matchingCommands.map(item => <button key={item.command} type="button" role="option" onClick={() => onCommand(item.command)} className={'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ' + (matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)]?.command === item.command ? 'bg-white/[.07]' : 'hover:bg-white/[.07]')}><code className="min-w-28 text-xs font-semibold text-lilac">{item.command}</code><span className="min-w-0"><strong className="block text-xs font-medium text-copy">{item.label}</strong><small className="text-[10px] text-muted">{item.description}</small></span></button>)}
+        {matchingCommands.length > 0 && <div id="central-command-menu"
+          className="liquid-command-menu absolute bottom-[calc(100%+12px)] left-0 right-0 z-30 max-h-[min(55vh,430px)] overflow-y-auto p-2"
+          aria-label="Sugestões de comandos da Central">
+          <div className="flex items-center justify-between gap-2 px-4 py-2">
+            <p className="liquid-command-group">Comandos, agentes e integrações</p>
+            <span className="text-[10px] text-muted">↑ ↓ navegar · Enter executar · Esc fechar</span>
+          </div>
+          <div role="listbox" aria-label="Comandos" className="space-y-0.5">
+            {matchingCommands.map((item, index) => {
+              const isSelected = index === Math.min(activeCommand, matchingCommands.length - 1)
+              return <button key={item.command} type="button" role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setActiveCommand(index)}
+                onClick={() => onCommand(item.command)}
+                className="liquid-menu-item relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left">
+                {isSelected && <LiquidGlassUnderlay className="liquid-command-highlight" radius={16} strength={0.052}/>}
+                <span className="relative z-10 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/20 bg-white/10 text-lilac">
+                  <CommandIcon name={item.icon}/>
+                </span>
+                <span className="relative z-10 min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold text-copy">{item.label}</span>
+                  <span className="block text-[11px] leading-5 text-muted">{item.description}</span>
+                </span>
+                <code className="liquid-command-key relative z-10 shrink-0 text-[11px]">{item.command}</code>
+              </button>
+            })}
+          </div>
         </div>}
-        <div className={"chat-composer rounded-[23px] shadow-xl shadow-black/15 focus-within:ring-4 focus-within:ring-lilac/5 " + (prompt.trim() ? "is-typing" : "")}>
-          <textarea value={prompt} disabled={sending} onChange={e => { setPrompt(e.target.value); setActiveCommand(0) }} onKeyDown={handleKeyDown} rows={2} placeholder={sending ? 'Enviando para a Central…' : running ? "Peça ajustes aos trabalhadores enquanto eles executam..." : "Escreva uma mensagem ou digite / para ver comandos..."} className="block max-h-40 min-h-[67px] w-full resize-y bg-transparent px-5 pt-4 text-sm text-copy outline-none placeholder:text-[#aaa7b1] disabled:opacity-70" />
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 flex-wrap items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><label title="Autorizar agentes a editar e testar dentro da pasta configurada" className="flex cursor-pointer items-center gap-1 rounded-lg border border-lilac/25 px-2 py-1.5 text-[11px] text-lilac"><input type="checkbox" checked={autonomous} disabled={computerAccess?.mode === 'blocked' || running} onChange={e => {
-        if(e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
-        setAutonomous(e.target.checked)
-      }} className="accent-violet-400"/> Autonomia      </label><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : submitMessage()} disabled={!prompt.trim() || sending}>{sending ? 'Enviando…' : running ? 'Enviar ajuste ↑' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
+        <div className="liquid-chat-composer" role="group" aria-label="Escrever mensagem ou comando">
+          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.14} radius={48}
+            depth={14} edgeHighlight={0.52} glow={0.24} chromaticAberration={0.23}/>
+          <div className="composer-input-content">
+            <button type="button" aria-label="Abrir comandos" title="Comandos /"
+              onClick={openCommandPalette} className="liquid-command-trigger"
+              disabled={sending}><CommandIcon name="sparkles"/></button>
+            <textarea ref={inputRef} value={prompt} disabled={sending}
+              onChange={e => {setPrompt(e.target.value);setActiveCommand(0)}}
+              onKeyDown={handleKeyDown} rows={1}
+              aria-label="Mensagem ou comando da Central"
+              aria-controls={matchingCommands.length ? 'central-command-menu' : undefined}
+              placeholder={sending ? 'Enviando para a Central…' :
+                running ? 'Peça ajustes aos trabalhadores…' :
+                'Comandos com / ou digite sua mensagem…'}
+              className="reference-composer-input"/>
+            <button type="button" aria-label={matchingCommands.length ? 'Executar comando' : 'Enviar mensagem'}
+              title={running ? 'Enviar ajuste' : 'Enviar'}
+              className="reference-send-button"
+              onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand,matchingCommands.length - 1)].command) : submitMessage()}
+              disabled={!prompt.trim() || sending}>
+              <CommandIcon name={sending ? 'activity' : 'send'}/>
+            </button>
+          </div>
+        </div>
+        <div className="reference-composer-footer">
+          <span role="status" title={autonomous ? computerAccess?.folder || 'Pasta não configurada' : 'Autonomia desligada'}>
+            {autonomous ? '● Autonomia ativa · acesso restrito à pasta autorizada' : '○ Autonomia desligada'}
+            {files.length ? ' · ' + files.length + ' arquivo(s) anexado(s)' : ''}
+          </span>
+          <details className="reference-tools">
+            <summary aria-label="Abrir ferramentas e permissões">Ferramentas e permissões ▴</summary>
+            <div className="reference-tools-menu">
+              <input ref={fileRef} type="file" className="hidden"
+                accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"
+                onChange={attach}/>
+              <Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar arquivo</Button>
+              <Button small quiet type="button" onClick={onOpenComputer}>🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button>
+              <label title="Autorizar agentes a editar e testar somente na pasta configurada"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs">
+                <input type="checkbox" checked={autonomous}
+                  disabled={computerAccess?.mode === 'blocked' || running}
+                  onChange={e => {
+                    if (e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
+                    setAutonomous(e.target.checked)
+                  }} className="accent-slate-700"/> Autonomia
+              </label>
+              <p className="w-full text-[10px] text-slate-500">
+                {computerAccess?.folder || 'Selecione uma pasta autorizada antes de permitir ações no computador.'}
+              </p>
+            </div>
+          </details>
         </div>
       </div>
       <p className="mx-auto mt-2 max-w-[690px] text-center text-[10px] text-muted">Tarefas usam suas próprias chaves de provedor e podem gerar cobranças.</p>
@@ -411,19 +551,19 @@ function EditorDialog({ modal, data, onClose, onSave }) {
   const agentOptions=data.agents.filter(a=>a.enabled)
   const addNode=parallel=>{const type=document.querySelector('[name="node-kind"]')?.value||'agent',agentId=document.querySelector('[name="node-agent"]')?.value,agent=agentOptions.find(a=>a.id===agentId);if(type==='agent'&&!agent){setError('Selecione um trabalhador.');return}const last=nodes.at(-1);setNodes(old=>[...old,{id:crypto.randomUUID(),kind:type,agent_id:type==='agent'?agentId:null,name:type==='agent'?agent.name:'Aprovação humana',deps:last?(parallel?last.deps:[last.id]):[],instructions:''}]);setError('')}
   return <Modal title={modal.kind==='provider'?(editing?'Editar provedor':'Conectar provedor'):modal.kind==='agent'?(editing?'Configurar trabalhador':'Novo trabalhador'):modal.kind==='project'?'Novo projeto':editing?'Editar fluxo':'Criar fluxo'} description={modal.kind==='provider'?'Configure um provedor de IA ao qual você possui acesso.':modal.kind==='agent'?'Defina a identidade e as instruções do trabalhador.':modal.kind==='project'?'Organize suas conversas em um workspace.':'Monte etapas sequenciais ou paralelas, com aprovação opcional.'} onClose={onClose} onSubmit={submit} busy={busy} error={error} submit={modal.kind==='workflow'?'Salvar fluxo':modal.kind==='provider'?'Conectar API':modal.kind==='agent'?'Salvar trabalhador':modal.kind==='project'?'Criar projeto':'Salvar alterações'}>
-    {modal.kind==='provider'&&<><label className="mb-4 block text-xs font-medium text-muted">Preset de conexão<select value={presetId} onChange={e=>chooseProviderPreset(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-[#1b1b1b] px-3 text-sm text-copy"><option value="">Escolha um provedor ou mantenha personalizado</option>{['Local','Grátis limitado','Cotas/créditos','Verificar plano','Uso pago','Créditos de avaliação','Créditos / uso pago','Grátis/uso pago','Local / próprio','Personalizado'].map(group=><optgroup key={group} label={group}>{providerPresets.filter(p=>p.group===group).map(p=><option key={p.id} value={p.id}>{p.name.trim()} — {p.badge}</option>)}</optgroup>)}</select>{presetId&&<small className="mt-2 block leading-4 text-muted">{providerPresets.find(p=>p.id===presetId)?.note}</small>}</label><div className="grid gap-2 sm:grid-cols-2"><Field label="Nome" name="name" value={providerName} onChange={e=>setProviderName(e.target.value)} required placeholder="Meu provedor"/><label className="mb-4 block text-xs font-medium text-muted">Protocolo<select name="kind" value={providerKind} onChange={e=>setProviderKind(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-[#1b1b1b] px-3 text-sm text-copy">{Object.entries(providerKindLabels).map(([kind,label])=><option key={kind} value={kind}>{label}</option>)}</select></label></div><Field label="Identificador real do modelo" name="model" value={providerModel} onChange={e=>setProviderModel(e.target.value)} required placeholder="Consulte o catálogo do provedor"/><div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]"><Field label={editing?'Nova chave (em branco mantém a atual)':'Chave de API (se exigida pelo provedor)'} name="api_key" type="password" autoComplete="new-password"/><a href={providerKeyLinks[providerKind]||providerKeyLinks.compatible} target="_blank" rel="noopener noreferrer" className="mb-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-lilac/25 bg-lilac/[.08] px-4 text-[10px] font-bold tracking-wider text-lilac transition hover:border-lilac/50 hover:bg-lilac/[.15]">CHAVE API ↗</a></div>{['ollama','lmstudio','jan','localai','vllm','llamacpp'].includes(providerKind)&&<p className="-mt-2 mb-4 text-[10px] leading-4 text-muted">Este provedor local normalmente não precisa de chave; o botão abre a documentação para ativar a API local.</p>}{providerKind==='compatible'&&<p className="-mt-2 mb-4 text-[10px] leading-4 text-muted">Para endpoints personalizados, gere a chave no painel do serviço que fornece a API.</p>}<Field label="URL base (opcional)" name="base_url" type="url" value={providerBaseUrl} onChange={e=>setProviderBaseUrl(e.target.value)} placeholder="Usar endereço padrão do preset"/><div className="grid gap-2 sm:grid-cols-2"><Field label="Prioridade (1 = primeira)" name="priority" type="number" min="1" value={editing?.priority||5}/><Field label="US$ / milhão de tokens de entrada" name="input_price" type="number" step="0.000001" min="0" value={editing?.input_price??''}/></div><Field label="US$ / milhão de tokens de saída" name="output_price" type="number" step="0.000001" min="0" value={editing?.output_price??''}/><label className="flex items-center gap-2 text-xs text-muted"><input name="enabled" type="checkbox" defaultChecked={editing?.enabled!==false} className="accent-violet-400"/>Provedor habilitado</label></>}
-    {modal.kind==='agent'&&<><div className="grid gap-2 sm:grid-cols-2"><Field label="Nome do trabalhador" name="name" value={editing?.name||''} required/><Field label="Avatar (caractere)" name="avatar" value={editing?.avatar||'✦'}/></div><label className="mb-4 block text-xs font-medium text-muted">Especialização do agente<select name="specialty" value={agentSpecialty} onChange={e=>setAgentSpecialty(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-[#1b1b1b] px-3 text-sm text-copy">{specialtyOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><small className="mt-2 block leading-4 text-muted">{specialtyOptions.find(([value])=>value===agentSpecialty)?.[2]} O motor usa essa categoria para encaminhar tarefas automaticamente.</small></label><label className="mb-4 block text-xs font-medium text-muted">Instruções de sistema<textarea name="instructions" defaultValue={editing?.instructions||'Você é um assistente especialista. Entregue resultados concretos e verificáveis.'} required minLength="4" rows="5" className="mt-2 w-full rounded-xl border border-white/10 bg-[#1b1b1b] p-3 text-sm text-copy outline-none focus:border-lilac/50"/></label><div className="grid gap-2 sm:grid-cols-2"><label className="mb-4 block text-xs font-medium text-muted">Provedor preferencial<select name="provider_id" defaultValue={editing?.provider_id||''} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-[#1b1b1b] px-3 text-sm text-copy"><option value="">Automático — qualquer provedor ativo</option>{data.providers.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label><Field label="Modelo específico (opcional)" name="model" value={editing?.model||''}/></div><label className="flex items-center gap-2 text-xs text-muted"><input name="enabled" type="checkbox" defaultChecked={editing?.enabled!==false} className="accent-violet-400"/>Ativo</label></>}
-    {modal.kind==='project'&&<>{modal.organizationId && <p className="mb-3 text-xs text-muted">O projeto será criado na organização selecionada.</p>}<Field label="Nome do projeto" name="name" required/><label className="mb-4 block text-xs font-medium text-muted">Descrição<textarea name="description" rows="3" className="mt-2 w-full rounded-xl border border-white/10 bg-[#1b1b1b] p-3 text-sm text-copy outline-none focus:border-lilac/50"/></label></>}
-    {modal.kind==='workflow'&&<><Field label="Nome do fluxo" name="name" value={editing?.name||'Fluxo multiagente'} required/><Field label="Descrição" name="description" value={editing?.description||''}/><div className="mb-4 rounded-2xl border border-white/10 bg-[#151518] p-4"><p className="mb-3 text-xs font-semibold">Adicionar etapa</p><div className="grid gap-2 sm:grid-cols-2"><select name="node-kind" className="rounded-xl border border-white/10 bg-card p-2 text-xs"><option value="agent">Trabalhador IA</option><option value="approval">Aprovação humana</option></select><select name="node-agent" className="rounded-xl border border-white/10 bg-card p-2 text-xs">{agentOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div><div className="mt-3 flex gap-2"><Button small type="button" onClick={()=>addNode(false)}>＋ Sequencial</Button><Button small type="button" onClick={()=>addNode(true)}>＋ Paralelo</Button></div></div><p className="mb-2 text-xs font-medium text-muted">Etapas do fluxo</p><WorkflowStages nodes={nodes} agents={data.agents} onChange={setNodes}/></>}
+    {modal.kind==='provider'&&<><label className="mb-4 block text-xs font-medium text-muted">Preset de conexão<select value={presetId} onChange={e=>chooseProviderPreset(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-panel px-3 text-sm text-copy"><option value="">Escolha um provedor ou mantenha personalizado</option>{['Local','Grátis limitado','Cotas/créditos','Verificar plano','Uso pago','Créditos de avaliação','Créditos / uso pago','Grátis/uso pago','Local / próprio','Personalizado'].map(group=><optgroup key={group} label={group}>{providerPresets.filter(p=>p.group===group).map(p=><option key={p.id} value={p.id}>{p.name.trim()} — {p.badge}</option>)}</optgroup>)}</select>{presetId&&<small className="mt-2 block leading-4 text-muted">{providerPresets.find(p=>p.id===presetId)?.note}</small>}</label><div className="grid gap-2 sm:grid-cols-2"><Field label="Nome" name="name" value={providerName} onChange={e=>setProviderName(e.target.value)} required placeholder="Meu provedor"/><label className="mb-4 block text-xs font-medium text-muted">Protocolo<select name="kind" value={providerKind} onChange={e=>setProviderKind(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-panel px-3 text-sm text-copy">{Object.entries(providerKindLabels).map(([kind,label])=><option key={kind} value={kind}>{label}</option>)}</select></label></div><Field label="Identificador real do modelo" name="model" value={providerModel} onChange={e=>setProviderModel(e.target.value)} required placeholder="Consulte o catálogo do provedor"/><div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]"><Field label={editing?'Nova chave (em branco mantém a atual)':'Chave de API (se exigida pelo provedor)'} name="api_key" type="password" autoComplete="new-password"/><a href={providerKeyLinks[providerKind]||providerKeyLinks.compatible} target="_blank" rel="noopener noreferrer" className="mb-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-lilac/25 bg-lilac/[.08] px-4 text-[10px] font-bold tracking-wider text-lilac transition hover:border-lilac/50 hover:bg-lilac/[.15]">CHAVE API ↗</a></div>{['ollama','lmstudio','jan','localai','vllm','llamacpp'].includes(providerKind)&&<p className="-mt-2 mb-4 text-[10px] leading-4 text-muted">Este provedor local normalmente não precisa de chave; o botão abre a documentação para ativar a API local.</p>}{providerKind==='compatible'&&<p className="-mt-2 mb-4 text-[10px] leading-4 text-muted">Para endpoints personalizados, gere a chave no painel do serviço que fornece a API.</p>}<Field label="URL base (opcional)" name="base_url" type="url" value={providerBaseUrl} onChange={e=>setProviderBaseUrl(e.target.value)} placeholder="Usar endereço padrão do preset"/><div className="grid gap-2 sm:grid-cols-2"><Field label="Prioridade (1 = primeira)" name="priority" type="number" min="1" value={editing?.priority||5}/><Field label="US$ / milhão de tokens de entrada" name="input_price" type="number" step="0.000001" min="0" value={editing?.input_price??''}/></div><Field label="US$ / milhão de tokens de saída" name="output_price" type="number" step="0.000001" min="0" value={editing?.output_price??''}/><label className="flex items-center gap-2 text-xs text-muted"><input name="enabled" type="checkbox" defaultChecked={editing?.enabled!==false} className="accent-violet-400"/>Provedor habilitado</label></>}
+    {modal.kind==='agent'&&<><div className="grid gap-2 sm:grid-cols-2"><Field label="Nome do trabalhador" name="name" value={editing?.name||''} required/><Field label="Avatar (caractere)" name="avatar" value={editing?.avatar||'✦'}/></div><label className="mb-4 block text-xs font-medium text-muted">Especialização do agente<select name="specialty" value={agentSpecialty} onChange={e=>setAgentSpecialty(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-panel px-3 text-sm text-copy">{specialtyOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><small className="mt-2 block leading-4 text-muted">{specialtyOptions.find(([value])=>value===agentSpecialty)?.[2]} O motor usa essa categoria para encaminhar tarefas automaticamente.</small></label><label className="mb-4 block text-xs font-medium text-muted">Instruções de sistema<textarea name="instructions" defaultValue={editing?.instructions||'Você é um assistente especialista. Entregue resultados concretos e verificáveis.'} required minLength="4" rows="5" className="mt-2 w-full rounded-xl border border-white/10 bg-panel p-3 text-sm text-copy outline-none focus:border-lilac/50"/></label><div className="grid gap-2 sm:grid-cols-2"><label className="mb-4 block text-xs font-medium text-muted">Provedor preferencial<select name="provider_id" defaultValue={editing?.provider_id||''} className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-panel px-3 text-sm text-copy"><option value="">Automático — qualquer provedor ativo</option>{data.providers.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label><Field label="Modelo específico (opcional)" name="model" value={editing?.model||''}/></div><label className="flex items-center gap-2 text-xs text-muted"><input name="enabled" type="checkbox" defaultChecked={editing?.enabled!==false} className="accent-violet-400"/>Ativo</label></>}
+    {modal.kind==='project'&&<>{modal.organizationId && <p className="mb-3 text-xs text-muted">O projeto será criado na organização selecionada.</p>}<Field label="Nome do projeto" name="name" required/><label className="mb-4 block text-xs font-medium text-muted">Descrição<textarea name="description" rows="3" className="mt-2 w-full rounded-xl border border-white/10 bg-panel p-3 text-sm text-copy outline-none focus:border-lilac/50"/></label></>}
+    {modal.kind==='workflow'&&<><Field label="Nome do fluxo" name="name" value={editing?.name||'Fluxo multiagente'} required/><Field label="Descrição" name="description" value={editing?.description||''}/><div className="mb-4 rounded-2xl border border-white/10 bg-ink p-4"><p className="mb-3 text-xs font-semibold">Adicionar etapa</p><div className="grid gap-2 sm:grid-cols-2"><select name="node-kind" className="rounded-xl border border-white/10 bg-card p-2 text-xs"><option value="agent">Trabalhador IA</option><option value="approval">Aprovação humana</option></select><select name="node-agent" className="rounded-xl border border-white/10 bg-card p-2 text-xs">{agentOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div><div className="mt-3 flex gap-2"><Button small type="button" onClick={()=>addNode(false)}>＋ Sequencial</Button><Button small type="button" onClick={()=>addNode(true)}>＋ Paralelo</Button></div></div><p className="mb-2 text-xs font-medium text-muted">Etapas do fluxo</p><WorkflowStages nodes={nodes} agents={data.agents} onChange={setNodes}/></>}
   </Modal>
 }
 
 export default function App() {
-  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
+  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState((localStorage.getItem('central-theme-design') === 'reference-ice-v1' ? (localStorage.getItem('central-theme') || 'light') : 'light'));const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
-  useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme)},[theme])
+  useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme);localStorage.setItem('central-theme-design','reference-ice-v1')},[theme])
   useEffect(()=>{let cancelled=false;api('/me').then(async me=>{if(cancelled)return;setUser(me);await loadAll()}).catch(()=>{}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[loadAll])
   useEffect(()=>{if(user&&(page==='dashboard'||page==='monitoring'))refreshStats()},[page,user,refreshStats])
   useEffect(()=>{if(!user)return;let active=true;api('/computer-access').then(value=>{if(active)setComputerAccess(value)}).catch(()=>{if(active)setComputerAccess({mode:'blocked',folder:''});setAutonomous(false);setWorkspaceApprovals([])});return()=>{active=false}},[user?.id])
@@ -561,8 +701,20 @@ export default function App() {
     setPrompt('')
     if (command === '/novo') return newChat()
     if (command === '/menu') return setMenuOpen(true)
+    if (command === '/chat') return navigate('chat')
+    if (command === '/previa') { setPage('chat');setExecutionPanelOpen(true);return }
+    if (command === '/memoria') return openMemoryPanel()
+    if (command === '/computador') return setComputerOpen(true)
+    if (command === '/automatico') {
+      setMode('auto');setSelectedAgent('');notify('Modo automático selecionado.')
+      return
+    }
+    if (command === '/equipe') {
+      setMode('team');setSelectedAgent('');notify('Modo equipe selecionado.')
+      return
+    }
     if (command === '/ajuda') {
-      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /skills e /plugins para gerenciar recursos no chat. Ative com /skill ativar nome ou /plugin ativar nome; desative com /skill desativar nome ou /plugin desativar nome. Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
+      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Digite / para abrir a paleta. Use /novo, /chat, /previa, /memoria, /computador, /automatico e /equipe no chat. Navegue com /painel, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens, /integracoes, /github e /configuracoes. /skills e /plugins listam recursos; /skill ativar nome ou /plugin ativar nome respeitam as aprovações e o escopo de segurança. /aprovar e /rejeitar atuam somente em etapas pendentes.' }])
       return
     }
     if (command === '/aprovar' || command === '/rejeitar') {
@@ -570,27 +722,46 @@ export default function App() {
       if (!pending) return notify('Não há etapa aguardando aprovação nesta conversa.')
       return approval(pending.id, command === '/aprovar')
     }
-    const destinations = { '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/configuracoes': 'settings' }
+    const destinations = { '/painel': 'dashboard', '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/integracoes': 'resources', '/github': 'git', '/configuracoes': 'settings' }
     if (destinations[command]) return navigate(destinations[command])
     notify('Comando não encontrado. Use /ajuda, /skills ou /plugins.')
   }
   const selectSuggestion=value=>setPrompt(value)
   if(!authReady)return <div className="grid min-h-screen place-items-center bg-ink text-sm text-muted">Abrindo sua central…</div>
-  if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-[#28292c] px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
-  return <div className="relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy">
+  if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-card px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
+  return <div className="central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy" data-page={page} data-theme={theme}>
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
     {menuOpen && <>
       <button aria-hidden="true" tabIndex={-1} onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/>
-      <div className="menu-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
+      <div className="menu-drawer central-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
         <button type="button" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-lg text-xl text-muted hover:bg-white/10">×</button>
         <Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/>
       </div>
     </>}
-    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[radial-gradient(ellipse_at_55%_42%,#1c3762,transparent_49%),#131314]">
-      <header className="z-10 flex h-[58px] shrink-0 items-center justify-between border-b border-white/[.06] bg-[#131314d9] px-5 backdrop-blur-xl max-sm:px-3">
-        <div className="flex min-w-0 items-center gap-3"><button type="button" aria-label="Abrir menu" title="Menu" onClick={() => setMenuOpen(true)} className="menu-toggle grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-lg text-muted transition hover:bg-white/[.07] hover:text-copy"><span aria-hidden="true">☰</span></button><div className="min-w-0"><p className="truncate text-xs text-muted">{page === 'chat' ? 'Central IA' : 'Workspace'}</p><strong className="block truncate text-[13px] font-medium text-copy">{pageNames[page]}</strong></div></div>
-        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sistema online</span><button aria-label="Alternar tema" title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
+    <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
+        <div className="reference-header-left flex items-center gap-4">
+          <button type="button" aria-label="Abrir menu" title="Menu"
+            onClick={() => setMenuOpen(true)} className="reference-menu-toggle">
+            <span className="reference-hamburger" aria-hidden="true"><span/><span/><span/></span>
+          </button>
+          <div className="reference-header-brand">
+            <span className="reference-header-brand-mark">
+              <AIIcons.CentralCore className="h-5 w-5" isWorking={!!currentRun}/>
+            </span>
+            <span>Central IA</span>
+          </div>
+        </div>
+        <div className="reference-header-right">
+          <span className="flex items-center gap-2 rounded-full border border-emerald-200/70 bg-white/60 px-3 py-1.5 text-[10px] text-slate-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"/>
+            Sessão conectada
+          </span>
+          <button type="button" aria-label="Alternar tema" title="Alternar tema"
+            onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+            className="reference-icon-button">◐</button>
+        </div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
         {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
@@ -624,7 +795,7 @@ export default function App() {
       onMove={moveConversationToProject} onSelectNewProject={setSelectedProject} onRefresh={loadAll}
       onOpenConversation={openConversation} onClose={() => {setMemoryOpen(false);setMemoryTargetProject(null)}}/>}
     {modal?.kind === 'health' ? <HealthDialog provider={modal.item} onClose={() => setModal(null)} notify={notify}/> : modal && <EditorDialog modal={modal} data={data} onClose={() => setModal(null)} onSave={saveEditor}/>}
-    {toast && <div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-[#28292c] px-4 py-3 text-sm shadow-xl">{toast}</div>}
+    {toast && <div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-card px-4 py-3 text-sm shadow-xl">{toast}</div>}
   </div>
 }
 

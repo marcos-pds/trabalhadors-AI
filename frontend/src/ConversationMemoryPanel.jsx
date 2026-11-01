@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import KnowledgePanel from './KnowledgePanel'
 
-const field = 'min-h-10 w-full rounded-xl border border-white/10 bg-[#191919] px-3 py-2 text-xs text-copy outline-none focus:border-lilac/60'
+const field = 'min-h-10 w-full rounded-xl border border-white/10 bg-panel px-3 py-2 text-xs text-copy outline-none focus:border-lilac/60'
 const action = 'rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold transition hover:bg-white/10 disabled:opacity-40'
 
 export default function ConversationMemoryPanel({
@@ -110,7 +110,7 @@ export default function ConversationMemoryPanel({
   }
 
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
-    <section role="dialog" aria-modal="true" aria-labelledby="memory-panel-title" className="my-auto max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#202023] p-5 shadow-2xl sm:p-7">
+    <section role="dialog" aria-modal="true" aria-labelledby="memory-panel-title" className="my-auto max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-panel p-5 shadow-2xl sm:p-7">
       <div className="flex items-start justify-between gap-4">
         <div><h2 id="memory-panel-title" className="text-xl font-semibold">Memória e histórico</h2>
           <p className="mt-2 text-xs leading-5 text-muted">Agentes lembram do contexto recente e, em projetos, recuperam trechos relacionados de outras conversas desse mesmo projeto.</p>
