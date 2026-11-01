@@ -113,3 +113,10 @@ def test_runtime_model_list_redacts_upstream_errors(api, monkeypatch):
     response=asyncio.run(api[3]({'api_key':'secret-key'},action='models'))
     assert response.status_code==422
     assert 'secret-key' not in response.text and 'authentication' in response.text
+
+
+def test_runtime_model_catalog_server_mode_never_contacts_provider(api, monkeypatch):
+    import central.main as main
+    monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE','server')
+    monkeypatch.setattr(main,'discover_models',lambda *a,**kw:pytest.fail('network'))
+    assert asyncio.run(api[3]({'api_key':'secret'},action='models')).status_code == 403
