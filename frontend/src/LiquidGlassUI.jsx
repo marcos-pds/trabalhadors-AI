@@ -3,7 +3,8 @@ import { LiquidGlass } from 'liquid-glass-web-react'
 import { AIIcons } from './ReferenceIcons.jsx'
 
 // Refraction decorates the background; interactive content stays sharp.
-export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 28 }) {
+export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 28,
+  depth = 8, edgeHighlight = 0.32, glow = 0.16, chromaticAberration = 0.15 }) {
   const ref = useRef(null)
   const [bounds, setBounds] = useState({ width: 340, height: 110 })
   const [reduced, setReduced] = useState(false)
@@ -36,8 +37,8 @@ export function LiquidGlassUnderlay({ className = '', strength = 0.08, radius = 
     {reduced ? <span className="liquid-underpaint"/> : (
       <LiquidGlass className="liquid-refractor" x={0.5} y={0.5}
         width={Math.max(48, bounds.width)} height={Math.max(36, bounds.height)}
-        radius={radius} strength={strength} chromaticAberration={0.15}
-        curvature={0.72} depth={8} glow={0.16} edgeHighlight={0.32}
+        radius={radius} strength={strength} chromaticAberration={chromaticAberration}
+        curvature={0.72} depth={depth} glow={glow} edgeHighlight={edgeHighlight}
         quality={256} shadow={false}>
         <span className="liquid-underpaint"><span className="liquid-underpaint-shine"/></span>
       </LiquidGlass>
