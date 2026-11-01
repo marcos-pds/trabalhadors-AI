@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { chatCommands, matchingChatCommands } from './commandPalette.mjs'
+import { CommandIcon, LiquidGlassUnderlay, LiveAgentOrbit } from './LiquidGlassUI.jsx'
 import ProviderCatalog from './ProviderCatalog'
 import LocalRuntimesPanel from './LocalRuntimesPanel'
 import SpecialistProfilesPanel from './SpecialistProfilesPanel'
@@ -17,23 +19,6 @@ import TokenUsagePanel from './TokenUsagePanel'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
-const chatCommands = [
-  { command: '/skills', label: 'Ativar skills no chat', description: 'Listar skills ou usar /skill ativar nome' },
-  { command: '/plugins', label: 'Ativar plugins no chat', description: 'Listar integrações ou usar /plugin ativar nome' },
-  { command: '/ajuda', label: 'Ver comandos', description: 'Mostrar os comandos disponíveis' },
-  { command: '/novo', label: 'Nova conversa', description: 'Começar uma conversa limpa' },
-  { command: '/menu', label: 'Abrir menu', description: 'Acessar as áreas da Central IA' },
-  { command: '/agentes', label: 'Trabalhadores', description: 'Gerenciar agentes de IA' },
-  { command: '/provedores', label: 'Provedores', description: 'Gerenciar conexões e modelos' },
-  { command: '/projetos', label: 'Projetos', description: 'Organizar conversas por projeto' },
-  { command: '/fluxos', label: 'Fluxos', description: 'Abrir fluxos de trabalho' },
-  { command: '/historico', label: 'Histórico', description: 'Ver execuções anteriores' },
-  { command: '/monitoramento', label: 'Monitoramento', description: 'Ver saúde e métricas' },
-  { command: '/tokens', label: 'Uso de tokens', description: 'Acompanhar o consumo de tokens' },
-  { command: '/configuracoes', label: 'Configurações', description: 'Preferências e conta' },
-  { command: '/aprovar', label: 'Aprovar etapa', description: 'Autorizar a etapa que aguarda aprovação' },
-  { command: '/rejeitar', label: 'Rejeitar etapa', description: 'Recusar a etapa que aguarda aprovação' },
-]
 const navGroups = [['WORKSPACE', [['chat','▣'],['dashboard','◫'],['agents','◈'],['workflows','⌁'],['projects','▤']]], ['GERENCIAR', [['history','◷'],['monitoring','⌁'],['tokens','◉'],['providers','⬡'],['resources','+'],['settings','⚙']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
@@ -157,7 +142,7 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
     { id: 'avulsas', title: '◷ Conversas avulsas',
       conversations: data.conversations.filter(c => !c.project_id) },
   ].filter(group => group.conversations.length)
-  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-[#242528] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-8 w-8"/></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><Icon className={page === key ? 'text-lilac' : 'text-muted'}>{glyph}</Icon>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav><div className="scrollbar-soft mt-5 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
+  return <aside className="z-20 flex h-full min-h-0 flex-col bg-sidebar px-3 py-5"><div className="mb-6 flex items-center gap-3 px-2"><span className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-[#242528] shadow-lg shadow-blue-900/20"><BrandOrbit className="h-8 w-8"/></span><span><strong className="block text-sm font-semibold">Central IA</strong><small className="text-[9px] tracking-[.14em] text-muted">SEU WORKSPACE</small></span></div><nav className="liquid-navigation space-y-4">{navGroups.map(([title, entries]) => <div key={title}><p className="mb-1 px-3 text-[10px] font-bold tracking-[.13em] text-[#85828b]">{title}</p>{entries.map(([key, glyph]) => <button key={key} onClick={() => onNavigate(key)} title={pageNames[key]} className={`liquid-menu-item flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition ${page === key ? 'bg-white/[.09] text-copy' : 'text-[#c0bec5] hover:bg-white/[.05] hover:text-copy'}`}><Icon className={page === key ? 'text-lilac' : 'text-muted'}>{glyph}</Icon>{pageNames[key]}{key === 'chat' && <span className="ml-auto rounded-md bg-lilac/10 px-2 py-0.5 text-[10px] text-lilac">IA</span>}</button>)}</div>)}</nav><div className="scrollbar-soft mt-5 min-h-0 flex-1 overflow-y-auto border-t border-white/[.08] pt-3"><div className="mb-1 flex items-center justify-between px-2"><span className="text-[10px] font-bold tracking-[.13em] text-[#85828b]">CONVERSAS</span><button onClick={onNewChat} title="Nova conversa" className="rounded-lg px-2 py-1 text-lg text-muted hover:bg-white/[.06] hover:text-copy">＋</button></div>{groups.length ? groups.map(group => <div key={group.id} className="mb-3">
           <p title={group.title} className="truncate px-2.5 pb-1 pt-3 text-[10px] font-bold text-lilac">{group.title}</p>
           {group.conversations.map(convo => <button key={convo.id} onClick={() => onSwitch(convo.id)}
             title={convo.title} className={`mb-0.5 flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs transition ${convo.id === data.currentConvo ? 'bg-white/[.09] text-copy' : 'text-[#b8b5bd] hover:bg-white/[.05] hover:text-copy'}`}>
@@ -166,8 +151,25 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
         </div>) : <p className="px-2.5 py-2 text-[11px] leading-5 text-muted">Suas conversas aparecem aqui.</p>}</div><div className="border-t border-white/[.08] pt-3"><button type="button" onClick={() => onNavigate('git')} title="Conectar GitHub" className={`mb-3 flex min-h-10 w-full items-center gap-3 rounded-xl border border-white/10 px-3 text-left text-[12px] text-[#c0bec5] transition hover:border-white/20 hover:bg-white/[.06] hover:text-copy ${page === 'git' ? 'border-white/20 bg-white/[.08] text-copy' : ''}`}><GitHubMark className="h-[18px] w-[18px]"/><span>Conectar GitHub</span><span className="ml-auto text-[10px] text-muted">Git</span></button><p className="mb-2 flex items-center gap-2 px-2 text-[10px] text-muted"><span className={`h-2 w-2 rounded-full ${data.providers.some(p=>p.enabled) ? 'bg-emerald-300' : 'bg-amber-300'}`} />{data.providers.some(p=>p.enabled) ? `${data.providers.filter(p=>p.enabled).length} provedor(es) ativo(s)` : 'Nenhum provedor conectado'}</p><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-cyan-700 to-violet-700 text-xs font-bold text-white">{me.email[0]?.toUpperCase()}</span><span className="min-w-0 flex-1 truncate text-xs text-copy">{me.email.split('@')[0]}<small className="mt-0.5 block text-[10px] text-muted">Minha conta</small></span><button onClick={onLogout} title="Sair" className="rounded-lg p-2 text-muted hover:bg-white/[.06] hover:text-copy">⎋</button></div></div></aside>
 }
 
-function ChatWelcome({ onSuggest }) {
-  return <div className="absolute inset-x-3 top-[33%] flex -translate-y-1/2 flex-col items-center px-3 text-center max-sm:top-[28%]"><div aria-hidden="true" className="orb mb-5 grid h-14 w-14 place-items-center rounded-[18px] border border-white/15 bg-[#1b1d22] shadow-xl shadow-blue-500/20"><BrandOrbit className="h-12 w-12"/></div><p className="mb-2 text-[10px] font-bold tracking-[.17em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p><h1 className="text-[clamp(31px,4vw,44px)] font-medium tracking-[-.06em] text-copy">Por onde começamos?</h1><p className="mt-2 max-w-md text-sm text-muted">Peça ajuda a um especialista ou coloque sua equipe para trabalhar.</p><div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => onSuggest('Crie uma interface de dashboard responsiva e elegante')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">✦</span>Criar uma interface</button><button onClick={() => onSuggest('Desenvolva uma API com autenticação e persistência')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">⌘</span>Desenvolver uma API</button><button onClick={() => onSuggest('Analise e melhore a arquitetura de um aplicativo')} className="rounded-full border border-white/10 bg-white/[.035] px-3.5 py-2 text-[11px] text-[#c2bec8] hover:border-lilac/40 hover:bg-white/[.07]"><span className="mr-1.5 text-lilac">◎</span>Revisar arquitetura</button></div></div>
+function ChatWelcome({ onSuggest, providers = [], running = false }) {
+  const connections = providers.filter(provider => provider.enabled).length
+  return <div className="relative mx-auto flex min-h-[490px] w-full max-w-3xl flex-col items-center justify-center px-3 pb-10 pt-2 text-center max-sm:min-h-[410px]">
+    <LiveAgentOrbit providers={providers} running={running}/>
+    <p className="mb-2 text-[10px] font-bold tracking-[.20em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p>
+    <h1 className="text-[clamp(31px,4vw,47px)] font-semibold tracking-[-.06em] text-copy">Por onde começamos?</h1>
+    <p className="mt-3 max-w-md text-sm leading-6 text-muted">Crie, desenvolva e teste seus projetos com uma equipe de agentes no mesmo chat.</p>
+    <p className="mt-2 text-[11px] text-muted">{connections
+      ? connections + ' provedor(es) habilitado(s) · digite / para acessar a Central'
+      : 'Nenhum provedor habilitado · digite /provedores para configurar'}</p>
+    <div className="mt-6 flex flex-wrap justify-center gap-2">
+      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
+        onClick={() => onSuggest('Crie uma interface de dashboard responsiva e elegante')}>✦ Criar interface</button>
+      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
+        onClick={() => onSuggest('Desenvolva uma API com autenticação e persistência')}>⌘ Desenvolver API</button>
+      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
+        onClick={() => onSuggest('Analise e melhore a arquitetura de um aplicativo')}>◎ Revisar arquitetura</button>
+    </div>
+  </div>
 }
 
 function RichText({ text }) {
@@ -182,13 +184,13 @@ function RichText({ text }) {
 
 function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSelectedAgent, prompt, setPrompt, files, setFiles, running, onSend, onCancel, onApproval, onSuggest, currentConvo, selectedProject, onOpenMemory, computerAccess, onOpenComputer, autonomous, setAutonomous, workspaceApprovals, onWorkspaceApproval, onOpenExecution, onMenu, onCommand, activityRunId }) {
   const fileRef = useRef(null)
+  const inputRef = useRef(null)
   const transcriptRef = useRef(null)
   const sendLockRef = useRef(false)
   const [sending, setSending] = useState(false)
   const [activeCommand, setActiveCommand] = useState(0)
-  const matchingCommands = prompt.startsWith('/')
-    ? chatCommands.filter(item => item.command.startsWith(prompt.trim().toLowerCase()) || item.label.toLowerCase().includes(prompt.trim().slice(1).toLowerCase()))
-    : []
+  const matchingCommands = matchingChatCommands(prompt)
+  const openCommandPalette = () => { setPrompt('/'); setActiveCommand(0); inputRef.current?.focus() }
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight }, [messages, steps])
   async function attach(e) {
     const file = e.target.files?.[0]
@@ -229,7 +231,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
     }
   }
   const activeProject = data.projects.find(p => p.id === (data.conversations.find(c => c.id === currentConvo)?.project_id || selectedProject))
-  return <div className="relative flex h-full min-h-0 flex-col">
+  return <div className="central-chat-scene relative flex h-full min-h-0 flex-col">
     <header className="flex min-h-[62px] shrink-0 items-center justify-between gap-3 border-b border-white/[.07] px-5 py-2 max-sm:px-3">
       <div className="min-w-0"><strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong><small className="mt-1 block text-[11px] text-muted">{activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}</small></div>
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -241,7 +243,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
       </div>
     </header>
     <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
-      {!messages.length ? <ChatWelcome onSuggest={onSuggest} /> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
+      {!messages.length ? <ChatWelcome onSuggest={onSuggest} providers={data.providers} running={running}/> : <div className="mx-auto max-w-3xl py-5">{messages.filter(message => message.type !== 'token_usage').map((message, index) => message.type === 'event' ? <div key={index} className="my-3 rounded-xl border border-lilac/15 bg-lilac/5 px-4 py-2 text-xs text-violet-100">{message.content}</div> : <article key={message.stepId || index} className={'mb-7 flex gap-3 ' + (message.role === 'user' ? 'flex-row-reverse' : '')}><div className={'grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm text-white ' + (message.role === 'user' ? 'bg-[#36363c]' : 'bg-gradient-to-br from-[#8670d4] to-[#4a8da0]')}>{message.role === 'user' ? '☺' : <BrandOrbit className="h-6 w-6"/>}</div><div className={'min-w-0 ' + (message.role === 'user' ? 'max-w-[78%]' : '')}><p className="mb-2 text-xs font-semibold text-copy">{message.role === 'user' ? 'Você' : message.agent || 'Central IA'}</p>{message.role === 'user' ? <div className="rounded-[17px] rounded-tr-[5px] border border-white/10 bg-white/[.07] px-4 py-3 text-sm leading-6">{message.content}</div> : <RichText text={message.content} />}</div></article>)}{messages.filter(message => message.type === 'token_usage').map(message => <div key={`usage-${message.runId}`} role="status" className="my-3 ml-11 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] px-4 py-3 text-xs text-cyan-100"><strong>Consumo desta execução:</strong> {Number(message.total_tokens).toLocaleString('pt-BR')} tokens — {Number(message.input_tokens).toLocaleString('pt-BR')} entrada e {Number(message.output_tokens).toLocaleString('pt-BR')} saída. <span className="text-muted">{Number(message.actual_tokens).toLocaleString('pt-BR')} reportados pelo provedor · {Number(message.estimated_tokens).toLocaleString('pt-BR')} estimados · {message.generation_count} chamada(s).</span></div>)}</div>}
       {activityRunId && <ConversationActivity key={activityRunId} api={api} runId={activityRunId} active={running}/>}
       {steps.length > 0 && <section aria-live="polite" className="mx-auto mb-5 max-w-3xl rounded-2xl border border-white/10 bg-white/[.035] p-4">
         <div className="mb-3 flex items-center justify-between"><strong className="text-xs font-semibold">Etapas da execução</strong><span className="text-[10px] text-muted">{steps.filter(step => step.status === 'completed').length}/{steps.length} concluídas</span></div>
