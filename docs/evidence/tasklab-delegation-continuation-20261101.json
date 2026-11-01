@@ -1,0 +1,136 @@
+{
+  "run": {
+    "id": "27f9bbcd-9ca7-4299-88c0-2b0d18de1d96",
+    "status": "cancelled",
+    "error": null
+  },
+  "steps": [
+    {
+      "id": "architecture",
+      "agent_id": "architecture",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "backend",
+      "agent_id": "backend",
+      "status": "queued",
+      "error": "Falha na API selecionada (request)."
+    },
+    {
+      "id": "frontend",
+      "agent_id": "frontend",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "review",
+      "agent_id": "review",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "7a67e026-0223-432b-988d-ac6e154992a4",
+      "agent_id": "code",
+      "status": "queued",
+      "error": null
+    }
+  ],
+  "pending_approvals": [
+    {
+      "id": "6647f54f-3e87-4ef7-a2d5-4d6f47837126",
+      "request": {
+        "action": "browser_tool",
+        "arguments": {
+          "pageId": 2,
+          "url": "http://localhost:5173/"
+        },
+        "tool": "navigate_page"
+      }
+    }
+  ],
+  "workspaces": [
+    {
+      "step_id": "backend",
+      "state": "active"
+    }
+  ],
+  "api_calls_this_segment": 18,
+  "independent_acceptance_complete": false,
+  "codex_used": false,
+  "operator_application_repairs": 0,
+  "recent_provider_attempts": [
+    {
+      "kind": "groq",
+      "model": "allam-2-7b",
+      "category": "request",
+      "http_status": 400
+    },
+    {
+      "kind": "openrouter",
+      "model": "cohere/north-mini-code:free",
+      "category": "response",
+      "http_status": null
+    },
+    {
+      "kind": "zai",
+      "model": "glm-4.5-flash",
+      "category": "timeout",
+      "http_status": null
+    },
+    {
+      "kind": "openrouter",
+      "model": "openrouter/free",
+      "category": "timeout",
+      "http_status": null
+    },
+    {
+      "kind": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "category": "rate_limit",
+      "http_status": 429
+    },
+    {
+      "kind": "zai",
+      "model": "glm-4.7-flash",
+      "category": "rate_limit",
+      "http_status": 429
+    },
+    {
+      "kind": "groq",
+      "model": "allam-2-7b",
+      "category": "request",
+      "http_status": 400
+    },
+    {
+      "kind": "openrouter",
+      "model": "cohere/north-mini-code:free",
+      "category": "request",
+      "http_status": 400
+    },
+    {
+      "kind": "groq",
+      "model": "qwen/qwen3.8-27b",
+      "category": "rate_limit",
+      "http_status": 429
+    },
+    {
+      "kind": "groq",
+      "model": "openai/gpt-oss-120b",
+      "category": "response",
+      "http_status": null
+    },
+    {
+      "kind": "cloudflare",
+      "model": "@cf/meta/llama-3.1-8b-instruct",
+      "category": "acceptance_limit",
+      "http_status": null
+    },
+    {
+      "kind": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "category": "acceptance_limit",
+      "http_status": null
+    }
+  ]
+}
