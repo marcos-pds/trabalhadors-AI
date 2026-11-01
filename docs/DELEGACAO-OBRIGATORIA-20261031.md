@@ -20,8 +20,11 @@ destinatario habilitado. O contrato nao cria identidades ou concede ferramentas.
 ```
 
 O exemplo representa uma etapa dentro de um fluxo valido, nao um fluxo completo.
-O campo pode ser enviado pela definicao JSON do fluxo; nao foi adicionado um
-controle novo ao editor visual nesta rodada.
+O campo pode ser enviado pela definicao JSON ou pelo editor visual: em cada
+etapa, marque Exigir criacao de subtarefa antes de concluir. A interface usa
+a capacidade can_delegate calculada pelo servidor, bloqueia o revisor e
+preserva instrucoes e requisito ao reabrir o fluxo. Selecionar um fluxo com
+esse requisito ativa o modo autonomo; a permissao da pasta continua obrigatoria.
 
 O limite global de chamadas do laboratorio agora produz `WorkerPaused` e um
 checkpoint `paused_limit`. Ele nao prejudica a saude de provedores que nem
