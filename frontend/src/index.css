@@ -599,3 +599,7 @@ select option { background: #242528; color: #e8eaed; }
 :root.light :is(input, textarea, select):focus-visible {
   outline: 2px solid #475569; outline-offset: 3px;
 }
+
+.central-root .liquid-chat-composer textarea { resize: none; scrollbar-width: thin; }
+.central-root[data-theme="light"] .liquid-chat-composer textarea:focus-visible { outline: none; }
+.central-root .liquid-chat-composer:focus-within { outline: 2px solid var(--glass-muted); outline-offset: 3px; }
