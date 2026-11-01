@@ -94,3 +94,11 @@ visual foi interpretado para a tecnologia existente React Web/Electron.
 Testes adicionados: `frontend/src/glassComposer.test.mjs`. Eles verificam
 cores, seletores, parâmetros da lente e acessibilidade estática. A
 fidelidade **ainda exige captura de navegador e teste manual de foco**.
+
+## Revisao integrada em Windows e Chromium
+
+A revisao em checkout isolado preservou o desenho que ja existia nesta branch e corrigiu superficies escuras antigas de campos, dialogos e paineis para usarem os tokens de tema. A consulta real de catalogos, permissoes e delegacao continua ligada aos endpoints existentes. O compositor agora cresce com o texto, nao exibe redimensionador nativo e usa foco na capsula em vez de um retangulo sobre a entrada.
+
+Navegador real: cadastro de conta descartavel, abertura de comandos, navegacao por /provedores e confirmacao de campo branco com texto slate. Nenhuma chave de producao foi usada para o teste visual. O browser-act foi utilizado em navegador dedicado; a sessao foi encerrada.
+
+A validacao Electron cobre Ctrl+K, setas, Escape, Enter, lista de comandos real, layout de 390px sem overflow horizontal, troca de tema e paleta clara dos controles. As validacoes restantes de Windows e o hash do pacote ficam no relatorio desktop correspondente. Nao se afirma homologacao em Safari, Firefox, Ubuntu ou iOS.
