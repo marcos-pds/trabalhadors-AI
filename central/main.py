@@ -1651,6 +1651,45 @@ def external_execution_inventory(request: Request, user=Depends(current_user)):
     return inventory()
 
 
+class ExternalRuntimeModelsIn(BaseModel):
+    api_key: str = Field(default='', max_length=16384)
+    source_provider_id: str | None = Field(default=None, max_length=80)
+    provider_kind: str = Field(default='gemini', pattern=r'^(gemini|anthropic|groq|openai|openrouter)$')
+
+
+@app.post('/api/runtimes/external/{runtime}/models')
+async def external_runtime_models(runtime: str, data: ExternalRuntimeModelsIn,
+                                  request: Request, user=Depends(current_user)):
+    require_csrf(request)
+    local_only(request)
+    if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') != 'local':
+        raise HTTPException(403, 'Runtimes locais indisponiveis no modo servidor.')
+    supported = {'claude': {'anthropic'}, 'gemini': {'gemini'}, 'acp': {'gemini'},
+                 'opencode': {'groq', 'gemini', 'anthropic', 'openai', 'openrouter'}}
+    if runtime not in supported:
+        raise HTTPException(422, 'Runtime nao suportado.')
+    if data.source_provider_id and data.api_key:
+        raise HTTPException(422, 'Escolha uma conexao ou informe uma chave.')
+    kind = {'claude': 'anthropic', 'gemini': 'gemini', 'acp': 'gemini'}.get(runtime, data.provider_kind)
+    key = data.api_key.strip()
+    if data.source_provider_id:
+        source = require_owned(DB, 'providers', data.source_provider_id, user['id'])
+        if source['kind'] not in supported[runtime] or not source['enabled']:
+            raise HTTPException(422, 'Conexao incompativel com o runtime.')
+        kind = source['kind']
+        key = SEC.decrypt(source['api_key_enc'])
+    if not key or any(ord(char) < 32 for char in key):
+        raise HTTPException(422, 'Informe uma chave API valida.')
+    try:
+        models = await discover_models(kind, key, runtime=True)
+    except ProviderError as exc:
+        # Do not expose upstream bodies or credentials.
+        raise HTTPException(422, 'Nao foi possivel listar modelos: ' + exc.category) from None
+    prefix = ('google' if kind == 'gemini' else kind) + '/' if runtime == 'opencode' else ''
+    return {'models': [dict(item, id=prefix + item['id']) for item in models],
+            'provider_kind': kind, 'generation_tested': False}
+
+
 class ExternalRuntimeConnectIn(BaseModel):
     model: str = Field(min_length=1, max_length=120, pattern=r'^[A-Za-z0-9][A-Za-z0-9._:/-]*$')
     api_key: str = Field(default='', max_length=16384)

@@ -25,11 +25,11 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(main,'DB',db);monkeypatch.setattr(main,'SEC',security)
     monkeypatch.setattr(main,'ENGINE',Engine(db,security))
     monkeypatch.setitem(main.app.dependency_overrides,main.current_user,lambda:{'id':'owner'})
-    async def request(body,*,client_ip='127.0.0.1',headers=True,runtime='gemini'):
+    async def request(body,*,client_ip='127.0.0.1',headers=True,runtime='gemini',action='connect'):
         transport=httpx.ASGITransport(app=main.app,client=(client_ip,1234))
         async with httpx.AsyncClient(transport=transport,base_url='http://127.0.0.1',
                                     headers={'x-central-request':'1'} if headers else {}) as client:
-            return await client.post('/api/runtimes/external/'+runtime+'/connect',json=body)
+            return await client.post('/api/runtimes/external/'+runtime+'/'+action,json=body)
     yield db,security,calls,request
     db.close()
 
@@ -71,3 +71,45 @@ def test_connect_requires_local_client_csrf_and_local_deployment(api,monkeypatch
     monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE','server')
     assert asyncio.run(request(body)).status_code==403
     assert calls==[]
+
+
+def test_runtime_model_list_uses_owned_saved_key_without_cli_or_mutations(api, monkeypatch):
+    import central.main as main
+    db, _, calls, request = api
+    seen = []
+    async def discover(kind, key, **options):
+        seen.append((kind, key, options))
+        return [{'id':'gemini-text','name':'Text'}]
+    monkeypatch.setattr(main, 'discover_models', discover)
+    response = asyncio.run(request({'source_provider_id':'source'}, action='models', runtime='opencode'))
+    assert response.status_code == 200
+    assert response.json()['models'][0]['id'] == 'google/gemini-text'
+    assert response.json()['generation_tested'] is False
+    assert seen == [('gemini','source-fixture-key',{'runtime':True})]
+    assert 'source-fixture-key' not in response.text
+    assert calls == [] and db.one('SELECT COUNT(*) n FROM agents')['n'] == 0
+
+
+@pytest.mark.parametrize('body,options,status', [
+    ({'source_provider_id':'foreign'}, {}, 404),
+    ({'source_provider_id':'wrong'}, {}, 422),
+    ({'source_provider_id':'source','api_key':'secret'}, {}, 422),
+    ({}, {}, 422),
+    ({'api_key':'secret'}, {'headers':False}, 403),
+    ({'api_key':'secret'}, {'client_ip':'10.1.2.3'}, 403),
+])
+def test_runtime_model_list_guards_before_network(api, monkeypatch, body, options, status):
+    import central.main as main
+    monkeypatch.setattr(main,'discover_models',lambda *a,**kw:pytest.fail('network'))
+    assert asyncio.run(api[3](body,action='models',**options)).status_code == status
+
+
+def test_runtime_model_list_redacts_upstream_errors(api, monkeypatch):
+    import central.main as main
+    from central.providers import ProviderError
+    async def fail(*args, **kwargs):
+        raise ProviderError('authentication','secret-key upstream body')
+    monkeypatch.setattr(main,'discover_models',fail)
+    response=asyncio.run(api[3]({'api_key':'secret-key'},action='models'))
+    assert response.status_code==422
+    assert 'secret-key' not in response.text and 'authentication' in response.text

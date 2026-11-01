@@ -79,7 +79,7 @@ def paid_price(pricing):
 def normalize_models(kind, items):
     models = {}
     for item in items:
-        if not isinstance(item, dict) or item.get('active') is False:
+        if not isinstance(item, dict) or item.get('active') is False or item.get('lifecycle') == 'retired':
             continue
         mid = str(item.get('id') or item.get('name') or '')
         if kind == 'gemini':
@@ -111,7 +111,7 @@ def normalize_models(kind, items):
                   'free': 'Elegível para conexão automática · confirme cotas da conta',
                   'paid': 'Pago · preço informado pelo catálogo',
                   'unknown': 'Preço/plano não confirmado · pode gerar cobrança'}[billing]
-        models[mid] = dict(id=mid, name=item.get('displayName') or item.get('name') or mid,
+        models[mid] = dict(id=mid, name=item.get('displayName') or item.get('display_name') or item.get('name') or mid,
                            source=item.get('_catalog_source', 'API do provedor'),
                            context_length=item.get('context_length') or item.get('inputTokenLimit')
                            or item.get('max_model_len'), eligible=eligible,
@@ -119,14 +119,16 @@ def normalize_models(kind, items):
     return sorted(models.values(), key=lambda m: (not m['eligible'], m['id']))
 
 
-async def discover_models(kind, api_key):
-    if kind not in BY_KIND or not BY_KIND[kind]['quick']:
+async def discover_models(kind, api_key, *, runtime=False):
+    if not (runtime and kind in ('openai', 'anthropic')) and (kind not in BY_KIND or not BY_KIND[kind]['quick']):
         raise ProviderError('catalog', 'Este provedor exige configuração manual; veja as condições no catálogo.')
     if kind != 'ollama' and not api_key.strip():
         raise ProviderError('authentication', 'Informe a chave API do provedor.')
     base = DEFAULT_ENDPOINTS[kind]
     headers = {'x-goog-api-key': api_key} if kind == 'gemini' else (
         {'Authorization': f'Bearer {api_key}'} if api_key else {})
+    if kind == 'anthropic':
+        headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01'}
     items = []
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(25, connect=8), follow_redirects=False) as client:
@@ -149,13 +151,16 @@ async def discover_models(kind, api_key):
                 if not isinstance(batch, list):
                     raise ValueError('invalid catalog')
                 items.extend(batch)
-                token = payload.get('nextPageToken') if kind == 'gemini' else None
+                token = payload.get('nextPageToken') if kind == 'gemini' else (
+                    payload.get('last_id') if kind == 'anthropic' and payload.get('has_more') else None)
+                if kind == 'anthropic' and payload.get('has_more') and not token:
+                    raise ValueError('invalid pagination')
                 if not token:
                     break
                 if token in seen:
                     raise ProviderError('catalog', 'Paginação inválida no catálogo do provedor.')
                 seen.add(token)
-                params['pageToken'] = token
+                params['pageToken' if kind == 'gemini' else 'after_id'] = token
             else:
                 raise ProviderError('catalog', 'Catálogo grande demais. Tente a configuração manual.')
         if kind == 'zai':

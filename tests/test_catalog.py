@@ -453,3 +453,21 @@ def test_streaming_connection_requires_csrf(connection_app):
         complete(main.connect_provider_stream(
             main.QuickProviderIn(kind='groq', api_key='key'), bad_request, {'id': 'user'}))
     assert error.value.status_code == 403
+
+
+def test_runtime_anthropic_catalog_pagination_and_auth_without_changing_quick_policy():
+    calls=[]
+    def respond(request):
+        calls.append(request)
+        assert request.headers['x-api-key']=='fixture-key'
+        assert 'fixture-key' not in str(request.url)
+        if len(calls)==1:
+            return httpx.Response(200,json={'data':[{'id':'claude-one','display_name':'One'}], 'has_more':True,'last_id':'claude-one'})
+        assert request.url.params['after_id']=='claude-one'
+        return httpx.Response(200,json={'data':[{'id':'claude-two'},{'id':'claude-retired','lifecycle':'retired'}],'has_more':False})
+    with mock_catalog(respond):
+        result=complete(discover_models('anthropic','fixture-key',runtime=True))
+    assert [m['id'] for m in result]==['claude-one','claude-two']
+    assert result[0]['name']=='One'
+    with pytest.raises(ProviderError):
+        complete(discover_models('anthropic','fixture-key'))
