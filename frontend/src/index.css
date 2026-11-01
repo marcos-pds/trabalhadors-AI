@@ -437,3 +437,148 @@ select option { background: #242528; color: #e8eaed; }
   box-shadow:0 8px 24px rgba(15,23,42,.16);
 }
 @media(max-height:730px){.reference-brand-list {max-height:135px;min-height:60px;}}
+
+
+/*
+ * Ice White glass correction (visual feedback 2026-11-01).
+ * Keep the real glass edge legible against the nearly-white workspace.
+ * The liquid-glass-web-react layer refracts its painted gradient; backdrop
+ * blur supplies transparency to the real page behind the control.
+ */
+.central-root[data-theme="light"] .liquid-chat-composer {
+  border: 1.5px solid rgba(43, 57, 79, .72);
+  border-top-color: rgba(55, 70, 91, .86);
+  border-bottom-color: rgba(39, 54, 77, .76);
+  border-radius: 9999px;
+  background:
+    radial-gradient(ellipse 52% 130% at 17% -28%, rgba(255, 255, 255, .60), transparent 78%),
+    linear-gradient(113deg,
+      rgba(190, 209, 228, .34) 0%,
+      rgba(231, 240, 249, .15) 31%,
+      rgba(255, 255, 255, .08) 54%,
+      rgba(177, 198, 222, .33) 100%);
+  -webkit-backdrop-filter: blur(18px) saturate(165%) contrast(1.08);
+  backdrop-filter: blur(18px) saturate(165%) contrast(1.08);
+  box-shadow:
+    0 18px 34px -13px rgba(33, 47, 66, .25),
+    0 3px 8px -3px rgba(31, 45, 67, .16),
+    inset 0 1.5px 1px rgba(255, 255, 255, .85),
+    inset 0 -3px 8px rgba(52, 78, 112, .12);
+  transition:
+    border-color .26s ease,
+    box-shadow .3s cubic-bezier(.2, .8, .2, 1),
+    background .3s ease,
+    transform .3s cubic-bezier(.2, .8, .2, 1);
+}
+/* A fine internal highlight traces the lip of the glass, while the outer
+   slate stroke supplies contrast. The overlay never receives pointer events. */
+.central-root[data-theme="light"] .liquid-chat-composer::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .73),
+    inset 0 -2px 4px rgba(54, 74, 105, .16),
+    inset 2px 0 3px rgba(255, 255, 255, .33),
+    inset -2px 0 3px rgba(52, 76, 111, .14);
+}
+.central-root[data-theme="light"] .liquid-chat-composer:hover,
+.central-root[data-theme="light"] .liquid-chat-composer:focus-within {
+  border-color: rgba(30, 41, 59, .95);
+  background:
+    radial-gradient(ellipse 52% 130% at 17% -28%, rgba(255, 255, 255, .57), transparent 78%),
+    linear-gradient(113deg,
+      rgba(179, 200, 225, .40) 0%,
+      rgba(230, 239, 249, .13) 37%,
+      rgba(255, 255, 255, .07) 53%,
+      rgba(162, 190, 220, .40) 100%);
+  box-shadow:
+    0 20px 41px -12px rgba(32, 50, 78, .32),
+    0 0 0 2px rgba(75, 94, 119, .10),
+    inset 0 2px 3px rgba(255, 255, 255, .83),
+    inset 0 -4px 10px rgba(52, 79, 112, .17);
+  transform: translateY(-1px);
+}
+.central-root[data-theme="light"] .liquid-chat-composer > .liquid-underlay {
+  opacity: .78;
+}
+.central-root[data-theme="light"] .liquid-chat-composer .liquid-underpaint {
+  background:
+    radial-gradient(ellipse 40% 160% at 14% 10%, rgba(255, 255, 255, .38), transparent 76%),
+    radial-gradient(ellipse 46% 130% at 94% 105%, rgba(119, 162, 202, .22), transparent 80%),
+    linear-gradient(104deg,
+      rgba(174, 196, 223, .24),
+      rgba(255, 255, 255, .06) 48%,
+      rgba(135, 171, 206, .20));
+}
+.central-root[data-theme="light"] .liquid-chat-composer .liquid-underpaint-shine {
+  background: linear-gradient(105deg,
+    transparent 9%,
+    rgba(255, 255, 255, .08) 23%,
+    rgba(255, 255, 255, .45) 34%,
+    rgba(255, 255, 255, .08) 46%,
+    transparent 71%);
+  animation: ice-glass-glint 8s ease-in-out infinite;
+}
+.central-root[data-theme="light"] .liquid-chat-composer textarea {
+  color: #253449;
+  font-weight: 500;
+}
+.central-root[data-theme="light"] .liquid-chat-composer textarea::placeholder {
+  color: #667891;
+  opacity: 1;
+}
+.central-root[data-theme="light"] .liquid-command-trigger {
+  color: #d96916;
+}
+.central-root[data-theme="light"] .reference-send-button {
+  background: #172338;
+  border: 1px solid rgba(20, 31, 49, .62);
+  box-shadow:
+    0 6px 13px rgba(22, 34, 54, .23),
+    inset 0 1px 2px rgba(255, 255, 255, .26);
+}
+.central-root[data-theme="light"] .liquid-command-menu {
+  border-color: rgba(64, 80, 104, .42);
+  background: rgba(229, 238, 247, .76);
+  box-shadow:
+    0 22px 48px rgba(32, 48, 73, .2),
+    inset 0 1px 2px rgba(255, 255, 255, .70);
+}
+.central-root[data-theme="light"] .liquid-menu-item:hover,
+.central-root[data-theme="light"] .liquid-menu-item:focus-visible {
+  border-color: rgba(58, 78, 105, .36);
+  background: linear-gradient(120deg,
+    rgba(255, 255, 255, .67),
+    rgba(201, 221, 241, .48));
+  box-shadow:
+    0 7px 19px -7px rgba(37, 55, 82, .19),
+    inset 0 1px rgba(255, 255, 255, .8);
+}
+@keyframes ice-glass-glint {
+  0%, 100% { transform: translateX(-14%); opacity: .45; }
+  50% { transform: translateX(14%); opacity: .76; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .central-root[data-theme="light"] .liquid-chat-composer .liquid-underpaint-shine {
+    animation: none;
+  }
+  .central-root[data-theme="light"] .liquid-chat-composer:hover,
+  .central-root[data-theme="light"] .liquid-chat-composer:focus-within {
+    transform: none;
+  }
+}
+@media (forced-colors: active) {
+  .central-root[data-theme="light"] .liquid-chat-composer {
+    background: Canvas;
+    color: CanvasText;
+    border: 2px solid CanvasText;
+    box-shadow: none;
+  }
+  .central-root[data-theme="light"] .liquid-chat-composer::after {
+    display: none;
+  }
+}
