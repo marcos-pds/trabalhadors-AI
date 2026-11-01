@@ -292,13 +292,8 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
         </div>)}</div>
       </section>}
     </div>
-    <div className="shrink-0 border-t border-white/[.06] px-6 pb-4 pt-4 max-sm:px-3">
+    <div className="reference-bottom-dock shrink-0 px-6 pb-4 pt-4 max-sm:px-3">
       <div className="relative mx-auto max-w-[690px]">
-        <div className="mb-2 text-[11px] text-muted" role="status">
-          {autonomous
-            ? <>Autonomia ativa · pasta autorizada: <strong className="break-all text-lilac">{computerAccess?.folder || 'nenhuma'}</strong> · as alterações ficam limitadas ao workspace escolhido</>
-            : <>Autonomia desligada · tarefas que exigem edição real de código precisarão de uma pasta autorizada e de Autonomia ativada</>}
-        </div>
         {workspaceApprovals.length > 0 && <div className="mb-3 space-y-3" aria-live="polite">
           {workspaceApprovals.map(item => <div key={item.approval_id} className="rounded-2xl border border-amber-300/25 bg-amber-300/[.04] p-3">
             <strong className="text-xs text-amber-200">Trabalhador solicita permissão</strong>
@@ -713,7 +708,7 @@ export default function App() {
         <div className="reference-header-left flex items-center gap-4">
           <button type="button" aria-label="Abrir menu" title="Menu"
             onClick={() => setMenuOpen(true)} className="reference-menu-toggle">
-            <CommandIcon name="menu" className="h-5 w-5"/>
+            <span className="reference-hamburger" aria-hidden="true"><span/><span/><span/></span>
           </button>
           <div className="reference-header-brand">
             <span className="reference-header-brand-mark">
