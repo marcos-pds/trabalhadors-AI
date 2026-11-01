@@ -1,0 +1,18 @@
+{
+  "packaged": true,
+  "checks": [
+    "registration_and_authenticated_ui",
+    "motion_real_capability_diagnostics_and_reload",
+    "external_runtime_profiles_and_explicit_connection",
+    "frozen_backend_real_cli_version_and_connection_without_inference",
+    "authenticated_project_creation",
+    "sandbox_context_isolation_no_node",
+    "authorized_preview_interaction_without_credentials",
+    "preview_shutdown",
+    "owned_backend_shutdown",
+    "login_and_project_persist_after_restart"
+  ],
+  "passed": true,
+  "final_backend_closed": true,
+  "final_preview_closed": true
+}
