@@ -50,3 +50,8 @@ São tarefas Python pequenas. Não substituem aceitação de projeto maior, QA v
 - [Gemini configuração](https://geminicli.com/docs/reference/configuration/) e [políticas](https://geminicli.com/docs/reference/policy-engine/)
 - [OpenCode CLI](https://opencode.ai/docs/cli/), [agentes](https://opencode.ai/docs/agents/) e [permissões](https://opencode.ai/docs/permissions/)
 - [ACP v1](https://agentclientprotocol.com/protocol/v1/session-setup) e [segurança](https://agentclientprotocol.com/protocol/v1/security)
+## Busca de modelos no painel
+
+Desde o desktop 0.2.5 e a atualizacao web correspondente, colar a chave API ou selecionar uma conexao salva inicia a consulta automatica do catalogo. A lista considera a credencial atual; respostas antigas sao descartadas ao trocar a chave/runtime. Ha botao Atualizar modelos e entrada manual como alternativa. OpenCode permite selecionar o provedor da chave e aplica o prefixo correto ao modelo.
+
+A consulta usa somente a listagem de modelos, sem executar CLI, gerar resposta ou criar trabalhadores. O acesso efetivo, as cotas e a compatibilidade final do modelo sao confirmados na execucao. Teste real do catalogo Gemini nesta maquina retornou 34 modelos de geracao; a chave nao foi exibida ou alterada.
