@@ -338,8 +338,6 @@ select option { background: #242528; color: #e8eaed; }
 .living-orbit-hint { position: absolute; top: 88%; color: var(--glass-muted); font-size: 10px; }
 .living-agent-orbit.is-working .living-core-mark { animation: orbit-rotate 2.6s linear infinite; }
 .living-agent-orbit.is-working .living-orbit-halo.halo-one { animation-duration: 12s; }
-.central-root[data-theme="light"] .central-chat-scene .text-muted,
-.central-root[data-theme="light"] .central-chat-scene .text-copy { color: inherit; }
 .central-root[data-theme="light"] .central-chat-scene .border-white\/10 { border-color: rgba(95,103,145,.18); }
 .central-root[data-theme="light"] .central-chat-scene .bg-card { background: rgba(255,255,255,.67); }
 .central-root[data-theme="light"] .central-chat-scene .bg-white\/\[\.035\] { background: rgba(255,255,255,.4); }
