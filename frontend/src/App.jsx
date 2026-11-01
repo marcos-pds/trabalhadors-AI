@@ -248,14 +248,50 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
   }
   const activeProject = data.projects.find(p => p.id === (data.conversations.find(c => c.id === currentConvo)?.project_id || selectedProject))
   return <div className="central-chat-scene relative flex h-full min-h-0 flex-col">
-    <header className="flex min-h-[62px] shrink-0 items-center justify-between gap-3 border-b border-white/[.07] px-5 py-2 max-sm:px-3">
-      <div className="min-w-0"><strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong><small className="mt-1 block text-[11px] text-muted">{activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}</small></div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={onOpenExecution} title="Abrir prévia do projeto" className="rounded-xl border border-emerald-300/25 px-3 py-2 text-[11px] text-emerald-200 hover:bg-emerald-400/10">◫ Prévia</button>
-        {running && <button type="button" onClick={onCancel} className="rounded-xl border border-rose-300/40 px-3 py-2 text-[11px] font-bold text-rose-200 hover:bg-rose-400/10">■ Parar</button>}
-        <button type="button" onClick={onOpenMemory} title="Buscar conversas e configurar memória" className="rounded-xl border border-lilac/30 px-3 py-2 text-[11px] text-lilac hover:bg-lilac/10">⌕ Memória</button>
-        <select value={mode} onChange={e => {setMode(e.target.value);if(e.target.value!=='manual')setSelectedAgent('')}} aria-label="Modo de trabalho" className="max-w-[150px] rounded-xl border border-white/10 bg-card px-3 py-2 text-[11px] text-copy outline-none focus:border-lilac/50"><option value="auto">✦ Automático</option><option value="manual">◇ Um trabalhador</option><option value="team">▣ Equipe</option></select>
-        <select value={selectedAgent} onChange={e => { setSelectedAgent(e.target.value); if(e.target.value) setMode('manual'); else if(mode==='manual') setMode('auto') }} aria-label="Trabalhador preferido" className="max-w-[155px] rounded-xl border border-white/10 bg-card px-3 py-2 text-[11px] text-copy outline-none focus:border-lilac/50"><option value="">Qualquer trabalhador</option>{data.agents.filter(a => a.enabled).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+    <header className="central-chat-toolbar relative z-20 flex min-h-[61px] shrink-0 items-center justify-between gap-3 border-b border-white/[.09] px-5 py-2 max-sm:px-3">
+      <div className="min-w-0 flex-1">
+        <strong className="block truncate text-[13px] font-semibold">{data.conversations.find(c => c.id === currentConvo)?.title || 'Nova conversa'}</strong>
+        <small className="mt-1 block truncate text-[11px] text-muted">
+          {activeProject ? '▤ ' + activeProject.name + ' · memória ampliada' : 'Conversa avulsa · memória curta'}
+        </small>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button type="button" onClick={openCommandPalette} aria-label="Abrir paleta de comandos"
+          title="Comandos / · Ctrl+K" className="liquid-toolbar-action">
+          <CommandIcon name="sparkles"/><span className="max-sm:hidden">Comandos</span><kbd>/</kbd>
+        </button>
+        <button type="button" onClick={onOpenExecution} aria-label="Abrir prévia"
+          title="Prévia e execução" className="liquid-toolbar-action">
+          <CommandIcon name="play"/><span className="max-sm:hidden">Prévia</span>
+        </button>
+        {running && <button type="button" onClick={onCancel} className="liquid-toolbar-action is-danger"
+          aria-label="Parar execução"><CommandIcon name="x"/><span className="max-sm:hidden">Parar</span></button>}
+        <button type="button" onClick={onOpenMemory} aria-label="Abrir memória" title="Memória"
+          className="liquid-toolbar-action max-sm:hidden"><CommandIcon name="brain"/></button>
+        <details className="liquid-mode-menu relative">
+          <summary className="liquid-toolbar-action" aria-label="Configurar modo e trabalhador">
+            <CommandIcon name="users"/><span className="max-sm:hidden">
+              {mode === 'team' ? 'Equipe' : mode === 'manual' ? 'Individual' : 'Auto'}
+            </span>
+          </summary>
+          <div className="liquid-command-menu absolute right-0 top-[calc(100%+10px)] z-40 w-[min(300px,85vw)] p-4 shadow-2xl">
+            <label className="mb-3 block text-xs text-muted">Modo de trabalho
+              <select value={mode} onChange={e => {setMode(e.target.value);if(e.target.value!=='manual')setSelectedAgent('')}}
+                aria-label="Modo de trabalho" className="mt-2 w-full rounded-xl border border-white/20 bg-card px-3 py-2.5 text-xs text-copy">
+                <option value="auto">✦ Automático</option><option value="manual">◇ Um trabalhador</option><option value="team">▣ Equipe</option>
+              </select>
+            </label>
+            <label className="block text-xs text-muted">Trabalhador preferido
+              <select value={selectedAgent}
+                onChange={e => {setSelectedAgent(e.target.value);if(e.target.value)setMode('manual');else if(mode==='manual')setMode('auto')}}
+                aria-label="Trabalhador preferido" className="mt-2 w-full rounded-xl border border-white/20 bg-card px-3 py-2.5 text-xs text-copy">
+                <option value="">Qualquer trabalhador</option>
+                {data.agents.filter(agent => agent.enabled).map(agent =>
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              </select>
+            </label>
+          </div>
+        </details>
       </div>
     </header>
     <div ref={transcriptRef} className="scrollbar-soft relative min-h-0 flex-1 overflow-y-auto px-6 py-5 max-sm:px-3">
