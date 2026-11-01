@@ -136,6 +136,23 @@ async function main() {
 
     await page.screenshot({path:path.join(evidence,'animated-providers.png'),fullPage:true})
     report.checks.push('provider_cards_with_brand_icons')
+    // Exercise the real noreferrer anchor and native handler without opening a
+    // browser tab during automated acceptance. Only the OS boundary is mocked.
+    const windowCount=app.windows().length
+    await app.evaluate(({shell})=>{
+      global.savedExternalOpener=shell.openExternal
+      global.providerLinkOpened=null
+      shell.openExternal=async url=>{global.providerLinkOpened=url}
+    })
+    try {
+      await page.locator('article').filter({has:page.getByRole('heading',{name:'Groq',exact:true})})
+        .getByRole('link',{name:'Obter chave',exact:true}).click()
+      await expect.poll(()=>app.evaluate(()=>global.providerLinkOpened)).toBe('https://console.groq.com/keys')
+      expect(app.windows().length).toBe(windowCount)
+      report.checks.push('provider_key_anchor_routes_to_system_browser_without_popup')
+    } finally {
+      await app.evaluate(({shell})=>{shell.openExternal=global.savedExternalOpener;delete global.savedExternalOpener})
+    }
 
     await page.getByRole('button',{name:'Abrir menu'}).click()
     await page.getByTitle('Chat IA',{exact:true}).click()

@@ -8,7 +8,7 @@ const { inventory, summary } = require('./dependency_inventory.cjs')
 const { isRunning, stopOwnedBackend } = require('./process_lifecycle.cjs')
 const { PROFILES, planFor, planText } = require('./setup_profiles.cjs')
 const { RENDERER_PREFERENCES, backendOrigin, createNetworkPolicy, requestHeaders,
-  responseHeaders, externalAuthURL, dataDirectory, backendEnvironment } = require('./security_policy.cjs')
+  responseHeaders, externalAuthURL, externalProviderURL, dataDirectory, backendEnvironment } = require('./security_policy.cjs')
 
 const READY = /^CENTRAL_DESKTOP_READY=(http:\/\/127\.0\.0\.1:(\d{1,5})\/)$/
 let child = null
@@ -278,6 +278,13 @@ function showWindow(url) {
   })
   win.webContents.on('page-title-updated', event => { event.preventDefault(); win.setTitle('Central IA') })
   win.webContents.setWindowOpenHandler(details => {
+    const providerURL = externalProviderURL(details.url, details.referrer?.url, serverOrigin)
+    if (providerURL && !quitting) {
+      shell.openExternal(providerURL).catch(() => {
+        if (!quitting) dialog.showErrorBox('Central IA', 'Nao foi possivel abrir o navegador padrao. Tente novamente.')
+      })
+      return { action: 'deny' }
+    }
     // Only the app's existing blank OAuth placeholder may create a window.
     // Preview popups, arbitrary links and externally supplied feature flags fail closed.
     if (details.url === 'about:blank' && !authWindow && !quitting) {

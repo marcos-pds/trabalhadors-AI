@@ -3,10 +3,30 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { RENDERER_PREFERENCES, createNetworkPolicy, backendOrigin, requestHeaders,
-  responseHeaders, externalAuthURL, dataDirectory, backendEnvironment } = require('./security_policy.cjs')
+  responseHeaders, externalAuthURL, externalProviderURL, dataDirectory, backendEnvironment } = require('./security_policy.cjs')
 const APP = 'http://127.0.0.1:41001'
 const PREVIEW = 'http://127.0.0.1:42002'
 const request = (url, extra = {}) => ({ url, resourceType: 'xhr', initiatorOrigin: APP, ...extra })
+
+test('official provider links support noreferrer and reject unsafe targets and preview referrers', () => {
+  for (const url of ['https://console.groq.com/keys','https://aistudio.google.com/app/apikey','https://openrouter.ai/settings/keys']) {
+    assert.equal(externalProviderURL(url, '', APP), url)
+    assert.equal(externalProviderURL(url, APP+'/', APP), url)
+    assert.equal(externalProviderURL(url, PREVIEW+'/', APP), null)
+  }
+  for (const url of ['https://evil.test/','https://console.groq.com.evil.test/keys',
+    'http://console.groq.com/keys','https://console.groq.com:444/keys',
+    'https://user:pass@console.groq.com/keys','file:///C:/secret','javascript:alert(1)']) {
+    assert.equal(externalProviderURL(url, '', APP), null)
+  }
+})
+
+test('every official catalog key and conditions page is supported', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname,'../central/catalog.py'),'utf8').split('BY_KIND =')[0]
+  for (const match of source.matchAll(/'(https:\/\/[^']+)'/g)) {
+    assert.ok(externalProviderURL(match[1], '', APP), match[1])
+  }
+})
 
 test('renderer has no Node, preload, webview, or relaxed web security', () => {
   assert.equal(RENDERER_PREFERENCES.nodeIntegration, false)

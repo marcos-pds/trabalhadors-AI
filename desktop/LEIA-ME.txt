@@ -1,7 +1,7 @@
-CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.12
+CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.13
 Criador: Marcos Paulo (@marcos-pds)
 
-Instale usando Central-IA-Setup-0.2.12.exe e abra Central IA pelo menu Iniciar.
+Instale usando Central-IA-Setup-0.2.13.exe e abra Central IA pelo menu Iniciar.
 A interface e o servidor Python acompanham o aplicativo. Nao e necessario
 instalar Python ou Node para abrir a Central.
 

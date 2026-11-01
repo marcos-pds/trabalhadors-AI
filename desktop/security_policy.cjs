@@ -29,6 +29,22 @@ function backendOrigin(value) {
   return url.origin
 }
 
+// Official provider pages may open in the system browser, never in Electron.
+const PROVIDER_HOSTS = new Set(['console.groq.com','openrouter.ai','aistudio.google.com','ai.google.dev',
+  'console.mistral.ai','docs.mistral.ai','cloud.sambanova.ai','docs.sambanova.ai','z.ai','docs.z.ai',
+  'dash.cloudflare.com','developers.cloudflare.com','huggingface.co','dashboard.cohere.com','cohere.com',
+  'build.nvidia.com','docs.api.nvidia.com','cloud.cerebras.ai','www.cerebras.ai','modelscope.cn',
+  'cloud.siliconflow.com','docs.siliconflow.com','ollama.com','docs.ollama.com',
+  'chatgpt.com','developers.openai.com'])
+function externalProviderURL(value, referrer, origin) {
+  const url = parsed(value)
+  if (!url || url.protocol !== 'https:' || url.port || !PROVIDER_HOSTS.has(url.hostname)) return null
+  // noreferrer links intentionally have an empty referrer. A supplied preview
+  // referrer must not be treated as the authenticated application.
+  if (referrer && parsed(referrer)?.origin !== origin) return null
+  return url.href
+}
+
 function previewURL(status, origin) {
   if (!status || status.status !== 'running') return null
   const url = loopback(status.url)
@@ -150,5 +166,5 @@ function backendEnvironment(source, data) {
     CENTRAL_HOST: '127.0.0.1', CENTRAL_JOB_MODE: 'embedded', PYTHONUNBUFFERED: '1' })
 }
 
-module.exports = { RENDERER_PREFERENCES, backendOrigin, createNetworkPolicy, requestHeaders,
+module.exports = { RENDERER_PREFERENCES, backendOrigin, createNetworkPolicy, requestHeaders, externalProviderURL,
   responseHeaders, externalAuthURL, dataDirectory, backendEnvironment }

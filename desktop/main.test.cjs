@@ -180,3 +180,13 @@ test('untrusted popups, webviews, and file navigation cannot gain renderer privi
   assert.equal(appSession.permissionCheck(), false)
   appSession.permission(null, 'camera', allowed => assert.equal(allowed, false))
 })
+
+test('provider key links open in the system browser without creating an Electron window', async () => {
+  const { trace } = await harness()
+  const win = trace.windows[0]
+  const count = trace.windows.length
+  const url = 'https://console.groq.com/keys'
+  assert.equal(win.openHandler({url,referrer:{url:''}}).action, 'deny')
+  assert.equal(trace.external, url)
+  assert.equal(trace.windows.length, count)
+})
