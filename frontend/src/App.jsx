@@ -191,6 +191,22 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
   const [activeCommand, setActiveCommand] = useState(0)
   const matchingCommands = matchingChatCommands(prompt)
   const openCommandPalette = () => { setPrompt('/'); setActiveCommand(0); inputRef.current?.focus() }
+  useEffect(() => {
+    const shortcut = event => {
+      const node = event.target
+      const tag = node?.tagName?.toLowerCase()
+      const typing = node?.isContentEditable || ['input','textarea','select'].includes(tag)
+      if ((event.key === '/' && !typing && !event.altKey && !event.ctrlKey && !event.metaKey) ||
+          (event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey) && !event.altKey)) {
+        event.preventDefault()
+        setPrompt('/')
+        setActiveCommand(0)
+        inputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [setPrompt])
   useEffect(() => { if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight }, [messages, steps])
   async function attach(e) {
     const file = e.target.files?.[0]
