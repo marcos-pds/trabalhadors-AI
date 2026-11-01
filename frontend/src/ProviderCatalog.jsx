@@ -1,3 +1,4 @@
+import { ReferenceProviderIcon } from './ReferenceIcons.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { providerCategory, providerFilters } from './providerFilters'
 import { connectCatalogStream } from './catalogConnectionStream'
@@ -50,7 +51,7 @@ export default function ProviderCatalog({ api, providers, onConnected, onManual,
     {!catalog && !error && <p role="status" className="py-6 text-sm text-muted">Carregando catálogo de serviços...</p>}
     <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {visible.map((p) => <article key={p.kind} className="flex flex-col rounded-2xl border border-white/10 bg-panel p-5">
-        <div className="flex items-start justify-between gap-3"><h3 className="text-sm font-semibold">{p.name}</h3><span className="rounded-full bg-white/5 px-2 py-1 text-[9px] text-muted">{p.access}</span></div>
+        <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="provider-brand-icon" aria-hidden="true"><ReferenceProviderIcon kind={p.kind} className="h-6 w-6"/></span><h3 className="text-sm font-semibold">{p.name}</h3></div><span className="rounded-full bg-white/5 px-2 py-1 text-[9px] text-muted">{p.access}</span></div>
         <p className="mt-3 flex-1 text-xs leading-5 text-muted">{p.note}</p>
         <p className={'mt-3 text-[11px] ' + (verified(p) ? 'text-emerald-300' : 'text-muted')}>{verified(p) ? 'Conexão ativa · teste aprovado' : providers.some(c => c.kind === p.kind) ? 'Cadastro existente · validar conexão' : 'Ainda não conectado'}</p>
         <div className="mt-4 flex flex-wrap gap-2">

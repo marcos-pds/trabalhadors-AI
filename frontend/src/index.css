@@ -426,17 +426,12 @@ select option { background: #242528; color: #e8eaed; }
 .central-root[data-theme="dark"] .reference-hamburger span {background:#e8eaed;}
 
 
-.reference-brand-list {flex-shrink:1;min-height:110px;max-height:210px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent;}
-.reference-brand-item {min-height:48px;color:#475569;}
-.reference-brand-item:hover {background:rgba(255,255,255,.88);box-shadow:0 7px 18px rgba(15,23,42,.08);}
-.central-root[data-theme="light"] .central-drawer .reference-brand-item .text-slate-700 {color:#334155;}
 .central-root[data-theme="light"] button.bg-gradient-to-r {
   background-image:none;
   background-color:#0f172a;
   color:#fff;
   box-shadow:0 8px 24px rgba(15,23,42,.16);
 }
-@media(max-height:730px){.reference-brand-list {max-height:135px;min-height:60px;}}
 
 
 /*
@@ -446,22 +441,22 @@ select option { background: #242528; color: #e8eaed; }
  * blur supplies transparency to the real page behind the control.
  */
 .central-root[data-theme="light"] .liquid-chat-composer {
-  border: 1.5px solid rgba(43, 57, 79, .72);
-  border-top-color: rgba(55, 70, 91, .86);
-  border-bottom-color: rgba(39, 54, 77, .76);
+  border: 1px solid rgba(255, 255, 255, .82);
+  border-top-color: rgba(255, 255, 255, .96);
+  border-bottom-color: rgba(148, 163, 184, .18);
   border-radius: 9999px;
   background:
     radial-gradient(ellipse 52% 130% at 17% -28%, rgba(255, 255, 255, .60), transparent 78%),
     linear-gradient(113deg,
-      rgba(190, 209, 228, .34) 0%,
+      rgba(219, 235, 249, .16) 0%,
       rgba(231, 240, 249, .15) 31%,
       rgba(255, 255, 255, .08) 54%,
-      rgba(177, 198, 222, .33) 100%);
+      rgba(215, 233, 249, .14) 100%);
   -webkit-backdrop-filter: blur(18px) saturate(165%) contrast(1.08);
   backdrop-filter: blur(18px) saturate(165%) contrast(1.08);
   box-shadow:
-    0 18px 34px -13px rgba(33, 47, 66, .25),
-    0 3px 8px -3px rgba(31, 45, 67, .16),
+    0 18px 34px -13px rgba(71, 85, 105, .12),
+    0 3px 8px -3px rgba(71, 85, 105, .08),
     inset 0 1.5px 1px rgba(255, 255, 255, .85),
     inset 0 -3px 8px rgba(52, 78, 112, .12);
   transition:
@@ -487,17 +482,17 @@ select option { background: #242528; color: #e8eaed; }
 }
 .central-root[data-theme="light"] .liquid-chat-composer:hover,
 .central-root[data-theme="light"] .liquid-chat-composer:focus-within {
-  border-color: rgba(30, 41, 59, .95);
+  border-color: rgba(255, 255, 255, .96);
   background:
     radial-gradient(ellipse 52% 130% at 17% -28%, rgba(255, 255, 255, .57), transparent 78%),
     linear-gradient(113deg,
-      rgba(179, 200, 225, .40) 0%,
+      rgba(219, 235, 249, .20) 0%,
       rgba(230, 239, 249, .13) 37%,
       rgba(255, 255, 255, .07) 53%,
-      rgba(162, 190, 220, .40) 100%);
+      rgba(215, 233, 249, .18) 100%);
   box-shadow:
-    0 20px 41px -12px rgba(32, 50, 78, .32),
-    0 0 0 2px rgba(75, 94, 119, .10),
+    0 20px 41px -12px rgba(71, 85, 105, .14),
+    0 0 22px rgba(186, 219, 247, .24),
     inset 0 2px 3px rgba(255, 255, 255, .83),
     inset 0 -4px 10px rgba(52, 79, 112, .17);
   transform: translateY(-1px);
@@ -602,4 +597,10 @@ select option { background: #242528; color: #e8eaed; }
 
 .central-root .liquid-chat-composer textarea { resize: none; scrollbar-width: thin; }
 .central-root[data-theme="light"] .liquid-chat-composer textarea:focus-visible { outline: none; }
-.central-root .liquid-chat-composer:focus-within { outline: 2px solid var(--glass-muted); outline-offset: 3px; }
+.central-root .liquid-chat-composer:focus-within { outline: none; }
+
+.provider-brand-icon {display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,.65);box-shadow:inset 0 1px 1px rgba(255,255,255,.9),0 3px 12px rgba(71,85,105,.05);}
+.central-root[data-theme="dark"] .provider-brand-icon {background:rgba(255,255,255,.07);}
+.central-root .central-drawer {background:rgba(255,255,255,.92);}
+.central-root .central-drawer nav button {min-height:38px;}
+.central-root .liquid-chat-composer:has(textarea:focus-visible) {box-shadow:0 12px 32px rgba(71,85,105,.12),0 0 26px rgba(125,190,237,.24),inset 0 1px 2px rgba(255,255,255,.95);}

@@ -8,11 +8,11 @@ const app = read('App.jsx')
 const lens = read('LiquidGlassUI.jsx')
 const corrected = style.slice(style.indexOf('Ice White glass correction'))
 
-test('Ice White composer has a dark slate outline instead of the original white rim', () => {
+test('Ice White composer uses a translucent rim without dark outline', () => {
   assert.ok(corrected.length > 1800)
   assert.match(corrected, /\.central-root\[data-theme="light"\] \.liquid-chat-composer \{/)
-  assert.match(corrected, /border: 1\.5px solid rgba\(43, 57, 79, \.72\)/)
-  assert.match(corrected, /border-color: rgba\(30, 41, 59, \.95\)/)
+  assert.match(corrected, /border: 1px solid rgba\(255, 255, 255, \.82\)/)
+  assert.match(corrected, /border-color: rgba\(255, 255, 255, \.96\)/)
   assert.match(corrected, /backdrop-filter: blur\(18px\) saturate\(165%\)/)
 })
 
