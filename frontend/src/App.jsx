@@ -275,15 +275,56 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
             </div>
           </div>)}
         </div>}
-        {matchingCommands.length > 0 && <div role="listbox" aria-label="Comandos" className="absolute bottom-[calc(100%+9px)] left-0 right-0 z-30 max-h-72 overflow-y-auto rounded-2xl border border-white/10 bg-[#202024] p-1.5 shadow-2xl shadow-black/50">
-          {matchingCommands.map(item => <button key={item.command} type="button" role="option" onClick={() => onCommand(item.command)} className={'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ' + (matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)]?.command === item.command ? 'bg-white/[.07]' : 'hover:bg-white/[.07]')}><code className="min-w-28 text-xs font-semibold text-lilac">{item.command}</code><span className="min-w-0"><strong className="block text-xs font-medium text-copy">{item.label}</strong><small className="text-[10px] text-muted">{item.description}</small></span></button>)}
+        {matchingCommands.length > 0 && <div id="central-command-menu"
+          className="liquid-command-menu absolute bottom-[calc(100%+12px)] left-0 right-0 z-30 max-h-[min(55vh,430px)] overflow-y-auto p-2"
+          aria-label="Sugestões de comandos da Central">
+          <div className="flex items-center justify-between gap-2 px-4 py-2">
+            <p className="liquid-command-group">Comandos, agentes e integrações</p>
+            <span className="text-[10px] text-muted">↑ ↓ navegar · Enter executar · Esc fechar</span>
+          </div>
+          <div role="listbox" aria-label="Comandos" className="space-y-0.5">
+            {matchingCommands.map((item, index) => {
+              const isSelected = index === Math.min(activeCommand, matchingCommands.length - 1)
+              return <button key={item.command} type="button" role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setActiveCommand(index)}
+                onClick={() => onCommand(item.command)}
+                className="liquid-menu-item relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left">
+                {isSelected && <LiquidGlassUnderlay className="liquid-command-highlight" radius={16} strength={0.052}/>}
+                <span className="relative z-10 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/20 bg-white/10 text-lilac">
+                  <CommandIcon name={item.icon}/>
+                </span>
+                <span className="relative z-10 min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold text-copy">{item.label}</span>
+                  <span className="block text-[11px] leading-5 text-muted">{item.description}</span>
+                </span>
+                <code className="liquid-command-key relative z-10 shrink-0 text-[11px]">{item.command}</code>
+              </button>
+            })}
+          </div>
         </div>}
-        <div className={"chat-composer rounded-[23px] shadow-xl shadow-black/15 focus-within:ring-4 focus-within:ring-lilac/5 " + (prompt.trim() ? "is-typing" : "")}>
-          <textarea value={prompt} disabled={sending} onChange={e => { setPrompt(e.target.value); setActiveCommand(0) }} onKeyDown={handleKeyDown} rows={2} placeholder={sending ? 'Enviando para a Central…' : running ? "Peça ajustes aos trabalhadores enquanto eles executam..." : "Escreva uma mensagem ou digite / para ver comandos..."} className="block max-h-40 min-h-[67px] w-full resize-y bg-transparent px-5 pt-4 text-sm text-copy outline-none placeholder:text-[#aaa7b1] disabled:opacity-70" />
+        <div className="liquid-chat-composer">
+          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.075} radius={28}/>
+          <div className="composer-input-content">
+            <div className="flex items-start gap-2 px-3 pt-3">
+              <button type="button" aria-label="Abrir comandos" title="Digite / para navegar"
+                onClick={openCommandPalette} className="liquid-command-trigger"
+                disabled={sending}><CommandIcon name="sparkles"/></button>
+              <textarea ref={inputRef} value={prompt} disabled={sending}
+                onChange={e => {setPrompt(e.target.value);setActiveCommand(0)}}
+                onKeyDown={handleKeyDown} rows={2}
+                aria-label="Mensagem ou comando da Central"
+                aria-controls={matchingCommands.length ? 'central-command-menu' : undefined}
+                placeholder={sending ? 'Enviando para a Central…' :
+                  running ? 'Peça ajustes aos trabalhadores enquanto executam…' :
+                  'Digite / para ver comandos ou escreva sua tarefa…'}
+                className="block max-h-40 min-h-[67px] min-w-0 flex-1 resize-y bg-transparent px-2 pt-2 text-sm outline-none disabled:opacity-70" />
+            </div>
           <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3"><div className="flex min-w-0 flex-wrap items-center gap-2"><input ref={fileRef} type="file" className="hidden" accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml" onChange={attach} /><Button small quiet disabled={sending} onClick={() => fileRef.current?.click()}>＋ Anexar</Button><Button small quiet type="button" onClick={onOpenComputer} title="Permissões de acesso a uma pasta local">🖥 Computador · {computerAccess?.mode === 'full' ? 'Pasta autorizada' : computerAccess?.mode === 'ask' ? 'Solicitar permissão' : 'Bloqueado'}</Button><label title="Autorizar agentes a editar e testar dentro da pasta configurada" className="flex cursor-pointer items-center gap-1 rounded-lg border border-lilac/25 px-2 py-1.5 text-[11px] text-lilac"><input type="checkbox" checked={autonomous} disabled={computerAccess?.mode === 'blocked' || running} onChange={e => {
         if(e.target.checked && !window.confirm('Ativar trabalhadores autônomos? Eles poderão alterar arquivos e executar comandos permitidos no workspace escolhido. Pacotes e scripts de projeto executam código real no Windows.')) return
         setAutonomous(e.target.checked)
       }} className="accent-violet-400"/> Autonomia      </label><span className="truncate text-[10px] text-muted">{files.length ? files.map(f => f.name).join(', ') : 'Até 2 MB'}</span></div><div className="flex items-center gap-2">{running && <Button small quiet onClick={onCancel}>■ Parar</Button>}<Button primary small onClick={() => matchingCommands.length ? onCommand(matchingCommands[Math.min(activeCommand, matchingCommands.length - 1)].command) : submitMessage()} disabled={!prompt.trim() || sending}>{sending ? 'Enviando…' : running ? 'Enviar ajuste ↑' : matchingCommands.length ? 'Executar comando' : <>Enviar <span aria-hidden="true">↑</span></>}</Button></div></div>
+          </div>
         </div>
       </div>
       <p className="mx-auto mt-2 max-w-[690px] text-center text-[10px] text-muted">Tarefas usam suas próprias chaves de provedor e podem gerar cobranças.</p>
