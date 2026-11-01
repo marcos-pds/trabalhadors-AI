@@ -237,8 +237,8 @@ select option { background: #242528; color: #e8eaed; }
 .reference-core-icon {position:relative;width:64px;height:64px;z-index:3;filter:drop-shadow(0 5px 10px rgba(30,41,59,.2));}
 .reference-core-shine {position:absolute;z-index:2;width:24px;height:24px;right:26px;top:16px;background:rgba(255,255,255,.65);filter:blur(2px);border-radius:50%;}
 .reference-orbit-satellite {
-  position:absolute;z-index:4;left:50%;top:50%;
-  transform:translate(calc(-50% + var(--satellite-x)),calc(-50% + var(--satellite-y)));
+  position:absolute;z-index:4;left:calc(50% + var(--satellite-x));top:calc(50% + var(--satellite-y));
+  transform:translate(-50%,-50%);
 }
 .reference-orbit-satellite-glass {
   display:grid;place-items:center;
@@ -382,7 +382,6 @@ select option { background: #242528; color: #e8eaed; }
 @media(max-width:620px) {
   .reference-orbit {width:min(275px,72vw);height:min(275px,72vw);}
   .reference-glass-core {width:145px;height:145px;}
-  .reference-orbit-satellite {transform:translate(calc(-50% + var(--satellite-x)*.83),calc(-50% + var(--satellite-y)*.83));}
   .central-chat-toolbar {top:8px;right:7px;max-width:calc(100vw - 110px);}
   .liquid-toolbar-action {width:36px;min-width:36px;min-height:36px;padding:6px;}
   .liquid-toolbar-action .max-sm\:hidden,.liquid-toolbar-action kbd {display:none;}
