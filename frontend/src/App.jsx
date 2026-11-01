@@ -211,6 +211,12 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
   const [sending, setSending] = useState(false)
   const [activeCommand, setActiveCommand] = useState(0)
   const matchingCommands = matchingChatCommands(prompt)
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    input.style.height = 'auto'
+    input.style.height = Math.min(80, Math.max(44, input.scrollHeight)) + 'px'
+  }, [prompt])
   const openCommandPalette = () => { setPrompt('/'); setActiveCommand(0); inputRef.current?.focus() }
   useEffect(() => {
     const shortcut = event => {
@@ -385,7 +391,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
               aria-controls={matchingCommands.length ? 'central-command-menu' : undefined}
               placeholder={sending ? 'Enviando para a Central…' :
                 running ? 'Peça ajustes aos trabalhadores…' :
-                'Comandos com / ou digite sua mensagem…'}
+                'Mensagem ou comando /'}
               className="reference-composer-input"/>
             <button type="button" aria-label={matchingCommands.length ? 'Executar comando' : 'Enviar mensagem'}
               title={running ? 'Enviar ajuste' : 'Enviar'}
