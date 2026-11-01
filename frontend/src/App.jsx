@@ -461,7 +461,7 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 }
 
 export default function App() {
-  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'dark');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
+  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'light');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
@@ -603,8 +603,20 @@ export default function App() {
     setPrompt('')
     if (command === '/novo') return newChat()
     if (command === '/menu') return setMenuOpen(true)
+    if (command === '/chat') return navigate('chat')
+    if (command === '/previa') { setPage('chat');setExecutionPanelOpen(true);return }
+    if (command === '/memoria') return openMemoryPanel()
+    if (command === '/computador') return setComputerOpen(true)
+    if (command === '/automatico') {
+      setMode('auto');setSelectedAgent('');notify('Modo automático selecionado.')
+      return
+    }
+    if (command === '/equipe') {
+      setMode('team');setSelectedAgent('');notify('Modo equipe selecionado.')
+      return
+    }
     if (command === '/ajuda') {
-      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Use /skills e /plugins para gerenciar recursos no chat. Ative com /skill ativar nome ou /plugin ativar nome; desative com /skill desativar nome ou /plugin desativar nome. Use /novo para iniciar uma conversa, /menu para abrir a navegação, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens ou /configuracoes para abrir cada área. Durante uma etapa pausada, /aprovar autoriza e /rejeitar nega a continuação.' }])
+      setMessages(old => [...old, { role: 'assistant', agent: 'Comandos da Central', content: 'Digite / para abrir a paleta. Use /novo, /chat, /previa, /memoria, /computador, /automatico e /equipe no chat. Navegue com /painel, /agentes, /provedores, /projetos, /fluxos, /historico, /monitoramento, /tokens, /integracoes, /github e /configuracoes. /skills e /plugins listam recursos; /skill ativar nome ou /plugin ativar nome respeitam as aprovações e o escopo de segurança. /aprovar e /rejeitar atuam somente em etapas pendentes.' }])
       return
     }
     if (command === '/aprovar' || command === '/rejeitar') {
@@ -612,27 +624,27 @@ export default function App() {
       if (!pending) return notify('Não há etapa aguardando aprovação nesta conversa.')
       return approval(pending.id, command === '/aprovar')
     }
-    const destinations = { '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/configuracoes': 'settings' }
+    const destinations = { '/painel': 'dashboard', '/agentes': 'agents', '/provedores': 'providers', '/projetos': 'projects', '/fluxos': 'workflows', '/historico': 'history', '/monitoramento': 'monitoring', '/tokens': 'tokens', '/integracoes': 'resources', '/github': 'git', '/configuracoes': 'settings' }
     if (destinations[command]) return navigate(destinations[command])
     notify('Comando não encontrado. Use /ajuda, /skills ou /plugins.')
   }
   const selectSuggestion=value=>setPrompt(value)
   if(!authReady)return <div className="grid min-h-screen place-items-center bg-ink text-sm text-muted">Abrindo sua central…</div>
   if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-[#28292c] px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
-  return <div className="relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy">
+  return <div className="central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy" data-page={page} data-theme={theme}>
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
     {menuOpen && <>
       <button aria-hidden="true" tabIndex={-1} onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/>
-      <div className="menu-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
+      <div className="menu-drawer central-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
         <button type="button" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-lg text-xl text-muted hover:bg-white/10">×</button>
         <Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/>
       </div>
     </>}
-    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[radial-gradient(ellipse_at_55%_42%,#1c3762,transparent_49%),#131314]">
-      <header className="z-10 flex h-[58px] shrink-0 items-center justify-between border-b border-white/[.06] bg-[#131314d9] px-5 backdrop-blur-xl max-sm:px-3">
+    <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="central-header z-10 flex h-[58px] shrink-0 items-center justify-between px-5 max-sm:px-3">
         <div className="flex min-w-0 items-center gap-3"><button type="button" aria-label="Abrir menu" title="Menu" onClick={() => setMenuOpen(true)} className="menu-toggle grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-lg text-muted transition hover:bg-white/[.07] hover:text-copy"><span aria-hidden="true">☰</span></button><div className="min-w-0"><p className="truncate text-xs text-muted">{page === 'chat' ? 'Central IA' : 'Workspace'}</p><strong className="block truncate text-[13px] font-medium text-copy">{pageNames[page]}</strong></div></div>
-        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sistema online</span><button aria-label="Alternar tema" title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
+        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sessão conectada</span><button aria-label="Alternar tema" title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
         {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
