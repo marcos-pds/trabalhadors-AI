@@ -619,3 +619,6 @@ select option { background: #242528; color: #e8eaed; }
 .desktop-content .min-h-screen {min-height:100%;}
 .desktop-content .central-drawer,
 .desktop-content .fixed.inset-0 {top:32px;}
+
+/* Keep native Windows caption controls above the opening animation. */
+body:has(.desktop-frame) > .cia-intro {top:32px;}

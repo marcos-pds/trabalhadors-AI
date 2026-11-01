@@ -188,6 +188,7 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
   const openCommandPalette = () => { setPrompt('/'); setActiveCommand(0); inputRef.current?.focus() }
   useEffect(() => {
     const shortcut = event => {
+      if (document.getElementById('root')?.inert) return
       const node = event.target
       const tag = node?.tagName?.toLowerCase()
       const typing = node?.isContentEditable || ['input','textarea','select'].includes(tag)

@@ -1,0 +1,63 @@
+/* Central IA · Cascata de Vidro. Estilos isolados pelo prefixo cia-intro. */
+.cia-intro{
+ --cia-bg:#e5e9f4;--cia-ink:#303c63;--cia-muted:#7884a1;--cia-line:#c6cede;
+ --cia-glass-top:#ffffffd9;--cia-glass-bottom:#ffffff55;--cia-glass-line:#fffffff0;
+ position:fixed;inset:0;z-index:2147483000;overflow:hidden;isolation:isolate;
+ background:var(--cia-bg);color:var(--cia-ink);
+ font-family:Manrope,Inter,"Segoe UI",Arial,sans-serif;box-sizing:border-box;
+ box-shadow:inset 0 0 140px #ffffff44;outline:none;
+}
+.cia-intro *,.cia-intro *::before,.cia-intro *::after{box-sizing:border-box}
+.cia-intro[data-theme="dark"]{
+ --cia-bg:#242c43;--cia-ink:#e0e8ff;--cia-muted:#a8b7d7;--cia-line:#485572;
+ --cia-glass-top:#fffffff0;--cia-glass-bottom:#ffffffb8;--cia-glass-line:#fffffff0;
+ box-shadow:inset 0 0 140px #10182940;
+}
+.cia-intro__glow{position:absolute;inset:-10%;background:radial-gradient(ellipse at 38% 60%,#ffffffc9,transparent 48%),radial-gradient(ellipse at 73% 29%,#b6c2eb99,transparent 52%);filter:blur(35px);pointer-events:none}
+.cia-intro[data-theme="dark"] .cia-intro__glow{opacity:.16}
+.cia-intro__grid{position:absolute;inset:0;background-image:linear-gradient(var(--cia-ink) 1px,transparent 1px),linear-gradient(90deg,var(--cia-ink) 1px,transparent 1px);background-size:72px 72px;opacity:.035;mask-image:radial-gradient(ellipse,#000,transparent 72%);pointer-events:none}
+.cia-intro__top{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:30px 36px;z-index:3}
+.cia-intro__brand{font-size:11px;font-weight:500;letter-spacing:2px}
+.cia-intro__brand>span{margin:0 10px;opacity:.3}
+.cia-intro__actions{display:flex;align-items:center;gap:8px}
+.cia-intro__actions button{appearance:none;font:inherit;font-size:12px;color:var(--cia-ink);background:transparent;border:1px solid var(--cia-line);border-radius:24px;padding:11px 15px;cursor:pointer;min-height:44px}
+.cia-intro__actions button:hover{background:#ffffff28}
+.cia-intro__actions button:focus-visible{outline:3px solid var(--cia-muted);outline-offset:4px}
+.cia-intro__actions button:disabled{cursor:default;opacity:.55}
+.cia-intro__actions [data-cia-skip]{border-color:transparent}
+.cia-intro__actions [data-cia-skip] span{margin-left:9px}
+.cia-intro__world{position:absolute;left:50%;top:48%;width:1100px;height:500px;transform:translate(-50%,-50%) scale(var(--cia-scale,1));transform-origin:center;pointer-events:none}
+.cia-intro__card{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px;border-radius:23px;transform-style:preserve-3d;will-change:transform,opacity}
+.cia-intro__glass{width:100%;height:100%;display:grid;place-items:center;border-radius:inherit;background:linear-gradient(135deg,var(--cia-glass-top),var(--cia-glass-bottom));border:1px solid var(--cia-glass-line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 16px 38px #2736600f,inset 0 1px 3px #fff}
+.cia-intro__glass svg{display:block;width:36px;height:36px;color:var(--cia-icon);overflow:visible}
+.cia-intro__copy{position:absolute;left:50%;top:50%;width:900px;margin-left:-450px;text-align:center;will-change:transform,opacity,filter}
+.cia-intro__eyebrow{font-size:10px;letter-spacing:3px;margin:0 0 14px;color:var(--cia-muted)}
+.cia-intro__copy h1{font:500 49px/1.17 Manrope,Inter,"Segoe UI",Arial,sans-serif;letter-spacing:-2.5px;margin:0;color:var(--cia-ink)}
+.cia-intro__copy h1 em{font-family:Georgia,"Times New Roman",serif;font-weight:400}
+.cia-intro__subtitle{font-size:12px;letter-spacing:.2px;margin:17px 0 0;color:var(--cia-muted)}
+.cia-intro__bottom{position:absolute;bottom:33px;left:36px;right:36px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;letter-spacing:1.8px;color:var(--cia-muted)}
+.cia-intro__bottom [data-cia-time]{font-size:12px;letter-spacing:1px;font-variant-numeric:tabular-nums}
+.cia-intro__progress{position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--cia-ink);transform-origin:left;transform:scaleX(var(--cia-progress,0));opacity:.4}
+.cia-intro__particles{position:absolute;inset:0;pointer-events:none}
+.cia-intro__particles i{position:absolute;width:2px;height:2px;border-radius:50%;background:var(--cia-ink);opacity:.15;animation:ciaIntroSpark 4s ease-in-out var(--cia-delay) infinite alternate}
+@keyframes ciaIntroSpark{from{opacity:.07;transform:translateY(0)}to{opacity:.28;transform:translateY(-8px)}}
+.cia-intro__status{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:700px){
+ .cia-intro__top{padding:20px;align-items:flex-start}
+ .cia-intro__brand{font-size:10px;line-height:1.8;max-width:155px;letter-spacing:1.3px}
+ .cia-intro__brand>span{display:block;font-size:0;height:0}
+ .cia-intro__actions{gap:0;flex-direction:column;align-items:flex-end}
+ .cia-intro__actions button{font-size:11px;padding:10px 12px}
+ .cia-intro__bottom{bottom:26px;left:22px;right:22px;font-size:9px;letter-spacing:1px}
+}
+@media(max-width:600px){
+ .cia-intro__card{width:120px;height:120px;margin:-60px;border-radius:32px}
+ .cia-intro__glass svg{width:59px;height:59px}
+ .cia-intro__copy h1{font-size:68px}
+ .cia-intro__eyebrow,.cia-intro__subtitle{display:none}
+ .cia-intro__world{top:47%}
+}
+@media(prefers-reduced-motion:reduce){
+ .cia-intro__particles i{animation:none}
+ .cia-intro__card,.cia-intro__copy{will-change:auto}
+}
