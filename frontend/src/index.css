@@ -401,3 +401,26 @@ select option { background: #242528; color: #e8eaed; }
   .liquid-underlay {display:none;}
   .liquid-chat-composer,.liquid-command-menu {background:Canvas;color:CanvasText;border:1px solid CanvasText;}
 }
+
+
+.reference-bottom-dock {
+  position:relative;
+  z-index:20;
+  background:linear-gradient(to top,#f0f4f8 0%,rgba(240,244,248,.92) 35%,rgba(240,244,248,0) 100%);
+  border:0;
+}
+.central-root[data-theme="dark"] .reference-bottom-dock {
+  background:linear-gradient(to top,#151821 0%,rgba(21,24,33,.88) 35%,transparent 100%);
+}
+.reference-hamburger {
+  display:flex;flex-direction:column;justify-content:space-between;align-items:center;
+  width:20px;height:16px;pointer-events:none;
+}
+.reference-hamburger span {
+  display:block;width:100%;height:2px;border-radius:99px;background:#334155;
+  transition:width .3s ease,transform .3s ease;
+}
+.reference-hamburger span:nth-child(3) {width:70%;}
+.reference-menu-toggle:hover .reference-hamburger span:first-child {width:80%;}
+.reference-menu-toggle:hover .reference-hamburger span:nth-child(3) {width:100%;}
+.central-root[data-theme="dark"] .reference-hamburger span {background:#e8eaed;}
