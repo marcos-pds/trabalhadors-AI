@@ -424,3 +424,16 @@ select option { background: #242528; color: #e8eaed; }
 .reference-menu-toggle:hover .reference-hamburger span:first-child {width:80%;}
 .reference-menu-toggle:hover .reference-hamburger span:nth-child(3) {width:100%;}
 .central-root[data-theme="dark"] .reference-hamburger span {background:#e8eaed;}
+
+
+.reference-brand-list {flex-shrink:1;min-height:110px;max-height:210px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent;}
+.reference-brand-item {min-height:48px;color:#475569;}
+.reference-brand-item:hover {background:rgba(255,255,255,.88);box-shadow:0 7px 18px rgba(15,23,42,.08);}
+.central-root[data-theme="light"] .central-drawer .reference-brand-item .text-slate-700 {color:#334155;}
+.central-root[data-theme="light"] button.bg-gradient-to-r {
+  background-image:none;
+  background-color:#0f172a;
+  color:#fff;
+  box-shadow:0 8px 24px rgba(15,23,42,.16);
+}
+@media(max-height:730px){.reference-brand-list {max-height:135px;min-height:60px;}}

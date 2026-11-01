@@ -2,8 +2,11 @@
 
 ## Origem visual
 
-Design inspirado no exemplo TSX enviado pelo operador, principalmente no
-orbe central, itens de menu animados, composer único e comandos com "/".
+**O arquivo TSX enviado é a fonte de verdade visual** para os ícones,
+a paleta Ice White e a geometria da tela inicial. Copiamos seus SVGs
+CentralCore/OpenAI/Claude/Gemini/DeepSeek/Meta/Mistral para ReferenceIcons.jsx,
+sem copiar os fluxos fictícios de execução. A refração React permanece uma
+camada visual, sem modificar conteúdo de mensagens.
 A refração usa a dependência MIT
 [PallavAg/liquid-glass-web-react](https://github.com/PallavAg/liquid-glass-web-react)
 na versão fixada no package-lock. Crédito ao autor do pacote; não copiamos
@@ -27,9 +30,14 @@ biblioteca compatível com navegadores.
 - /skills, /plugins, /skill ativar e /plugin ativar continuam pelo fluxo
   protegido de escopos e confirmações. /aprovar e /rejeitar continuam usando
   a operação original sobre uma etapa pendente.
-- O orbe mostra somente os provedores habilitados carregados da API.
-  Efeitos de animação NÃO significam que um modelo está online nem produzem
-  eventos ou resultados simulados.
+- O orbe exibe os quatro símbolos da **referência** nas mesmas posições:
+  OpenAI, Claude, Gemini e DeepSeek, mesmo quando não conectados. Os tooltips
+  consultam a lista real de provedores habilitados. O menu lateral exibe os seis
+  SVGs fornecidos no TSX, com estado de conexão real. Ícones e animações NÃO
+  significam que um modelo esteja online ou processando.
+- Barra Ice White em formato de pílula, estrela laranja, botão Enviar redondo
+  #0f172a e menu hover de vidro, conforme o TSX. Anexos e controles de
+  autonomia ficam em Ferramentas e permissões; aprovações permanecem visíveis.
 - Barra de entrada e item selecionado da paleta recebem um fundo refrativo,
   enquanto texto, botões e diff de aprovações ficam nítidos.
 - Acessibilidade: tecla Enter, Escape, setas, foco, contraste com fallback,
@@ -46,6 +54,8 @@ aprovações, botões Parar e os mesmos endpoints reais.
 - [ ] npm ci, npm test e npm run build em Windows e Ubuntu.
 - [ ] Playwright ou Chrome DevTools: menu / aberto pelo ícone e pelo teclado,
   navegação ↑ ↓, Enter, Escape, clique e navegação real de páginas.
+- [ ] Comparar screenshot lado a lado com o TSX de referência, especialmente
+  fundo #f0f4f8, núcleo 180px, órbita 320px, cores de marcas e pill de input.
 - [ ] Layout 390px e 1440px: sem overflow horizontal, composer acessível,
   aprovações e Parar visíveis mesmo com painel de execução aberto.
 - [ ] Safari/Firefox/Edge: refração ou fallback sem sacrificar legibilidade.
@@ -57,3 +67,6 @@ aprovações, botões Parar e os mesmos endpoints reais.
 
 Não declarar conformidade visual completa sem capturas e testes reais em
 navegador. Esta PR será testada sem alterar o estado do servidor principal.
+
+Os ícones de comandos seguem as formas SVG Lucide (https://lucide.dev),
+com licença ISC; o código de referência já utilizava lucide-react.
