@@ -56,7 +56,7 @@ select option { background: #242528; color: #e8eaed; }
 .menu-toggle:hover span { transform: rotate(90deg); }
 
 @media (prefers-reduced-motion: reduce) {
-  *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .chat-composer:hover, .chat-composer.is-typing { animation: none; }
 }
 
