@@ -29,7 +29,7 @@ export function flowActivity(activity, agents = [], providers = [], stale = fals
     label: stale ? 'Atualização indisponível' : labels[activity.status] || 'Estado não informado',
     moving: !stale && activity.status === 'running',
     done: steps.filter(step => step.status === 'completed').length, total: steps.length,
-    text: message?.content || (last ? activityLabel(last) : 'Aguardando o primeiro registro da execução.'),
+    text: message?.content || (last ? activityLabel(last) : 'Aguardando registros desta execução.'),
     logs: log.slice(-3).map(item => ({ seq:item.seq, text:activityLabel(item), failed:item.success === false || item.event === 'provider_error' })),
     verified: activity.status === 'completed' && activity.delivery_verified === true }
 }

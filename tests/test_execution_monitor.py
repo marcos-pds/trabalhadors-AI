@@ -49,6 +49,11 @@ def test_adjustments_are_persistent_scoped_and_consumed_once(monkeypatch, tmp_pa
                            json={'message': 'x' * 1801}).status_code == 422
         activity = client.get('/api/runs/' + rid + '/activity')
         assert activity.status_code == 200
+        reported = activity.json()['steps']
+        assert reported and all({'agent_id','provider_id','model','deps'} <= set(step) for step in reported)
+        assert all(isinstance(step['deps'], list) for step in reported)
+        stored = DB.one('SELECT agent_id FROM steps WHERE id=?', (reported[0]['id'],))
+        assert reported[0]['agent_id'] == stored['agent_id']
         assert any(e['event'] == 'workspace_feedback_received'
                    for e in activity.json()['events'])
         DB.event(rid, 'workspace_validation', {'passed': False, 'results': []})
