@@ -6,7 +6,7 @@ O verificador não gera arquivos da aplicação, não executa modelos nem aprova
 ## Pedido para a Central em laboratório isolado
 
 Use um repositório Git novo, com commit inicial, um banco da Central separado e
-agentes Codex autorizados para arquitetura, frontend, backend e revisão. Ative
+agentes de API autorizados (sem Codex) para arquitetura, frontend, backend e revisão. Ative
 o isolamento por trabalhador e exija delegação dinâmica real e integração
 de alterações mediante aprovação explícita do operador.
 
@@ -64,7 +64,7 @@ podem modificá-la pela própria interface/API. Nunca use contra produção.
 A aceitação permanece PENDENTE até este comando retornar passed: true
 num projeto real gerado pela Central. Não prova reinício do backend, sandbox
 de sistema operacional, execução de ACP/CLI externo, GPU ou Motion Studio.
-A homologação com Codex/DevTools exige a máquina local autorizada.
+A homologacao com APIs/DevTools exige a maquina local autorizada.
 
 Referências: nightly-labs/OpenBot (PolyForm Noncommercial) e
 CopilotKit/OpenBot (MIT). Nenhum código desses projetos foi copiado.
