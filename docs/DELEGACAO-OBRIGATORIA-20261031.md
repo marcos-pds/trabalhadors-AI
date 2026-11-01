@@ -20,8 +20,11 @@ destinatario habilitado. O contrato nao cria identidades ou concede ferramentas.
 ```
 
 O exemplo representa uma etapa dentro de um fluxo valido, nao um fluxo completo.
-O campo pode ser enviado pela definicao JSON do fluxo; nao foi adicionado um
-controle novo ao editor visual nesta rodada.
+O campo pode ser enviado pela definicao JSON ou pelo editor visual: em cada
+etapa, marque Exigir criacao de subtarefa antes de concluir. A interface usa
+a capacidade can_delegate calculada pelo servidor, bloqueia o revisor e
+preserva instrucoes e requisito ao reabrir o fluxo. Selecionar um fluxo com
+esse requisito ativa o modo autonomo; a permissao da pasta continua obrigatoria.
 
 O limite global de chamadas do laboratorio agora produz `WorkerPaused` e um
 checkpoint `paused_limit`. Ele nao prejudica a saude de provedores que nem
@@ -65,6 +68,16 @@ O [protocolo full-stack](ACEITACAO-FULLSTACK-INDEPENDENTE.md) continua sendo o
 gate de conclusao do projeto maior. O [ensaio anterior](TASKLAB-APIS-20261031.md)
 permanece documentado, inclusive suas falhas; esta evidencia nao o substitui.
 
+
+## Recuperacao de provedores
+
+O roteamento agora coloca candidatos sem circuito aberto antes dos que estao
+em recuperacao, mesmo quando o provedor em recuperacao era o preferido do
+trabalhador. O prazo de suspensao continua obrigatorio; depois dele, uma unica
+sondagem continua permitida se as alternativas nao concluirem. Uma resposta
+bem-sucedida restaura a preferencia normal. Nao concede acesso nem habilita
+provedores desativados. Testes de SQLite/relogio controlado cobrem essa ordem
+e o retorno apos recuperacao; nao comprovam que uma cota externa foi liberada.
 ## Continuacao do laboratorio
 
 Dois novos segmentos limitados a 420 e 180 segundos foram executados. Houve 34 e 18 chamadas, respectivamente. A Central instalou dependencias depois da revisao do comando npm_install vite na pasta isolada, iniciou a previa e utilizou MCP real: snapshot, fill, click e consulta ao console. As aprovacoes locais do navegador seguiram a politica do harness; a instalacao foi aprovada pelo operador. Nenhum arquivo da aplicacao foi corrigido pelo avaliador.

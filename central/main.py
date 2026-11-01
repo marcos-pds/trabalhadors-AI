@@ -786,8 +786,11 @@ class AgentIn(BaseModel):
 
 @app.get('/api/agents')
 def list_agents(user=Depends(current_user)):
+    from .agent_registry import effective_specialty
+    from .dynamic_delegation import CAN_DELEGATE
     agents = DB.all('SELECT * FROM agents WHERE user_id=? ORDER BY created_at',(user['id'],))
-    return [dict(agent, suggested_specialty=suggested_default_specialty(agent))
+    return [dict(agent, suggested_specialty=suggested_default_specialty(agent),
+                 can_delegate=bool(agent['enabled'] and effective_specialty(agent) in CAN_DELEGATE))
             for agent in agents]
 
 
