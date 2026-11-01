@@ -371,7 +371,8 @@ function ChatPage({ data, messages, steps, mode, setMode, selectedAgent, setSele
           </div>
         </div>}
         <div className="liquid-chat-composer" role="group" aria-label="Escrever mensagem ou comando">
-          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.08} radius={48}/>
+          <LiquidGlassUnderlay className="liquid-composer-refraction" strength={0.14} radius={48}
+            depth={14} edgeHighlight={0.52} glow={0.24} chromaticAberration={0.23}/>
           <div className="composer-input-content">
             <button type="button" aria-label="Abrir comandos" title="Comandos /"
               onClick={openCommandPalette} className="liquid-command-trigger"
