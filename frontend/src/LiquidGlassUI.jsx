@@ -73,6 +73,18 @@ export function CommandIcon({ name = 'sparkles', className = '' }) {
   </svg>
 }
 
+const providerVisuals = {
+  gemini: ['sparkles', '#8b81fa'],
+  openai: ['brain', '#13ad86'],
+  anthropic: ['sparkles', '#d69d76'],
+  codex_cli: ['monitor', '#26b8bb'],
+  groq: ['zap', '#f59e70'],
+  ollama: ['monitor', '#4ebec6'],
+  deepseek: ['activity', '#428ef0'],
+  mistral: ['chart', '#f6ae56'],
+  openrouter: ['git', '#a89fe8'],
+}
+
 export function LiveAgentOrbit({ providers = [], running = false }) {
   const enabled = providers.filter(item => item.enabled).slice(0, 5)
   return <div className={'living-agent-orbit' + (running ? ' is-working' : '')}
@@ -87,14 +99,16 @@ export function LiveAgentOrbit({ providers = [], running = false }) {
     </div>
     {enabled.map((provider, index) => {
       const angle = index * 2 * Math.PI / enabled.length - Math.PI / 2
+      const [icon, color] = providerVisuals[provider.kind] || ['sparkles', '#a99bff']
       return <div key={provider.id} className="living-provider"
         title={provider.name + ' — configuração salva'}
         style={{
           '--orbit-x': Math.cos(angle) * 46 + '%',
           '--orbit-y': Math.sin(angle) * 46 + '%',
           '--orbit-delay': -(index * 0.6) + 's',
+          '--provider-color': color,
         }}>
-        <span className="living-provider-dot" aria-hidden="true">✦</span>
+        <span className="living-provider-dot" aria-hidden="true"><CommandIcon name={icon}/></span>
         <span>{provider.name}</span>
       </div>
     })}
