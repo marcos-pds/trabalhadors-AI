@@ -78,3 +78,10 @@ sondagem continua permitida se as alternativas nao concluirem. Uma resposta
 bem-sucedida restaura a preferencia normal. Nao concede acesso nem habilita
 provedores desativados. Testes de SQLite/relogio controlado cobrem essa ordem
 e o retorno apos recuperacao; nao comprovam que uma cota externa foi liberada.
+## Continuacao do laboratorio
+
+Dois novos segmentos limitados a 420 e 180 segundos foram executados. Houve 34 e 18 chamadas, respectivamente. A Central instalou dependencias depois da revisao do comando npm_install vite na pasta isolada, iniciou a previa e utilizou MCP real: snapshot, fill, click e consulta ao console. As aprovacoes locais do navegador seguiram a politica do harness; a instalacao foi aprovada pelo operador. Nenhum arquivo da aplicacao foi corrigido pelo avaliador.
+
+Ambos os segmentos chegaram ao limite de tempo e preservaram checkpoint. Backend, frontend, subtarefa dinamica e revisao ainda nao concluiram. Nao houve promocao ou aceitacao full-stack. A ultima navegacao pedida para localhost:5173 permaneceu sem aprovacao por nao corresponder a porta da previa autorizada; esse bloqueio nao foi contornado. Os servicos pertencentes ao ensaio foram encerrados pelo harness.
+
+O relato resumido fica em evidence/tasklab-delegation-continuation-20261101.json. Os erros HTTP 400/429 e timeouts foram preservados. A nova ordem de roteamento evitou iniciar pela sondagem do Qwen suspenso, mas nao eliminou erros de outras APIs nem comprova entrega autonoma final.
