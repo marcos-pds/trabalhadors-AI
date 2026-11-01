@@ -5,7 +5,7 @@ const modeLabels = {
   ask: 'Solicitar permissão',
   full: 'Acesso total à pasta',
 }
-const control = 'mt-2 w-full rounded-xl border border-white/10 bg-[#17171a] px-3 py-3 text-xs text-copy outline-none focus:border-lilac/60'
+const control = 'mt-2 w-full rounded-xl border border-white/10 bg-ink px-3 py-3 text-xs text-copy outline-none focus:border-lilac/60'
 const button = 'rounded-xl border border-white/15 bg-white/[.04] px-3 py-2 text-xs font-medium text-copy hover:bg-white/[.09] disabled:cursor-not-allowed disabled:opacity-40'
 
 export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach }) {
@@ -82,7 +82,7 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
 
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/75 p-3 backdrop-blur-sm sm:p-5" onKeyDown={e => { if (e.key === 'Escape' && !busy) onClose() }}>
     <section role="dialog" aria-modal="true" aria-labelledby="computer-access-title"
-      className="my-auto max-h-[94vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/15 bg-[#212125] p-5 shadow-2xl sm:p-7">
+      className="my-auto max-h-[94vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/15 bg-panel p-5 shadow-2xl sm:p-7">
       <header className="flex items-start justify-between gap-3">
         <div>
           <h2 id="computer-access-title" className="text-lg font-semibold">Acesso ao computador</h2>
@@ -181,7 +181,7 @@ export default function ComputerAccessPanel({ api, onClose, onSaved, onAttach })
               onClose()
             }}>＋ Anexar ao chat</button>
           </div>
-          <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-[#141416] p-3 text-[11px] text-muted">{preview.content}</pre>
+          <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-white/10 bg-ink p-3 text-[11px] text-muted">{preview.content}</pre>
           <p className="mt-2 text-[10px] text-muted">Somente ao anexar e enviar sua mensagem esse conteúdo será encaminhado ao modelo de IA.</p>
         </div>}
       </section>

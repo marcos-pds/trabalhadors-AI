@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { providerCategory, providerFilters } from './providerFilters'
 import { connectCatalogStream } from './catalogConnectionStream'
 
-const control = 'min-h-11 rounded-xl border border-white/10 bg-[#191919] px-3 text-sm text-copy outline-none focus:border-lilac/60 disabled:opacity-50'
+const control = 'min-h-11 rounded-xl border border-white/10 bg-panel px-3 text-sm text-copy outline-none focus:border-lilac/60 disabled:opacity-50'
 const button = 'min-h-10 rounded-xl border border-white/10 px-4 text-xs font-semibold transition hover:bg-white/10 disabled:opacity-50 disabled:cursor-wait'
 const primary = button + ' border-lilac/30 bg-lilac/15 text-lilac'
 
@@ -133,7 +133,7 @@ function ConnectDialog({ service, api, saved, onClose, onConnected }) {
   const visible = (models || []).filter(m => `${m.id} ${m.name}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')))
   const accessLabel = m => m.billing === 'paid' ? 'Pago' : m.billing === 'free' ? (service.kind === 'sambanova' ? 'Free Tier documentado' : 'Gratuito elegível') : m.billing === 'local' ? 'Local' : 'Preço não confirmado'
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onKeyDown={e => { if (e.key === 'Escape' && !busy) onClose() }}>
-    <section role="dialog" aria-modal="true" aria-labelledby="connect-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#1f1f1f] p-6 shadow-2xl">
+    <section role="dialog" aria-modal="true" aria-labelledby="connect-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-panel p-6 shadow-2xl">
       <div className="flex items-center justify-between gap-4"><h2 id="connect-title" className="text-xl font-semibold">Conectar {service.name}</h2><button className={button} onClick={onClose} disabled={!!busy} aria-label="Fechar">×</button></div>
       {result ? <>
         <div role="status" className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4">
@@ -301,7 +301,7 @@ function ChatGPTPlanDialog({ api, onClose, onConnected }) {
     finally { setBusy(false) }
   }
   return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
-    <section role="dialog" aria-modal="true" aria-labelledby="chatgpt-plan-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#1f1f1f] p-6 shadow-2xl">
+    <section role="dialog" aria-modal="true" aria-labelledby="chatgpt-plan-title" className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-panel p-6 shadow-2xl">
       <div className="flex items-center justify-between gap-4"><h2 id="chatgpt-plan-title" className="text-xl font-semibold">Conectar ChatGPT</h2><button className={button} onClick={onClose} disabled={busy} aria-label="Fechar">×</button></div>
       <p className="mt-4 text-xs leading-5 text-muted">A conexão abre a autorização oficial da OpenAI. A Central solicita permissão para usar a cota elegível do seu plano nos pedidos de modelos. Isso não acessa conversas do ChatGPT e não é o mesmo que uma chave da API.</p>
       {status?.connected ? <>

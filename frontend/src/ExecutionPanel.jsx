@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import WorktreeReviewPanel from './WorktreeReviewPanel'
 
 const btn = 'rounded-xl border border-white/15 px-3 py-2 text-xs text-copy transition hover:bg-white/[.08] disabled:opacity-40'
-const input = 'w-full rounded-xl border border-white/15 bg-[#151519] px-3 py-2.5 text-xs text-copy outline-none focus:border-violet-400/60'
+const input = 'w-full rounded-xl border border-white/15 bg-ink px-3 py-2.5 text-xs text-copy outline-none focus:border-violet-400/60'
 
 function eventLabel(item) {
   const kind = item.event
@@ -152,7 +152,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
   const requestedPreview = urlInput || preview.url || ''
   const safePreview = /^https?:\/\/(?:127\.0\.0\.1|localhost):\d{1,5}(?:\/|$)/.test(requestedPreview)
     ? requestedPreview : null
-  return <aside aria-label="Painel da execução e prévia" style={{'--execution-panel-width': `${width || 50}%`}} className="flex h-full min-h-0 w-full flex-col border-t border-white/10 bg-[#17171b] lg:w-[var(--execution-panel-width)] lg:border-l lg:border-t-0">
+  return <aside aria-label="Painel da execução e prévia" style={{'--execution-panel-width': `${width || 50}%`}} className="flex h-full min-h-0 w-full flex-col border-t border-white/10 bg-ink lg:w-[var(--execution-panel-width)] lg:border-l lg:border-t-0">
     {tab !== 'preview' && <div className="shrink-0 border-b border-white/10 px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <strong className="text-sm">Central de execução</strong>
@@ -219,7 +219,7 @@ export default function ExecutionPanel({ api, runId, active, onStop, onClose, on
         </select>
         <button type="button" className={btn} disabled={!projects.length || !!loading} onClick={() => control('start')}>▶ Iniciar prévia</button>
       </div>}
-      <form className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-[#17171b] px-3 py-2" onSubmit={event => { event.preventDefault(); setFrameState('loading'); setFrameKey(n => n + 1) }}>
+      <form className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-ink px-3 py-2" onSubmit={event => { event.preventDefault(); setFrameState('loading'); setFrameKey(n => n + 1) }}>
         <span aria-hidden="true" className="text-xs text-emerald-300">●</span>
         <input aria-label="Endereço da prévia local" value={requestedPreview} onChange={event => setUrlInput(event.target.value)}
           placeholder="http://127.0.0.1:porta/" className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-copy outline-none placeholder:text-muted" />

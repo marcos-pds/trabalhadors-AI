@@ -57,7 +57,7 @@ export default function WorktreeReviewPanel({ api, runId, steps = [], active }) 
     <h3 className="font-semibold text-violet-200">Worktrees Git · revisão assistida</h3>
     <p className="mt-1 leading-5 text-muted">Modo experimental. A Central não direciona os agentes automaticamente a esses checkouts. O operador controla a integração.</p>
     <label className="mt-3 block text-[11px] text-muted">Etapa
-      <select className="mt-1 w-full rounded-lg border border-white/15 bg-[#151519] px-2 py-2 text-copy"
+      <select className="mt-1 w-full rounded-lg border border-white/15 bg-ink px-2 py-2 text-copy"
         value={selected} onChange={e => { setStepId(e.target.value); setPlan(null); setError(''); setNotice('') }}>
         {available.map(step => <option key={step.id} value={step.id}>{step.name} · {step.status}</option>)}
       </select>

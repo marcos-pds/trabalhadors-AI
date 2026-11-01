@@ -582,3 +582,20 @@ select option { background: #242528; color: #e8eaed; }
     display: none;
   }
 }
+
+/* Shared controls use the same palette as chat, including dialogs and catalog. */
+:root.light input::placeholder, :root.light textarea::placeholder {
+  color: var(--color-muted); opacity: 1;
+}
+:root.light select option { background: #fff; color: var(--color-copy); }
+:root.light :is(.text-rose-200, .text-rose-300) { color: #be123c; }
+:root.light :is(.text-emerald-200, .text-emerald-300) { color: #047857; }
+:root.light :is(.text-amber-200, .text-amber-300) { color: #92400e; }
+:root.light :is(.text-violet-100, .text-violet-200, .text-violet-300) { color: #5b21b6; }
+:root.light [role="dialog"] {
+  border-color: rgba(100,116,139,.24);
+  box-shadow: 0 24px 80px rgba(15,23,42,.18);
+}
+:root.light :is(input, textarea, select):focus-visible {
+  outline: 2px solid #475569; outline-offset: 3px;
+}
