@@ -5,7 +5,9 @@ export function activityLabel(item) {
   if (item.event === 'workspace_validation') return item.success === false ? 'Validação falhou' : 'Validação concluída'
   if (item.event === 'skill_context_selected') return 'Skills: ' + [...new Set((item.selected_skills || []).map(s => s.name))].join(', ')
   if (item.event === 'model_selected') return 'Modelo: ' + (item.model || 'selecionado')
-  if (item.event === 'provider_error') return 'Erro no provedor'
+  if (item.event === 'provider_error') return ({context_limit:'Contexto do modelo excedido',model_unavailable:'Modelo indisponível nesta conexão'}[item.category] || 'Erro no provedor')
+  if (item.event === 'worker_context_compacted') return 'Histórico reduzido após limite de contexto'
+  if (item.event === 'provider_suspended') return 'Modelo suspenso temporariamente'
   if (item.event === 'failover') return 'Tentando outro provedor'
   if (item.event === 'workspace_approval_required') return 'Aguardando aprovação'
   if (item.event === 'workspace_feedback_applied') return 'Ajuste recebido pelo trabalhador'
@@ -27,7 +29,8 @@ export function compactActivityEvents(events) {
   const visible = new Set(['model_selected','workspace_action_result','workspace_validation',
     'provider_error','failover','workspace_approval_required','workspace_feedback_applied',
     'worker_checkpoint_restored','worker_budget_warning','run_paused_limit','run_failed',
-    'run_completed','step_status','skill_context_selected','workspace_action_requested'])
+    'run_completed','step_status','skill_context_selected','workspace_action_requested',
+    'worker_context_compacted','provider_suspended'])
   const skills = new Set()
   return events.filter((item, index) => {
     if (!visible.has(item.event)) return false

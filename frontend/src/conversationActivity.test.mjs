@@ -2,6 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { activityLabel, compactActivityEvents, mergeActivityEvents } from './conversationActivity.mjs'
 
+test('real context recovery and model quarantine stay visible without claiming completion', () => {
+  const events = [{seq:1,event:'provider_error',category:'context_limit'},
+    {seq:2,event:'worker_context_compacted'},
+    {seq:3,event:'provider_suspended',category:'model_unavailable'}]
+  assert.equal(compactActivityEvents(events).length,3)
+  assert.equal(activityLabel(events[0]),'Contexto do modelo excedido')
+  assert.equal(activityLabel(events[1]),'Histórico reduzido após limite de contexto')
+  assert.equal(activityLabel(events[2]),'Modelo suspenso temporariamente')
+})
+
 test('polling merges events once in server order and bounds the visible history', () => {
   const initial = [{seq:1,event:'run_created'}, {seq:2,event:'worker_phase'}]
   assert.deepEqual(mergeActivityEvents(initial, [{seq:2,event:'worker_phase'}, {seq:3,event:'run_completed'}]).map(e => e.seq), [1,2,3])

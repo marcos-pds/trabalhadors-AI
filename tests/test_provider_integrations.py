@@ -9,6 +9,25 @@ import pytest
 from central.providers import DEFAULT_ENDPOINTS, ProviderClient
 
 
+@pytest.mark.parametrize('status,body,category', [
+    (400, {'error': {'code': 'context_length_exceeded', 'message': 'sensitive body'}}, 'context_limit'),
+    (422, {'error': {'type': 'context_window_exceeded'}}, 'context_limit'),
+    (404, {'error': {'code': 'model_not_found'}}, 'model_unavailable'),
+    (400, {'error': {'code': 'model_decommissioned'}}, 'model_unavailable'),
+    (400, {'error': {'message': 'context_length_exceeded'}}, 'request'),
+    (400, {'error': {'code': ['context_length_exceeded']}}, 'request'),
+    (400, [], 'request'),
+    (401, {'error': {'code': 'context_length_exceeded'}}, 'authentication'),
+    (500, {'error': {'code': 'model_not_found'}}, 'unavailable'),
+])
+def test_http_recovery_uses_explicit_error_identifiers_only(status, body, category):
+    from central.providers import classify_http
+    error = classify_http(status, json.dumps(body))
+    assert error.category == category and error.http_status == status
+    if category in ('context_limit', 'model_unavailable'):
+        assert 'sensitive body' not in str(error)
+
+
 @pytest.mark.parametrize('kind,model,url', [
     ('ollama', 'qwen2.5-coder:3b', 'http://127.0.0.1:11434/v1/chat/completions'),
     ('groq', 'openai/gpt-oss-20b', 'https://api.groq.com/openai/v1/chat/completions'),

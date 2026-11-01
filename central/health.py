@@ -104,13 +104,14 @@ class ProviderHealth:
         consecutive = 0 if success else row.get('consecutive_failures', 0) + 1
         previous_until = row.get('suspended_until')
         was_probe = previous_until is not None and previous_until <= now
-        open_breaker = bool(not success and category in TRANSIENT and
-                            (category == 'rate_limit' or consecutive >= 2 or was_probe))
+        open_breaker = bool(not success and (category == 'model_unavailable' or
+                            (category in TRANSIENT and
+                             (category == 'rate_limit' or consecutive >= 2 or was_probe))))
         open_count = 0 if success else row.get('open_count', 0)
         until = None if success else previous_until
         if open_breaker:
             open_count += 1
-            base = 120 if category == 'rate_limit' else 60
+            base = 1800 if category == 'model_unavailable' else 120 if category == 'rate_limit' else 60
             until = now + min(1800, base * (2 ** min(open_count - 1, 5)))
         elif until is not None and until <= now:
             until = None

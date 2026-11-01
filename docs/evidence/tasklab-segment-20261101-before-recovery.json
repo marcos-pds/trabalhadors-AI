@@ -1,0 +1,54 @@
+{
+  "run": {
+    "id": "27f9bbcd-9ca7-4299-88c0-2b0d18de1d96",
+    "status": "cancelled",
+    "error": null
+  },
+  "steps": [
+    {
+      "id": "architecture",
+      "agent_id": "architecture",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "backend",
+      "agent_id": "backend",
+      "status": "queued",
+      "error": "Falha na API selecionada (request)."
+    },
+    {
+      "id": "frontend",
+      "agent_id": "frontend",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "review",
+      "agent_id": "review",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "7a67e026-0223-432b-988d-ac6e154992a4",
+      "agent_id": "code",
+      "status": "queued",
+      "error": null
+    }
+  ],
+  "pending_approvals": [
+    {
+      "id": "ab3ae004-8f4f-4d4e-b2f0-6d4d1b8b99e2",
+      "folder": "C:\\Projetos\\Central-IA\\lab-api-delegacao-20261031\\workspace\\.central-worker-worktrees\\27f9bbcd-9ca7-4299-88c0-2b0d18de1d96\\backend",
+      "request_json": "{\"action\": \"browser_tool\", \"arguments\": {\"url\": \"http://localhost:5173/\"}, \"tool\": \"new_page\"}"
+    }
+  ],
+  "workspaces": [
+    {
+      "step_id": "backend",
+      "state": "active"
+    }
+  ],
+  "api_calls_this_segment": 3,
+  "independent_acceptance_complete": false
+}

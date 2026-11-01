@@ -284,7 +284,8 @@ class _Bridge:
             raise ProviderError('timeout', 'Tempo total da API selecionada excedido.', True) from None
         except ProviderError as exc:
             categories = {'acceptance_policy', 'acceptance_limit', 'authentication', 'credits',
-                          'rate_limit', 'unavailable', 'request', 'response', 'timeout', 'network'}
+                          'rate_limit', 'unavailable', 'request', 'response', 'timeout', 'network',
+                          'context_limit', 'model_unavailable'}
             category = exc.category if exc.category in categories else 'response'
             status = exc.http_status if type(exc.http_status) is int and 100 <= exc.http_status <= 599 else None
             raise ProviderError(category, 'Falha na API selecionada (' + category + ').', exc.retryable is True, status) from None

@@ -351,9 +351,10 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             checkpoint('paused_limit')
             raise
         except ProviderError as error:
+            context_rejected = error.http_status == 413 or error.category == 'context_limit'
             reduced = (compact_tool_history(transcript, len(messages), 4 if context_compactions == 0 else 2)
-                       if error.http_status == 413 and context_compactions < 2 else None)
-            if reduced is None and error.http_status == 413 and context_compactions == 0:
+                       if context_rejected and context_compactions < 2 else None)
+            if reduced is None and context_rejected and context_compactions == 0:
                 reduced = compact_tool_history(transcript, len(messages), 2)
             if reduced is None:
                 raise
@@ -361,7 +362,8 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             transcript = reduced
             context_compactions += 1
             emit(run_id, 'worker_context_compacted', {'step_id': step_id,
-                 'reason': 'http_413', 'removed_messages': removed, 'attempt': context_compactions})
+                 'reason': 'http_413' if error.http_status == 413 else 'context_limit',
+                 'removed_messages': removed, 'attempt': context_compactions})
             checkpoint()
             continue
         finally:

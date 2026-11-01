@@ -1552,7 +1552,8 @@ def run_activity(rid: str, user=Depends(current_user)):
                'native_session_started','native_session_resumed','native_turn_completed',
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
-               'run_failed','run_completed','provider_error','failover'}
+               'run_failed','run_completed','provider_error','failover',
+               'worker_context_compacted','provider_suspended'}
     import re
     def safe_log(message):
         snippet = str(message or '')[-900:]
@@ -1578,6 +1579,9 @@ def run_activity(rid: str, user=Depends(current_user)):
             'command': data.get('command'),
             'success': data.get('success', data.get('ok', data.get('passed'))),
             'model': data.get('model'),
+            'category': data.get('category') if data.get('category') in {
+                'context_limit','model_unavailable','rate_limit','authentication',
+                'credits','unavailable','request','response','timeout','network'} else None,
             'status': data.get('status'),
             'error': safe_log(data.get('error') or data.get('message')),
             'detail': safe_log(data.get('output')) if data.get('success') is False else '',

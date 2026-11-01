@@ -60,6 +60,11 @@ def test_adjustments_are_persistent_scoped_and_consumed_once(monkeypatch, tmp_pa
         validation = next(e for e in client.get('/api/runs/' + rid + '/activity').json()['events']
                           if e['event'] == 'workspace_validation')
         assert validation['success'] is False
+        DB.event(rid, 'worker_context_compacted', {'reason':'context_limit','removed_messages':4})
+        DB.event(rid, 'provider_suspended', {'category':'model_unavailable'})
+        recovery = client.get('/api/runs/' + rid + '/activity').json()['events']
+        assert any(e['event'] == 'worker_context_compacted' for e in recovery)
+        assert next(e for e in recovery if e['event'] == 'provider_suspended')['category'] == 'model_unavailable'
         assert consume_run_feedback(DB, user, rid) == ['Troque a cor do botão para azul.']
         assert consume_run_feedback(DB, user, rid) == []
         DB.execute("UPDATE runs SET status='paused_limit' WHERE id=?", (rid,))

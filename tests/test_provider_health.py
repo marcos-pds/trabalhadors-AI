@@ -50,6 +50,30 @@ def test_429_triggers_immediate_cooldown():
         db.close()
 
 
+def test_unavailable_model_is_quarantined_persistently_without_blocking_other_models(tmp_path):
+    path = tmp_path/'health.sqlite'
+    db = make_db(path)
+    now = [2000.0]
+    health = ProviderHealth(db, clock=lambda:now[0])
+    assert health.record('p','m',success=False,latency_ms=5,
+                         error=ProviderError('model_unavailable','Unavailable',False,400))['opened']
+    db.close()
+    db = Database(path)
+    try:
+        health = ProviderHealth(db, clock=lambda:now[0])
+        assert health.acquire('p','m') == (False,False)
+        assert health.acquire('p','other-model') == (True,False)
+        assert health.detail('p','m')['remaining_seconds'] == 1800
+        now[0] += 1801
+        assert health.acquire('p','m') == (True,True)
+        assert health.acquire('p','m') == (False,False)
+        health.record('p','m',success=True,latency_ms=10)
+        assert health.detail('p','m')['state'] == 'degraded'
+        assert health.detail('p','m')['suspended_until'] is None
+    finally:
+        db.close()
+
+
 def test_recovering_preferred_provider_waits_for_unbroken_alternatives_and_recovers(tmp_path):
     db=make_db(tmp_path/'rank.sqlite')
     try:
