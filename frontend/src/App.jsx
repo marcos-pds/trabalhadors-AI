@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { chatCommands, matchingChatCommands } from './commandPalette.mjs'
 import { CommandIcon, LiquidGlassUnderlay, LiveAgentOrbit } from './LiquidGlassUI.jsx'
+import { AIIcons } from './ReferenceIcons.jsx'
 import ProviderCatalog from './ProviderCatalog'
 import LocalRuntimesPanel from './LocalRuntimesPanel'
 import SpecialistProfilesPanel from './SpecialistProfilesPanel'
@@ -151,24 +152,9 @@ function Sidebar({ page, data, me, onNavigate, onNewChat, onSwitch, onLogout }) 
         </div>) : <p className="px-2.5 py-2 text-[11px] leading-5 text-muted">Suas conversas aparecem aqui.</p>}</div><div className="border-t border-white/[.08] pt-3"><button type="button" onClick={() => onNavigate('git')} title="Conectar GitHub" className={`mb-3 flex min-h-10 w-full items-center gap-3 rounded-xl border border-white/10 px-3 text-left text-[12px] text-[#c0bec5] transition hover:border-white/20 hover:bg-white/[.06] hover:text-copy ${page === 'git' ? 'border-white/20 bg-white/[.08] text-copy' : ''}`}><GitHubMark className="h-[18px] w-[18px]"/><span>Conectar GitHub</span><span className="ml-auto text-[10px] text-muted">Git</span></button><p className="mb-2 flex items-center gap-2 px-2 text-[10px] text-muted"><span className={`h-2 w-2 rounded-full ${data.providers.some(p=>p.enabled) ? 'bg-emerald-300' : 'bg-amber-300'}`} />{data.providers.some(p=>p.enabled) ? `${data.providers.filter(p=>p.enabled).length} provedor(es) ativo(s)` : 'Nenhum provedor conectado'}</p><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-cyan-700 to-violet-700 text-xs font-bold text-white">{me.email[0]?.toUpperCase()}</span><span className="min-w-0 flex-1 truncate text-xs text-copy">{me.email.split('@')[0]}<small className="mt-0.5 block text-[10px] text-muted">Minha conta</small></span><button onClick={onLogout} title="Sair" className="rounded-lg p-2 text-muted hover:bg-white/[.06] hover:text-copy">⎋</button></div></div></aside>
 }
 
-function ChatWelcome({ onSuggest, providers = [], running = false }) {
-  const connections = providers.filter(provider => provider.enabled).length
-  return <div className="relative mx-auto flex min-h-[490px] w-full max-w-3xl flex-col items-center justify-center px-3 pb-10 pt-2 text-center max-sm:min-h-[410px]">
+function ChatWelcome({ providers = [], running = false }) {
+  return <div className="reference-welcome relative mx-auto h-full min-h-[335px] w-full max-w-2xl">
     <LiveAgentOrbit providers={providers} running={running}/>
-    <p className="mb-2 text-[10px] font-bold tracking-[.20em] text-lilac">SUA EQUIPE DE IA, REUNIDA</p>
-    <h1 className="text-[clamp(31px,4vw,47px)] font-semibold tracking-[-.06em] text-copy">Por onde começamos?</h1>
-    <p className="mt-3 max-w-md text-sm leading-6 text-muted">Crie, desenvolva e teste seus projetos com uma equipe de agentes no mesmo chat.</p>
-    <p className="mt-2 text-[11px] text-muted">{connections
-      ? connections + ' provedor(es) habilitado(s) · digite / para acessar a Central'
-      : 'Nenhum provedor habilitado · digite /provedores para configurar'}</p>
-    <div className="mt-6 flex flex-wrap justify-center gap-2">
-      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
-        onClick={() => onSuggest('Crie uma interface de dashboard responsiva e elegante')}>✦ Criar interface</button>
-      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
-        onClick={() => onSuggest('Desenvolva uma API com autenticação e persistência')}>⌘ Desenvolver API</button>
-      <button className="liquid-menu-item rounded-full border border-white/20 bg-white/[.07] px-4 py-2 text-xs"
-        onClick={() => onSuggest('Analise e melhore a arquitetura de um aplicativo')}>◎ Revisar arquitetura</button>
-    </div>
   </div>
 }
 
@@ -513,11 +499,11 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 }
 
 export default function App() {
-  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState(localStorage.getItem('central-theme')||'light');const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
+  const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState((localStorage.getItem('central-theme-design') === 'reference-ice-v1' ? (localStorage.getItem('central-theme') || 'light') : 'light'));const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
-  useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme)},[theme])
+  useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme);localStorage.setItem('central-theme-design','reference-ice-v1')},[theme])
   useEffect(()=>{let cancelled=false;api('/me').then(async me=>{if(cancelled)return;setUser(me);await loadAll()}).catch(()=>{}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[loadAll])
   useEffect(()=>{if(user&&(page==='dashboard'||page==='monitoring'))refreshStats()},[page,user,refreshStats])
   useEffect(()=>{if(!user)return;let active=true;api('/computer-access').then(value=>{if(active)setComputerAccess(value)}).catch(()=>{if(active)setComputerAccess({mode:'blocked',folder:''});setAutonomous(false);setWorkspaceApprovals([])});return()=>{active=false}},[user?.id])
@@ -694,9 +680,28 @@ export default function App() {
       </div>
     </>}
     <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="central-header z-10 flex h-[58px] shrink-0 items-center justify-between px-5 max-sm:px-3">
-        <div className="flex min-w-0 items-center gap-3"><button type="button" aria-label="Abrir menu" title="Menu" onClick={() => setMenuOpen(true)} className="menu-toggle grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 text-lg text-muted transition hover:bg-white/[.07] hover:text-copy"><span aria-hidden="true">☰</span></button><div className="min-w-0"><p className="truncate text-xs text-muted">{page === 'chat' ? 'Central IA' : 'Workspace'}</p><strong className="block truncate text-[13px] font-medium text-copy">{pageNames[page]}</strong></div></div>
-        <div className="flex items-center gap-3"><span className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/[.06] px-2.5 py-1.5 text-[10px] text-emerald-200 max-sm:hidden"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Sessão conectada</span><button aria-label="Alternar tema" title="Alternar tema" onClick={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} className="rounded-lg p-2 text-muted hover:bg-white/[.06]">◐</button></div>
+      <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
+        <div className="reference-header-left flex items-center gap-4">
+          <button type="button" aria-label="Abrir menu" title="Menu"
+            onClick={() => setMenuOpen(true)} className="reference-menu-toggle">
+            <CommandIcon name="menu" className="h-5 w-5"/>
+          </button>
+          <div className="reference-header-brand">
+            <span className="reference-header-brand-mark">
+              <AIIcons.CentralCore className="h-5 w-5" isWorking={!!currentRun}/>
+            </span>
+            <span>Central IA</span>
+          </div>
+        </div>
+        <div className="reference-header-right">
+          <span className="flex items-center gap-2 rounded-full border border-emerald-200/70 bg-white/60 px-3 py-1.5 text-[10px] text-slate-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"/>
+            Sessão conectada
+          </span>
+          <button type="button" aria-label="Alternar tema" title="Alternar tema"
+            onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+            className="reference-icon-button">◐</button>
+        </div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
         {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
