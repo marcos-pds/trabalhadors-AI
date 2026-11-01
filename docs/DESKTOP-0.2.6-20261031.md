@@ -6,8 +6,11 @@ Validacao: 76 testes de delegacao/autonomia/controles, 8 de papeis, 53 frontend,
 
 Instalador local, sem assinatura digital; nao homologado em VM limpa.
 Arquivo: Central-IA-Setup-0.2.6.exe
-Tamanho: 143470695 bytes
-SHA256: b311d7d7e02c696c2918d9b7075fa884e2decf256772f2aad042a152debc0947
+Tamanho: 143469567 bytes
+SHA256: d358bd26b0517d51827a58b9c1bc2da690228aa559f4cefe46834e29a1b9f9bc
 Copia: Downloads/Central-IA-Desktop-0.2.6
 
 A aceitacao integrada do projeto maior continua pendente. O novo controle nao comprova sua entrega nem a execucao final da subtarefa do TaskLab. Nenhum Codex foi usado como trabalhador.
+
+Inclui tambem ordenacao de provedores: candidatos sem circuito aberto antes de sondagens em recuperacao. Nove testes de saude/adaptador aprovados.
+
