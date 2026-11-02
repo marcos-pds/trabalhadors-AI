@@ -14,12 +14,17 @@ try {
     if (-not $SkipInstall) {
         & $python -m pip install -r (Join-Path $PSScriptRoot 'requirements-lock.txt')
         if ($LASTEXITCODE -ne 0) { throw "Falha nas dependencias Python." }
-        & npm ci --no-audit --no-fund
+        & npm.cmd ci --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) { throw "Falha nas dependencias React." }
+        & npm.cmd ci --prefix (Join-Path $PSScriptRoot 'motion_studio\apps\web') --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "Falha nas dependencias do Motion Studio." }
     }
     if (-not $SkipFrontend) {
-        & npm run build
+        & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw "Build React falhou." }
+    }
+    if (-not (Test-Path (Join-Path $root "static\motion-studio\index.html"))) {
+        throw "Build do frontend Motion Studio ausente."
     }
     & $python -m pytest -q tests/test_desktop_launcher.py
     if ($LASTEXITCODE -ne 0) { throw "Testes do bootstrap falharam." }
@@ -57,13 +62,13 @@ try {
     Push-Location $PSScriptRoot
     try {
         if (-not $SkipInstall) {
-            & npm ci --no-audit --no-fund
+            & npm.cmd ci --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) { throw "Dependencias de build Electron falharam." }
         }
         & npm test
         if ($LASTEXITCODE -ne 0) { throw 'Testes desktop falharam.' }
-        if ($Signed) { & npx --no-install electron-builder --win nsis --config electron-builder.signed.cjs }
-        else { & npm run dist:win }
+        if ($Signed) { & npx.cmd --no-install electron-builder --win nsis --config electron-builder.signed.cjs }
+        else { & npm.cmd run dist:win }
         if ($LASTEXITCODE -ne 0) { throw "Criacao do instalador falhou." }
     } finally { Pop-Location }
     $outputDir = Join-Path $PSScriptRoot $outputName

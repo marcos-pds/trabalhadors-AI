@@ -20,8 +20,8 @@ import { parseResourceCommand, matchingResources, setChatResourceState } from '.
 import TokenUsagePanel from './TokenUsagePanel'
 import { providerCategory } from './providerFilters'
 
-const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
-const navGroups = [['WORKSPACE', [['chat','message'],['dashboard','layout'],['agents','users'],['workflows','git'],['projects','folder']]], ['GERENCIAR', [['history','clock'],['monitoring','activity'],['tokens','chart'],['providers','sparkles'],['resources','puzzle'],['settings','settings']]]]
+const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', motionStudio: 'Motion Studio', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
+const navGroups = [['WORKSPACE', [['chat','message'],['dashboard','layout'],['agents','users'],['workflows','git'],['projects','folder'],['motionStudio','monitor']]], ['GERENCIAR', [['history','clock'],['monitoring','activity'],['tokens','chart'],['providers','sparkles'],['resources','puzzle'],['settings','settings']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
   {id:'zai',name:'Z.ai / GLM',kind:'zai',model:'glm-4.7-flash',base_url:'https://api.z.ai/api/paas/v4',group:'Grátis limitado',badge:'Modelos Flash gratuitos com limites',note:'Use glm-4.7-flash ou glm-4.5-flash e uma chave API padrão. Outros modelos podem ser pagos; confira as cotas da conta.'},
@@ -559,6 +559,49 @@ function EditorDialog({ modal, data, onClose, onSave }) {
   </Modal>
 }
 
+const MOTION_STUDIO_WEB_URL = '/motion-studio/'
+const MOTION_STUDIO_API_URL = '/api/motion-studio/api/health'
+
+function MotionStudioPage({ theme }) {
+  const [available, setAvailable] = useState(false)
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    Promise.all([
+      fetch(MOTION_STUDIO_WEB_URL + 'index.html', { cache: 'no-store', signal: controller.signal }),
+      fetch(MOTION_STUDIO_API_URL, { cache: 'no-store', signal: controller.signal }),
+    ]).then(async ([webResponse, apiResponse]) => {
+      if (!webResponse.ok || !apiResponse.ok) throw new Error('Motion Studio não disponível neste build.')
+      const health = await apiResponse.json()
+      if (health.status !== 'ok' || health.database !== 'ready') throw new Error('API do Motion Studio indisponível.')
+      if (active) setAvailable(true)
+    }).catch(() => {
+      if (active) setAvailable(false)
+    }).finally(() => {
+      if (active) setChecking(false)
+      clearTimeout(timeout)
+    })
+    return () => {
+      active = false
+      clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [])
+
+  return <div className="flex min-h-[75vh] w-full flex-1 items-center justify-center">
+    {available ? <iframe
+      title="AI Motion Studio"
+      src={`${MOTION_STUDIO_WEB_URL}?embedded=central&theme=${theme}`}
+      className="h-[calc(100vh-4rem)] min-h-[640px] w-full border-0 bg-panel"
+    /> : <p role="status" aria-live="polite" className="p-6 text-sm text-muted">
+      {checking ? 'Abrindo AI Motion Studio…' : 'O AI Motion Studio não está disponível nesta instalação.'}
+    </p>}
+  </div>
+}
+
 export default function App() {
   const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState((localStorage.getItem('central-theme-design') === 'reference-ice-v1' ? (localStorage.getItem('central-theme') || 'light') : 'light'));const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
@@ -765,6 +808,7 @@ export default function App() {
         </div>
       </header>
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
+        {page === 'motionStudio' && <MotionStudioPage theme={theme}/>}
         {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
           {executionPanelOpen && <><div role="separator" aria-label="Ajustar largura do painel de execução" aria-orientation="vertical" className="hidden w-1 shrink-0 cursor-col-resize bg-white/10 transition hover:bg-violet-400/70 lg:block" onPointerDown={event=>{event.preventDefault();const size=e=>Math.min(68,Math.max(34,100-(e.clientX/window.innerWidth*100)));const move=e=>setExecutionWidth(size(e));const up=e=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);localStorage.setItem('central-execution-width',String(Math.round(size(e))))};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>
           <ExecutionPanel api={api} runId={currentRun || inspectedRun}

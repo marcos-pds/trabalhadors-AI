@@ -44,8 +44,9 @@ def prepare_runtime():
 def validate_assets(root):
     """Match central.main's ROOT/static mapping in source and frozen layouts."""
     static = root / "static"
-    index = static / "build" / "index.html"
-    if not index.is_file():
+    indexes = (static / "build" / "index.html",
+               static / "motion-studio" / "index.html")
+    if not all(index.is_file() for index in indexes):
         raise RuntimeError("Desktop frontend missing: static/build/index.html")
 
     class References(HTMLParser):
@@ -55,11 +56,18 @@ def validate_assets(root):
                     continue
                 path = unquote(urlsplit(value).path)
                 if path.startswith("/assets/"):
-                    resource = (static / path[len("/assets/"):]).resolve()
-                    if not resource.is_relative_to(static.resolve()) or not resource.is_file():
-                        raise RuntimeError("Desktop frontend asset missing or outside static directory")
+                    base, relative = static, path[len("/assets/"):]
+                elif path.startswith("/motion-studio/"):
+                    base = static / "motion-studio"
+                    relative = path[len("/motion-studio/"):]
+                else:
+                    continue
+                resource = (base / relative).resolve()
+                if not resource.is_relative_to(base.resolve()) or not resource.is_file():
+                    raise RuntimeError("Desktop frontend asset missing or outside static directory")
 
-    References().feed(index.read_text(encoding="utf-8"))
+    for index in indexes:
+        References().feed(index.read_text(encoding="utf-8"))
 
 
 class DesktopControl:

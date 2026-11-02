@@ -1,9 +1,9 @@
-CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.15
+CENTRAL IA DESKTOP - WINDOWS x64 - 0.2.17
 Criador: Marcos Paulo (@marcos-pds)
 
-Instale usando Central-IA-Setup-0.2.15.exe e abra Central IA pelo menu Iniciar.
-A interface e o servidor Python acompanham o aplicativo. Nao e necessario
-instalar Python ou Node para abrir a Central.
+Instale usando Central-IA-Setup-0.2.17.exe e abra Central IA pelo menu Iniciar.
+A interface, o editor AI Motion Studio e os servidores Python acompanham o
+aplicativo. Nao e necessario instalar Python ou Node para abrir a Central.
 
 No primeiro acesso, crie sua conta local e configure um provedor de IA.
 Codex, Ollama, Node, Git e ferramentas de projetos sao componentes opcionais,
@@ -24,3 +24,6 @@ Runtimes Claude Code, Gemini CLI, OpenCode e ACP sao opcionais.
 Instale os pacotes pelo script runtime-tools/install_windows.ps1 no repositorio.
 Depois use Provedores > Runtimes externos. Autenticacao por chave API,
 sem reutilizar assinaturas pessoais dos CLIs. Claude aguarda homologacao real.
+
+ComfyUI, modelos Wan e FFmpeg nao acompanham o instalador. O editor abre
+diretamente pela Central; renderizacao de video exige esses componentes locais.

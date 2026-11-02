@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "desktop/**"
+      - "static/motion-studio/**"
       - "central/**"
       - "frontend/**"
       - "requirements.txt"

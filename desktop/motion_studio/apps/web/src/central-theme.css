@@ -1,0 +1,141 @@
+.studio[data-theme="light"] {
+  color: #334155;
+  background: radial-gradient(circle at 50% -20%, #fff 0%, #f8fafc 48%, #e2e8f0 100%);
+}
+
+.studio[data-theme="light"] .topbar,
+.studio[data-theme="light"] .statusbar {
+  background: rgba(248, 250, 252, .9);
+  border-color: #cbd5e1;
+}
+
+.studio[data-theme="light"] .brand {
+  color: #334155;
+}
+
+.studio[data-theme="light"] .brand small,
+.studio[data-theme="light"] .project-switch > span,
+.studio[data-theme="light"] .save-status,
+.studio[data-theme="light"] .panel-heading,
+.studio[data-theme="light"] .section-label,
+.studio[data-theme="light"] .field-label,
+.studio[data-theme="light"] .timeline-hint,
+.studio[data-theme="light"] .ruler,
+.studio[data-theme="light"] .statusbar,
+.studio[data-theme="light"] .project-meta,
+.studio[data-theme="light"] .resolution {
+  color: #64748b;
+}
+
+.studio[data-theme="light"] .project-switch select,
+.studio[data-theme="light"] .icon-button,
+.studio[data-theme="light"] .quiet-button,
+.studio[data-theme="light"] .timeline-tools button {
+  color: #334155;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.studio[data-theme="light"] .panel {
+  border-color: #cbd5e1;
+  background: linear-gradient(150deg, rgba(255, 255, 255, .92), rgba(248, 250, 252, .96));
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .08);
+}
+
+.studio[data-theme="light"] .library-tabs,
+.studio[data-theme="light"] .engine-row,
+.studio[data-theme="light"] .ruler,
+.studio[data-theme="light"] .track-row,
+.studio[data-theme="light"] .track-label,
+.studio[data-theme="light"] .property-divider {
+  border-color: #cbd5e1;
+}
+
+.studio[data-theme="light"] .library-tabs button,
+.studio[data-theme="light"] .engine-row small,
+.studio[data-theme="light"] .helper-text,
+.studio[data-theme="light"] .track-label b,
+.studio[data-theme="light"] .track-label button,
+.studio[data-theme="light"] .properties-empty {
+  color: #64748b;
+}
+
+.studio[data-theme="light"] .media-import,
+.studio[data-theme="light"] .property-content input:not([type="color"]),
+.studio[data-theme="light"] .property-content textarea,
+.studio[data-theme="light"] .property-content select,
+.studio[data-theme="light"] .grapheme-row select {
+  color: #334155;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.studio[data-theme="light"] .media-import {
+  border-style: dashed;
+}
+
+.studio[data-theme="light"] .preview-frame {
+  background: radial-gradient(ellipse at 50% 46%, #e2e8f0, #f8fafc 69%);
+  border-color: #cbd5e1;
+}
+
+.studio[data-theme="light"] .preview-grid {
+  background-image: linear-gradient(#64748b22 1px, transparent 1px), linear-gradient(90deg, #64748b22 1px, transparent 1px);
+}
+
+.studio[data-theme="light"] .preview-empty,
+.studio[data-theme="light"] .transport,
+.studio[data-theme="light"] .transport button {
+  color: #475569;
+}
+
+.studio[data-theme="light"] .preview-empty small,
+.studio[data-theme="light"] .transport > span b {
+  color: #64748b;
+}
+
+.studio[data-theme="light"] .preview-time {
+  color: #334155;
+  background: rgba(255, 255, 255, .82);
+}
+
+.studio[data-theme="light"] .track-lane {
+  background: repeating-linear-gradient(90deg, transparent 0, transparent calc(20% - 1px), #cbd5e1 calc(20% - 1px), #cbd5e1 20%);
+}
+
+.studio[data-theme="light"] .clip-video {
+  color: #134e4a;
+  background: #ccfbf1;
+  border-color: #5eead4;
+}
+
+.studio[data-theme="light"] .clip-image {
+  color: #713f12;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.studio[data-theme="light"] .clip-audio {
+  color: #14532d;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.studio[data-theme="light"] .grapheme-row code,
+.studio[data-theme="light"] .project-meta b {
+  color: #334155;
+}
+
+.studio[data-theme="light"] .notice {
+  color: #78350f;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.studio[data-theme="light"] .notice b {
+  color: #92400e;
+}
+
+.studio[data-theme="light"] .notice p {
+  color: #78350f;
+}

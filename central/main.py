@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .database import Database, uid, utcnow
@@ -150,6 +150,22 @@ async def trace_requests(request: Request, call_next):
 
 FRONTEND_BUILD = ROOT/'static'/'build'
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
+os.environ['MOTION_STUDIO_DATA'] = str(DATA_DIR/'motion-studio')
+from desktop.motion_studio.apps.api.main import app as motion_studio_api
+@motion_studio_api.middleware('http')
+async def authenticate_motion_studio(request: Request, call_next):
+    try:
+        SEC.user(request)
+    except HTTPException as error:
+        return JSONResponse({'detail': error.detail}, status_code=error.status_code,
+                            headers=error.headers)
+    return await call_next(request)
+
+app.mount('/api/motion-studio', motion_studio_api, name='motion-studio-api')
+MOTION_STUDIO_BUILD = ROOT/'static'/'motion-studio'
+if MOTION_STUDIO_BUILD.is_dir():
+    app.mount('/motion-studio', StaticFiles(directory=MOTION_STUDIO_BUILD, html=True),
+              name='motion-studio')
 
 
 @app.get('/', include_in_schema=False)

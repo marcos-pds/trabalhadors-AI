@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --test frontend/src/*.test.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:motion-studio && vite build",
+    "build:motion-studio": "npm --prefix desktop/motion_studio/apps/web run build:desktop",
     "preview": "vite preview"
   },
   "dependencies": {

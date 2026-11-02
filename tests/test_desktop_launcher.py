@@ -42,6 +42,11 @@ def runtime(tmp_path, monkeypatch):
     (build / "app.js").write_text("console.log('desktop')", encoding="utf-8")
     (build / "index.html").write_text(
         '<html><script src="/assets/build/app.js"></script></html>', encoding="utf-8")
+    studio = root / "static" / "motion-studio"
+    (studio / "assets").mkdir(parents=True)
+    (studio / "assets" / "app.js").write_text("console.log('motion-studio')", encoding="utf-8")
+    (studio / "index.html").write_text(
+        '<html><script src="/motion-studio/assets/app.js"></script></html>', encoding="utf-8")
     monkeypatch.setattr(os, "environ", dict(os.environ))
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "frozen", False, raising=False)
@@ -90,9 +95,14 @@ def test_frozen_data_cannot_be_written_into_bundle(runtime, monkeypatch):
         launcher.prepare_runtime()
 
 
-@pytest.mark.parametrize("missing", ["index.html", "app.js"])
+@pytest.mark.parametrize("missing", ["index.html", "app.js", "studio-index.html", "studio-app.js"])
 def test_missing_packaged_assets_fail_before_startup(runtime, missing):
-    (runtime / "static" / "build" / missing).unlink()
+    if missing.startswith("studio-"):
+        asset = missing.removeprefix("studio-")
+        path = runtime / "static" / "motion-studio" / ("assets" if asset == "app.js" else "") / asset
+    else:
+        path = runtime / "static" / "build" / missing
+    path.unlink()
     with pytest.raises(RuntimeError, match="frontend"):
         launcher.prepare_runtime()
 

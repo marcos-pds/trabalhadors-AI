@@ -82,6 +82,12 @@ central-trabalhadores-ia/
 
 **Stack:** FastAPI / Python 3.11+, React, Vite, Tailwind CSS, SQLite (WAL), httpx e Fernet. O bundle estático do frontend fica em `static/build/`; durante o desenvolvimento, `npm run dev` inicia o Vite em `127.0.0.1:5173` e encaminha as chamadas de API ao FastAPI em `127.0.0.1:8765`. Para escalar para uma equipe e milhões de tarefas, é necessário evoluir a arquitetura para filas externas e workers distribuídos.
 
+## Motion Studio
+
+O item **Motion Studio** abre diretamente o editor dentro da Central. O frontend e a API mantidos em `desktop/motion_studio` são incluídos no repositório e no instalador desktop; a API usa um banco separado em `data/motion-studio/ai-motion-studio.sqlite3`, dentro da pasta de dados da Central.
+
+`npm ci --prefix desktop/motion_studio/apps/web` prepara as dependências do editor; depois, `npm run build` compila a Central e o frontend incorporado em `static/motion-studio/`. O instalador Windows executa a instalação e essas etapas automaticamente. ComfyUI, os pesos Wan e FFmpeg continuam sendo dependências locais opcionais: não são instalados nem incluídos no instalador, e a geração de vídeo permanece indisponível sem a configuração desses componentes.
+
 ## Provedores e modelos
 
 | Tipo | API usada | Observações |
