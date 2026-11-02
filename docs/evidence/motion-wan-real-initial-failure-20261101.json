@@ -1,0 +1,27 @@
+{
+  "run": {
+    "id": "9d1d6444-9dbe-4419-83dd-42daa0950bd4",
+    "state": "failed",
+    "error": "comfy_execution_failed",
+    "created_at": "2026-11-01T20:54:35.161778+00:00",
+    "updated_at": "2026-11-01T20:55:04.364395+00:00",
+    "cancel_requested": 0,
+    "jobs": [
+      {
+        "id": "generate",
+        "adapter": "comfyui_wan",
+        "state": "failed",
+        "artifact": null,
+        "error": "comfy_execution_failed",
+        "started_at": "2026-11-01T20:54:35.176431+00:00",
+        "finished_at": "2026-11-01T20:55:04.362298+00:00",
+        "remote_id": "cb0da6bd-c906-4a4a-85e6-4eefa8cccbe4"
+      }
+    ]
+  },
+  "real_inference": true,
+  "small_sanity_fixture": true,
+  "quality_benchmark": false,
+  "independent_decode": false,
+  "passed": false
+}

@@ -207,7 +207,7 @@ def test_context_switches_projects_without_reusing_prior_recall(
     assert [source['conversation_id'] for source in second['sources']] == ['other']
     assert 'MEMORIA-FINANCE' in second['text'] and 'MEMORIA-AURORA' not in second['text']
     assert 'MEMORIA-FINANCE' not in again['text'] and 'MEMORIA-AURORA' in again['text']
-    assert deterministic_provider[-1] == ['credenciais']  # actual cache reuse
+    assert deterministic_provider[-1] == ['search_query: credenciais']  # actual cache reuse
 
 
 def test_semantic_fingerprint_invalidates_changed_source(recall_db, deterministic_provider):
@@ -215,7 +215,10 @@ def test_semantic_fingerprint_invalidates_changed_source(recall_db, deterministi
     assert semantic_memory.retrieve(recall_db, 'alice', 'aurora', 'fresh', 'credenciais')
     recall_db.execute("UPDATE messages SET content='Paleta violeta editada' WHERE id='auth'")
     assert semantic_memory.retrieve(recall_db, 'alice', 'aurora', 'fresh', 'credenciais') == []
-    assert deterministic_provider[-1] == ['credenciais', 'Paleta violeta editada']
+    assert deterministic_provider[-1] == [
+        'search_query: credenciais',
+        'search_document: Paleta violeta editada',
+    ]
 
 
 def test_lexical_relevance_and_opt_out_never_call_provider(recall_db):

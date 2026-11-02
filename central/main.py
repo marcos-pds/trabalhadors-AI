@@ -1563,7 +1563,7 @@ def run_activity(rid: str, user=Depends(current_user)):
                'workspace_approval_required','workspace_validation',
                'workspace_feedback_received','workspace_feedback_applied',
                'run_failed','run_completed','provider_error','failover',
-               'worker_context_compacted','provider_suspended'}
+               'worker_context_compacted','provider_suspended','browser_qa_deferred','workspace_context_resolved'}
     import re
     def safe_log(message):
         snippet = str(message or '')[-900:]
@@ -1587,6 +1587,7 @@ def run_activity(rid: str, user=Depends(current_user)):
             'path': data.get('path') or summary.get('path'),
             'description': summary.get('description'),
             'command': data.get('command'),
+            'cwd': data.get('cwd'),
             'success': data.get('success', data.get('ok', data.get('passed'))),
             'model': data.get('model'),
             'category': data.get('category') if data.get('category') in {

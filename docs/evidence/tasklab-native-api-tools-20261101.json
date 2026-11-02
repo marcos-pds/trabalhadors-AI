@@ -1,0 +1,54 @@
+{
+  "run": {
+    "id": "27f9bbcd-9ca7-4299-88c0-2b0d18de1d96",
+    "status": "cancelled",
+    "error": null
+  },
+  "steps": [
+    {
+      "id": "architecture",
+      "agent_id": "architecture",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "backend",
+      "agent_id": "backend",
+      "status": "queued",
+      "error": "O modelo passou seis ciclos sem uma nova ação bem-sucedida. O progresso foi salvo; tentando outro provedor."
+    },
+    {
+      "id": "frontend",
+      "agent_id": "frontend",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "review",
+      "agent_id": "review",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "7a67e026-0223-432b-988d-ac6e154992a4",
+      "agent_id": "code",
+      "status": "queued",
+      "error": null
+    }
+  ],
+  "pending_approvals": [
+    {
+      "id": "9d0d7dc2-6a94-48f2-badc-4dfd16f5be43",
+      "folder": "C:\\Projetos\\Central-IA\\lab-api-delegacao-20261031\\workspace\\.central-worker-worktrees\\27f9bbcd-9ca7-4299-88c0-2b0d18de1d96\\backend",
+      "request_json": "{\"action\": \"command\", \"command\": \"pip_requirements\", \"cwd\": \"backend\"}"
+    }
+  ],
+  "workspaces": [
+    {
+      "step_id": "backend",
+      "state": "active"
+    }
+  ],
+  "api_calls_this_segment": 47,
+  "independent_acceptance_complete": false
+}

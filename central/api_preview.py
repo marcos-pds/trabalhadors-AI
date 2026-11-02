@@ -1,5 +1,6 @@
 """Run-owned loopback FastAPI preview. No arbitrary module, port or shell args."""
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -16,6 +17,20 @@ from .sandbox_executor import backend
 
 _LOCK=threading.RLock()
 _ENTRIES={}
+
+
+def source_digest(directory):
+    digest=hashlib.sha256();count=0;size=0
+    for base,dirs,files in os.walk(directory,followlinks=False):
+        dirs[:]=sorted(d for d in dirs if d not in ('.venv','node_modules','.git','__pycache__'))
+        for name in sorted(files):
+            if not name.endswith('.py'):continue
+            relative=(Path(base)/name).relative_to(directory).as_posix()
+            path=target(str(directory),relative)
+            count+=1;size+=path.stat().st_size
+            if count>256 or size>4*1024**2:raise HTTPException(422,'Código da API excede o limite de verificação da prévia.')
+            digest.update(relative.encode());digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _finish(entry):
@@ -45,7 +60,8 @@ def status(db,user_id,run_id,folder):
     with _LOCK:
         entry=_ENTRIES.get((id(db),user_id,run_id,folder))
         if not entry or entry['process'].poll() is not None:return {'api_status':'stopped'}
-        return {'api_status':'running','api_url':entry['url'],'api_cwd':entry['cwd']}
+        return {'api_status':'running','api_url':entry['url'],'api_cwd':entry['cwd'],
+                'api_source_current':source_digest(entry['directory'])==entry['source_digest']}
 
 
 def start(db,user_id,run_id,folder,cwd,cancelled,authorize):
@@ -61,9 +77,10 @@ def start(db,user_id,run_id,folder,cwd,cancelled,authorize):
         if current.is_symlink() or (hasattr(current,'is_junction') and current.is_junction()):
             raise HTTPException(403,'Ambiente Python não pode usar diretórios ligados.')
     key=(id(db),user_id,run_id,folder)
+    current_digest=source_digest(directory)
     with _LOCK:
         existing=_ENTRIES.get(key)
-        if existing and existing['process'].poll() is None:
+        if existing and existing['process'].poll() is None and existing['source_digest']==current_digest:
             if existing['cwd']!=cwd:raise HTTPException(409,'Pare a API antes de mudar o cwd.')
             return status(db,user_id,run_id,folder)
         if existing:
@@ -80,7 +97,8 @@ def start(db,user_id,run_id,folder,cwd,cancelled,authorize):
                                   start_new_session=os.name!='nt')
             if os.name=='nt':job=_WindowsJob(proc)
             entry={'process':proc,'job':job,'home':home,'cwd':cwd,'url':f'http://127.0.0.1:{port}',
-                   'logs':_PreviewLogs(proc),'deadline':time.monotonic()+1800}
+                   'logs':_PreviewLogs(proc),'deadline':time.monotonic()+1800,
+                   'directory':directory,'source_digest':current_digest}
             _ENTRIES[key]=entry
         except BaseException:
             if proc:_kill_tree(proc)

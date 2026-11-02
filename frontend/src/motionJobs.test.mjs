@@ -2,6 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mediaManifest} from './motionJobs.mjs'
 
+test('Wan form binds numeric generation parameters to a local API workflow',()=>{
+  const plan=mediaManifest({mode:'generate',source:'wan-api.json',output:'renders/wan.mp4',prompt:'Ocean',seed:'7',frames:'17',fps:'16'})
+  assert.equal(plan.artifacts[0].kind,'workflow')
+  assert.equal(plan.jobs[0].adapter,'comfyui_wan')
+  assert.equal(plan.jobs[0].stage,'generate')
+  assert.deepEqual(plan.jobs[0].params,{model:'wan',seed:7,frames:17,fps:16,prompt:'Ocean'})
+})
+
 test('media form produces typed source/output links without shell commands or claimed results',()=>{
   const p=mediaManifest({mode:'audio',source:'clip.mp4',output:'renders/final.wav'})
   assert.equal(p.jobs[0].adapter,'ffmpeg')

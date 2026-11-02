@@ -1,0 +1,61 @@
+{
+  "synthetic_fixtures": true,
+  "backend": "real_local_ollama",
+  "generation_worker_used": false,
+  "model": "nomic-embed-text",
+  "elapsed_seconds": 48.93,
+  "cases": [
+    {
+      "query": "How does authentication stay valid after the access credential expires?",
+      "expected_document": 0,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "Where can I drag a task after finishing it?",
+      "expected_document": 1,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "What colors should the interface use?",
+      "expected_document": 2,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "Which file format and codecs are used for movie downloads?",
+      "expected_document": 3,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "What happens when an agent spends its daily allowance?",
+      "expected_document": 4,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "What happens to the separate working directory when a worker is canceled?",
+      "expected_document": 5,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    }
+  ],
+  "top1_correct": 0,
+  "unauthorized_project_denied": true,
+  "cached_embeddings": 0,
+  "passed": false
+}

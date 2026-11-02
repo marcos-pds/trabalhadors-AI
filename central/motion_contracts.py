@@ -176,7 +176,7 @@ def capability_inventory(config=None):
             'contract_implemented': True, 'stage': stage,
             'installed': installed, 'version': version,
             'version_source': 'package_metadata' if version else None,
-            'service_status': 'pending', 'execution_supported': adapter != 'comfyui_wan',
+            'service_status': 'pending', 'execution_supported': True,
             'endpoint_configured': bool(config.comfy_endpoint) if adapter == 'comfyui_wan' else False,
         }
     return result
@@ -231,7 +231,8 @@ def _bounded_manifest(manifest):
 
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
-        _keys(params, ('model', 'seed', 'frames', 'fps'))
+        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt',))
+        if 'prompt' in params:_text(params['prompt'],1024)
         if params['model'] != 'wan':
             raise ContractError('unsupported model family')
         _integer(params['seed'], 0, 2**32 - 1)

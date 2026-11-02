@@ -368,6 +368,30 @@ def test_recovered_browser_gets_restart_feedback_before_requesting_stale_approva
     assert db.one('SELECT COUNT(*) n FROM workspace_action_approvals')['n']==0
 
 
+def test_backend_cannot_finish_before_api_check_or_reuse_it_after_edit(workspace,monkeypatch):
+    from central.workspace_guard import bind_run
+    db,root=workspace;set_policy(db,'user','full',str(root));bind_run(db,'user','run')
+    commands=[{'action':'finish','message':'early'},
+              {'action':'preview','operation':'start_api','cwd':'backend'},
+              {'action':'write','path':'hello.py','content':'updated'},
+              {'action':'finish','message':'stale'},
+              {'action':'preview','operation':'start_api','cwd':'backend'},
+              {'action':'finish','message':'validated'}]
+    class Model:
+        async def stream(self,*args):yield json.dumps(commands.pop(0))
+    starts=[]
+    async def action(db,user,rid,sid,command,emit):
+        if command['action']=='preview':
+            starts.append(command)
+            return {'success':True,'api_status':'running','api_source_current':True}
+        return {'success':True,'path':'hello.py','sha256':'0'*64}
+    monkeypatch.setattr('central.agent_autonomy.agent_action',action)
+    monkeypatch.setattr('central.worker_preview.owned_status',lambda *a:{'api_status':'running','api_source_current':True})
+    result=asyncio.run(autonomous_worker(Model(),db,'user','run','step',{'kind':'openai'},'','fixture','',
+        [{'role':'user','content':'Implement API'}],lambda *a:None,validate_at_finish=False,require_api_validation=True))
+    assert result=='validated' and len(starts)==2 and commands==[]
+
+
 def test_large_source_read_preserves_ending_and_sha_in_model_feedback(workspace):
     db, root = workspace
     set_policy(db, 'user', 'full', str(root))

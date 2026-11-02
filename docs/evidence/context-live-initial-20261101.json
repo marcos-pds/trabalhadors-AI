@@ -1,0 +1,246 @@
+{
+  "live_inference": true,
+  "synthetic_context_fixtures": true,
+  "codex_allowed": false,
+  "measures": "clarification decision after real context resolver; not software delivery",
+  "cases": [
+    {
+      "id": "ambiguous-multiple-runs",
+      "prompt": "continue",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "groq",
+          "model": "openai/gpt-oss-20b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.68
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "duplicate-retries",
+      "prompt": "continue",
+      "expected_clarification": false,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "gemini",
+          "model": "gemini-3.5-flash-lite",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.84
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "ambiguous-project",
+      "prompt": "continue o projeto",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "groq",
+          "model": "openai/gpt-oss-120b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.54
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "ambiguous-pronoun-runs",
+      "prompt": "deixe isso azul",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "openrouter",
+          "model": "cohere/north-mini-code:free",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 6.08
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "ambiguous-two-buttons",
+      "prompt": "deixe maior",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "groq",
+          "model": "allam-2-7b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.48
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "unknown-pronoun",
+      "prompt": "arrume isso",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "zai",
+          "model": "glm-4.7-flash",
+          "valid_response": false,
+          "error_type": "ProviderError",
+          "seconds": 45.01
+        },
+        {
+          "kind": "openrouter",
+          "model": "openrouter/free",
+          "valid_response": false,
+          "error_type": "JSONDecodeError",
+          "seconds": 2.64
+        },
+        {
+          "kind": "zai",
+          "model": "glm-4.5-flash",
+          "valid_response": false,
+          "error_type": "JSONDecodeError",
+          "seconds": 5.49
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "pronoun-conditional-clarification",
+      "prompt": "deixe isso azul",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "openrouter",
+          "model": "openrouter/free",
+          "valid_response": false,
+          "error_type": "JSONDecodeError",
+          "seconds": 2.25
+        },
+        {
+          "kind": "zai",
+          "model": "glm-4.5-flash",
+          "valid_response": false,
+          "error_type": "JSONDecodeError",
+          "seconds": 5.9
+        },
+        {
+          "kind": "gemini",
+          "model": "gemini-3.1-flash-lite",
+          "decision": false,
+          "valid_response": true,
+          "seconds": 2.92
+        }
+      ],
+      "correct": false
+    },
+    {
+      "id": "multiple-briefs-resume",
+      "prompt": "agora retome",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "zai",
+          "model": "glm-4.5-flash",
+          "valid_response": false,
+          "error_type": "JSONDecodeError",
+          "seconds": 5.95
+        },
+        {
+          "kind": "gemini",
+          "model": "gemini-3.1-flash-lite",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.91
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "no-cross-project-pronoun",
+      "prompt": "deixe isso azul",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "gemini",
+          "model": "gemini-3.1-flash-lite",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 5.38
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "gap-no-history-pronoun",
+      "prompt": "arrume isso",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "groq",
+          "model": "qwen/qwen3.8-27b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.35
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "gap-do-same-no-reference",
+      "prompt": "faça igual",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "cloudflare",
+          "model": "@cf/meta/llama-3.1-8b-instruct",
+          "valid_response": false,
+          "error_type": "ProviderError",
+          "seconds": 0.16
+        },
+        {
+          "kind": "groq",
+          "model": "openai/gpt-oss-20b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.56
+        }
+      ],
+      "correct": true
+    },
+    {
+      "id": "gap-which-of-two",
+      "prompt": "qual deles?",
+      "expected_clarification": true,
+      "resolver_passed": true,
+      "attempts": [
+        {
+          "kind": "groq",
+          "model": "openai/gpt-oss-20b",
+          "decision": true,
+          "valid_response": true,
+          "seconds": 0.46
+        }
+      ],
+      "correct": true
+    }
+  ],
+  "api_calls": 18,
+  "correct": 9,
+  "total": 12,
+  "complete": true
+}

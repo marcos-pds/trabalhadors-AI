@@ -20,6 +20,16 @@ Esses ensaios de mídia usam fixtures declaradas (cena de referência e fala sin
 
 ## Critérios ainda abertos
 
+### Integração local de prévia FastAPI e Vite
+
+A prévia Vite iniciada pelo trabalhador recebe `CENTRAL_PREVIEW_API_URL` somente
+quando uma API da mesma conta, execução e pasta está rodando. O endereço é
+validado como loopback com porta explícita e não é herdado de variáveis do
+processo da Central. No `vite.config.js` do projeto gerado, o proxy pode usar
+`process.env.CENTRAL_PREVIEW_API_URL` como destino de `/api`. Inicie `start_api`
+antes de `start`; se a API iniciar depois, reinicie a prévia frontend. Essa
+integração ainda depende de aceitação HTTP e visual do projeto gerado.
+
 1. QA visual com reparo comprovado no projeto maior.
 2. Avaliação real mais ampla de pedidos curtos/ambíguos, separada do corpus offline.
 3. Subtarefa delegada executada, revisada e integrada na entrega.

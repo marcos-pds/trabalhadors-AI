@@ -89,9 +89,17 @@ class MotionQueue:
         root,_=authorized_root(self.db,user,relative)
         data=validate_manifest(manifest,root)
         plans=plan_jobs(data,root,self._config(user))
+        self._check_workflows(data,root,user)
         return {'jobs':[{'id':p.job_id,'adapter':p.adapter,'status':p.status,
                          'reason':p.reason,'argv':list(p.command.argv) if p.command else None}
-                        for p in plans], 'executable':all(p.command is not None for p in plans)}
+                        for p in plans], 'executable':all(p.command is not None or p.service_operation is not None for p in plans)}
+
+    def _check_workflows(self,data,root,user):
+        from .comfy_motion import prepare_workflow
+        artifacts={a['id']:a for a in data['artifacts']}
+        for job in data['jobs']:
+            if job['adapter']=='comfyui_wan':
+                prepare_workflow(scoped_path(root,artifacts[job['inputs'][0]]['path']),job['params'],'preview',self._config(user))
 
     def enqueue(self,user,manifest,request_id,relative=''):
         if not isinstance(request_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,80}',request_id):
@@ -107,14 +115,16 @@ class MotionQueue:
             return self.get(user,existing['id'])
         data=validate_manifest(manifest,root)
         plans=plan_jobs(data,root,self._config(user))
-        if not plans or any(p.command is None for p in plans):
+        if not plans or any(p.command is None and p.service_operation is None for p in plans):
             raise HTTPException(409,'Ferramenta ausente ou adaptador sem executor disponível.')
+        self._check_workflows(data,root,user)
         inputs={a['id']:digest_file(scoped_path(root,a['path'])) for a in data['artifacts']
                 if a['provenance']['source']=='local'}
         for a in data['artifacts']:
             if a['id'] in inputs and a['provenance'].get('sha256',inputs[a['id']])!=inputs[a['id']]:
                 raise ContractError('input digest mismatch')
-        runtimes={p.job_id:{'argv':list(p.command.argv),'program_sha256':digest_file(Path(p.command.argv[0]))}
+        runtimes={p.job_id:({'argv':list(p.command.argv),'program_sha256':digest_file(Path(p.command.argv[0]))}
+                          if p.command else {'endpoint':p.endpoint,'service':'comfy_wan_v1'})
                   for p in plans}
         for p in plans:
             if p.adapter=='remotion' and len(p.command.argv)>1 and p.command.argv[1].endswith('.js'):
@@ -143,7 +153,7 @@ class MotionQueue:
     def get(self,user,rid):
         run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
         if not run:raise HTTPException(404,'Renderização não encontrada.')
-        jobs=self.db.all('SELECT id,adapter,state,artifact,error,started_at,finished_at FROM motion_jobs WHERE run_id=? ORDER BY rowid',(rid,))
+        jobs=self.db.all('SELECT id,adapter,state,artifact,error,started_at,finished_at,remote_id FROM motion_jobs WHERE run_id=? ORDER BY rowid',(rid,))
         for job in jobs:
             job['artifact']=json.loads(job['artifact']) if job['artifact'] else None
         return dict(run,jobs=jobs)
@@ -196,9 +206,9 @@ class MotionQueue:
             runtimes=json.loads(row['runtimes'])
             for job,plan in zip(data['jobs'],plans):
                 self._check(row,stop)
-                if not plan.command:raise ContractError('runtime_unavailable')
+                if not plan.command and not plan.service_operation:raise ContractError('runtime_unavailable')
                 expected=runtimes.get(plan.job_id,{})
-                if (expected.get('argv')!=list(plan.command.argv) or
+                if plan.command and (expected.get('argv')!=list(plan.command.argv) or
                     expected.get('program_sha256')!=digest_file(Path(plan.command.argv[0])) or
                     ('entry_sha256' in expected and expected['entry_sha256']!=digest_file(Path(plan.command.argv[1])))):
                     raise ContractError('runtime_changed')
@@ -210,10 +220,21 @@ class MotionQueue:
                 destination.parent.mkdir(parents=True,exist_ok=True)
                 scoped_path(root,output['path'],output=True)
                 self.db.execute("UPDATE motion_jobs SET state='running',started_at=? WHERE run_id=? AND id=?",(utcnow(),row['id'],job['id']))
-                self._command(row,plan.command,stop)
+                provenance=None
+                if plan.command:self._command(row,plan.command,stop)
+                else:
+                    if expected!={'endpoint':plan.endpoint,'service':'comfy_wan_v1'}:raise ContractError('runtime_changed')
+                    from .comfy_motion import execute as render_comfy
+                    source=job['inputs'][0]
+                    provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
+                        'central_motion_'+row['id']+'_'+job['id'],self._config(row['user_id']),
+                        lambda:self._check(row,stop),
+                        lambda prompt_id:self.db.execute('UPDATE motion_jobs SET remote_id=? WHERE run_id=? AND id=?',(prompt_id,row['id'],job['id'])),
+                        timeout=self.timeout,expected_digest=hashes[source])
                 self._check(row,stop)
                 path=scoped_path(root,output['path'])
                 artifact=receipt(path,output)
+                if provenance:artifact['provenance']=provenance
                 hashes[output['id']]=artifact['sha256']
                 self.db.execute("UPDATE motion_jobs SET state='completed',artifact=?,finished_at=? WHERE run_id=? AND id=?",(json.dumps(artifact),utcnow(),row['id'],job['id']))
         except InterruptedError as exc:
@@ -222,6 +243,8 @@ class MotionQueue:
             state='failed'
             # Do not persist subprocess output, paths, arbitrary error strings or secrets.
             known={'input_changed','runtime_changed','runtime_unavailable','media_process_failed','process_output_limit','render_timeout'}
+            from .comfy_motion import ERRORS
+            known.update(ERRORS)
             error=exc.detail if isinstance(exc,HTTPException) else str(exc) if str(exc) in known else type(exc).__name__
         self.db.execute("UPDATE motion_jobs SET state=?,error=?,finished_at=? WHERE run_id=? AND state IN ('queued','running')",(state,error,utcnow(),row['id']))
         self.db.execute("UPDATE motion_runs SET state=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,error=?,updated_at=? WHERE id=? AND lease_owner=?",(state,error,utcnow(),row['id'],owner))

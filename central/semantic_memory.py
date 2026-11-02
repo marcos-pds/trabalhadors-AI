@@ -50,7 +50,10 @@ def embed(texts):
             or parsed.path not in ('', '/')):
         raise ValueError('Embedding endpoint must be a local Ollama origin')
     model = os.environ.get('CENTRAL_EMBEDDING_MODEL', 'nomic-embed-text')
-    with httpx.Client(timeout=8, trust_env=False, follow_redirects=False) as client:
+    # Indexing up to sixteen missing documents takes longer than a cached query
+    # on CPU. Keep both paths finite without discarding every cold index batch.
+    timeout = httpx.Timeout(30 if len(texts)>1 else 8, connect=2)
+    with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False) as client:
         response = client.post(endpoint.rstrip('/') + '/api/embed',
                                json={'model': model, 'input': texts, 'truncate': True})
         response.raise_for_status()
@@ -59,9 +62,17 @@ def embed(texts):
         raise ValueError('Embedding batch size mismatch')
     for vector in vectors:
         if (not isinstance(vector, list) or not 1 <= len(vector) <= 8192
-                or any(not isinstance(v, (float, int)) or not math.isfinite(v) for v in vector)):
+                or any(type(v) not in (float, int) or not math.isfinite(v) for v in vector)):
             raise ValueError('Invalid embedding')
     return vectors
+
+
+def retrieval_text(text, model, *, query=False):
+    # Nomic's retrieval protocol distinguishes queries from indexed documents.
+    # Other explicitly configured models retain their own input convention.
+    if model.split(':',1)[0] == 'nomic-embed-text':
+        return ('search_query: ' if query else 'search_document: ') + text
+    return text
 
 
 def cosine(a, b):
@@ -86,7 +97,8 @@ def retrieve(db, user_id, project_id, conversation_id, query):
     missing, vectors = [], {}
     for row in rows:
         content = row['content'][:1800]
-        digest = hashlib.sha256(content.encode()).hexdigest()
+        document = retrieval_text(content, model)
+        digest = hashlib.sha256(document.encode()).hexdigest()
         row['fingerprint'] = digest
         cached = db.one('SELECT vector_json FROM memory_embeddings '
                         'WHERE message_id=? AND model=? AND fingerprint=?',
@@ -96,7 +108,8 @@ def retrieve(db, user_id, project_id, conversation_id, query):
         elif len(missing) < 16:
             missing.append(row)
     try:
-        batch = embed([query[:1800]] + [r['content'][:1800] for r in missing])
+        batch = embed([retrieval_text(query[:1800], model, query=True)] +
+                      [retrieval_text(r['content'][:1800], model) for r in missing])
         for row, vector in zip(missing, batch[1:]):
             db.execute('INSERT INTO memory_embeddings VALUES(?,?,?,?,?) '
                        'ON CONFLICT(message_id,model) DO UPDATE SET '

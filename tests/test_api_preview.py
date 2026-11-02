@@ -55,9 +55,14 @@ def test_owned_api_uses_project_venv_fixed_loopback_and_scoped_stop(runtime):
     assert procs[0].kwargs['shell'] is False and procs[0].kwargs['cwd']==str(root/'backend')
     assert not any(k.startswith('CENTRAL_') for k in procs[0].kwargs['env'])
     assert api.status(object(),'u','run',str(root))['api_status']=='stopped'
+    (root/'backend'/'main.py').write_text('app = changed')
+    assert api.status(db,'u','run',str(root))['api_source_current'] is False
+    api.start(db,'u','run',str(root),'backend',event,lambda:True)
+    assert len(procs)==2 and procs[0].poll()==0
+    assert api.status(db,'u','run',str(root))['api_source_current'] is True
     api.start(db,'u','other',str(root),'backend',event,lambda:True)
     api.stop_owned(db,'u','run',str(root))
-    assert procs[0].poll()==0 and procs[1].poll() is None
+    assert procs[1].poll()==0 and procs[2].poll() is None
 
 
 def test_api_refuses_missing_venv_traversal_and_cancel_before_spawn(runtime):

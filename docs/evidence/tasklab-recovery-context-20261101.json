@@ -1,0 +1,48 @@
+{
+  "run": {
+    "id": "27f9bbcd-9ca7-4299-88c0-2b0d18de1d96",
+    "status": "paused_limit",
+    "error": "Limite de ações por execução atingido; progresso salvo. Use Continuar execução."
+  },
+  "steps": [
+    {
+      "id": "architecture",
+      "agent_id": "architecture",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "id": "backend",
+      "agent_id": "backend",
+      "status": "paused_limit",
+      "error": "Limite de ações por execução atingido; progresso salvo. Use Continuar execução."
+    },
+    {
+      "id": "frontend",
+      "agent_id": "frontend",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "review",
+      "agent_id": "review",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "id": "7a67e026-0223-432b-988d-ac6e154992a4",
+      "agent_id": "code",
+      "status": "queued",
+      "error": null
+    }
+  ],
+  "pending_approvals": [],
+  "workspaces": [
+    {
+      "step_id": "backend",
+      "state": "active"
+    }
+  ],
+  "api_calls_this_segment": 51,
+  "independent_acceptance_complete": false
+}

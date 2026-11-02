@@ -207,7 +207,7 @@ def test_inventory_no_execution_or_version_guessing(monkeypatch):
     assert not result['comfyui_wan']['installed']
     assert all(v['contract_implemented'] and v['service_status'] == 'pending' for v in result.values())
     assert result['ffmpeg']['execution_supported'] and result['remotion']['execution_supported']
-    assert result['whisperx']['execution_supported'] and not result['comfyui_wan']['execution_supported']
+    assert result['whisperx']['execution_supported'] and result['comfyui_wan']['execution_supported']
 
 
 def test_no_execution_and_detached_manifest(project, monkeypatch):

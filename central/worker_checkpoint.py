@@ -47,11 +47,14 @@ def save_checkpoint(db, user_id, run_id, step_id, folder, transcript, *,
             'MENSAGENS DA EQUIPE',
             'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO',
             'Novos ajustes chegaram antes de concluir.',
+            'BLOQUEIO DE FERRAMENTA AINDA NÃO RESOLVIDO ',
         ))
 
     # User corrections may precede many tool calls. Keep their latest bounded
     # history across failover instead of silently dropping already-consumed notes.
-    important = [i for i, message in enumerate(preserved) if priority(message)][-6:]
+    blocker='BLOQUEIO DE FERRAMENTA AINDA NÃO RESOLVIDO '
+    important = [i for i,message in enumerate(preserved) if priority(message) and not message['content'].startswith(blocker)][-6:]
+    important += [i for i,message in enumerate(preserved) if message['content'].startswith(blocker)][-3:]
     keep = {0, *important, *range(max(0, len(preserved) - 12), len(preserved))}
     preserved = [message for i, message in enumerate(preserved) if i in keep]
     while len(json.dumps(preserved, ensure_ascii=False)) > MAX_TRANSCRIPT_CHARS and len(preserved) > 2:

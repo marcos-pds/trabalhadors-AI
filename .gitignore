@@ -48,6 +48,11 @@ dist/
 build/
 /static/build/
 /data/
+/desktop/dist-installer/
+/desktop/dist-signed/
+/desktop/.pyinstaller-build/
+/desktop/*.spec
+/desktop/test-results/
 
 .central-npm-cache/
 

@@ -21,6 +21,7 @@ from .worker_controls import SCHEMA as WORKER_CONTROL_SCHEMA
 from .isolated_workspaces import SCHEMA as ISOLATED_WORKSPACE_SCHEMA
 from .motion_schema import SCHEMA as MOTION_SCHEMA
 from .motion_schema import SETTINGS_SCHEMA as MOTION_SETTINGS_SCHEMA
+from .motion_schema import COMFY_SCHEMA as MOTION_COMFY_SCHEMA
 
 MIGRATIONS = (
     (1, 'retrieval_and_operations_indexes', (
@@ -107,6 +108,7 @@ MIGRATIONS = (
     (22, 'run_step_isolated_workspaces', ISOLATED_WORKSPACE_SCHEMA),
     (23, 'durable_motion_jobs', MOTION_SCHEMA),
     (24, 'owned_motion_tool_settings', MOTION_SETTINGS_SCHEMA),
+    (25, 'owned_comfy_prompt_receipts', MOTION_COMFY_SCHEMA),
 )
 
 

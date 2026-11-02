@@ -15,3 +15,5 @@ SETTINGS_SCHEMA = (
     "CREATE TABLE motion_tool_settings(user_id TEXT PRIMARY KEY REFERENCES users(id),config TEXT NOT NULL,updated_at TEXT NOT NULL)",
     "ALTER TABLE motion_runs ADD COLUMN runtimes TEXT NOT NULL DEFAULT '{}'",
 )
+
+COMFY_SCHEMA = ("ALTER TABLE motion_jobs ADD COLUMN remote_id TEXT",)

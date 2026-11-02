@@ -653,6 +653,17 @@ class RunOrchestrator:
                             for x in memory['sources']],
             })
         if step['instructions']: system += '\nInstruções do fluxo: ' + step['instructions'][:2000]
+        from .workflow_gates import downstream_visual_reviewer
+        visual_reviewer=(downstream_visual_reviewer(self.db,user,run['plan'],sid)
+                         if specialty=='backend' and run.get('autonomous') else None)
+        if visual_reviewer:
+            system += ('\nETAPA BACKEND COM REVISÃO POSTERIOR: implemente e teste a API real. '
+                       'Antes de finish, use preview start_api no cwd da API e confirme '
+                       'que ela iniciou após as últimas alterações. Corrija dependências '
+                       'e erros de inicialização com base nos logs. O frontend e a auditoria '
+                       'visual completa pertencem às etapas seguintes; não repita Lighthouse '
+                       'nesta etapa. A entrega final continua exigindo QA após integração.')
+            self.emit(run['id'],'browser_qa_deferred',{'step_id':sid,'reviewer_step_id':visual_reviewer})
         providers = self.providers.candidates(user, agent)
         if not providers:
             raise RuntimeError('Nenhum provedor configurado. Abra Provedores e adicione uma API válida.')
@@ -742,7 +753,9 @@ class RunOrchestrator:
                                         (requires_browser_validation(run['prompt']) or
                                          requires_visual_qa(run['prompt'])) and
                                         browser_mcp_available(self.db, user) and
-                                        specialty in ('code', 'frontend', 'backend', 'review')),
+                                        specialty in ('code', 'frontend', 'backend', 'review') and
+                                        not visual_reviewer),
+                                    require_api_validation=bool(visual_reviewer),
                                     planning_only=(is_implementation_request(run['prompt']) and
                                                    specialty in ('architecture', 'coordination',
                                                                  'design', 'research')),

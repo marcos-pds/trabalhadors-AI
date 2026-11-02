@@ -252,6 +252,22 @@ def test_host_environment_and_ttl(preview, monkeypatch):
     assert len(killed) == 1 and live.info('a')['status'] == 'running'
 
 
+def test_worker_frontend_receives_only_its_running_api_url(preview, monkeypatch):
+    from central import api_preview
+    db, folder, spawned, _ = preview
+    observed = []
+    def owned_api_status(database, user, run, root):
+        observed.append((database, user, run, root))
+        return {'api_status': 'running', 'api_url': 'http://127.0.0.1:45678'}
+    monkeypatch.setattr(api_preview, 'status', owned_api_status)
+    call(db, 'start')
+    assert spawned[0][1]['env']['CENTRAL_PREVIEW_API_URL'] == 'http://127.0.0.1:45678'
+    assert observed and observed[0] == (db, 'a', 'r1', str(folder))
+    assert 'CENTRAL_PREVIEW_API_URL' not in live._environment()
+    with pytest.raises(HTTPException):
+        live._environment(api_url='http://example.com:45678')
+
+
 def test_concurrent_host_starts_spawn_only_once(preview):
     db, folder, spawned, killed = preview
     with ThreadPoolExecutor(max_workers=2) as pool:

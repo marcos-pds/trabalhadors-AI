@@ -1,0 +1,194 @@
+{
+  "synthetic_fixtures": true,
+  "backend": "real_local_ollama",
+  "generation_worker_used": false,
+  "model": "nomic-embed-text",
+  "explicit_benchmark_warmup_seconds": 4.57,
+  "elapsed_seconds": 21.67,
+  "cases": [
+    {
+      "query": "How does authentication stay valid after the access credential expires?",
+      "expected_document": 0,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "Where can I drag a task after finishing it?",
+      "expected_document": 1,
+      "top1_correct": false,
+      "top4_contains_expected": false,
+      "scope_leak": false,
+      "sources": []
+    },
+    {
+      "query": "What colors should the interface use?",
+      "expected_document": 2,
+      "top1_correct": true,
+      "top4_contains_expected": true,
+      "scope_leak": false,
+      "sources": [
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "The application uses a white background and a blue accent for primary buttons.",
+          "retrieval": "semantic",
+          "score": 0.7117
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Tasks can be moved between pending, in progress and completed columns.",
+          "retrieval": "semantic",
+          "score": 0.4888
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Daily spending limits pause a worker when its token budget is exhausted.",
+          "retrieval": "semantic",
+          "score": 0.486
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Video exports are encoded as H264 MP4 with AAC audio.",
+          "retrieval": "semantic",
+          "score": 0.4841
+        }
+      ]
+    },
+    {
+      "query": "Which file format and codecs are used for movie downloads?",
+      "expected_document": 3,
+      "top1_correct": true,
+      "top4_contains_expected": true,
+      "scope_leak": false,
+      "sources": [
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Video exports are encoded as H264 MP4 with AAC audio.",
+          "retrieval": "semantic",
+          "score": 0.7034
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "The application uses a white background and a blue accent for primary buttons.",
+          "retrieval": "semantic",
+          "score": 0.5846
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Tasks can be moved between pending, in progress and completed columns.",
+          "retrieval": "semantic",
+          "score": 0.498
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Session renewal uses a rotating refresh token stored in an HttpOnly cookie.",
+          "retrieval": "semantic",
+          "score": 0.4942
+        }
+      ]
+    },
+    {
+      "query": "What happens when an agent spends its daily allowance?",
+      "expected_document": 4,
+      "top1_correct": true,
+      "top4_contains_expected": true,
+      "scope_leak": false,
+      "sources": [
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Daily spending limits pause a worker when its token budget is exhausted.",
+          "retrieval": "semantic",
+          "score": 0.6709
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "A canceled worker releases its isolated worktree after review.",
+          "retrieval": "semantic",
+          "score": 0.5321
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Tasks can be moved between pending, in progress and completed columns.",
+          "retrieval": "semantic",
+          "score": 0.5024
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Session renewal uses a rotating refresh token stored in an HttpOnly cookie.",
+          "retrieval": "semantic",
+          "score": 0.4988
+        }
+      ]
+    },
+    {
+      "query": "What happens to the separate working directory when a worker is canceled?",
+      "expected_document": 5,
+      "top1_correct": true,
+      "top4_contains_expected": true,
+      "scope_leak": false,
+      "sources": [
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "A canceled worker releases its isolated worktree after review.",
+          "retrieval": "semantic",
+          "score": 0.7999
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Daily spending limits pause a worker when its token budget is exhausted.",
+          "retrieval": "semantic",
+          "score": 0.5831
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Tasks can be moved between pending, in progress and completed columns.",
+          "retrieval": "semantic",
+          "score": 0.5484
+        },
+        {
+          "conversation_id": "project-old",
+          "title": "old",
+          "role": "user",
+          "content": "Session renewal uses a rotating refresh token stored in an HttpOnly cookie.",
+          "retrieval": "semantic",
+          "score": 0.5148
+        }
+      ]
+    }
+  ],
+  "top1_correct": 4,
+  "unauthorized_project_denied": true,
+  "cached_embeddings": 6,
+  "passed": false
+}

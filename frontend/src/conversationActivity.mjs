@@ -8,6 +8,8 @@ export function activityLabel(item) {
   if (item.event === 'provider_error') return ({context_limit:'Contexto do modelo excedido',model_unavailable:'Modelo indisponível nesta conexão'}[item.category] || 'Erro no provedor')
   if (item.event === 'worker_context_compacted') return 'Histórico reduzido após limite de contexto'
   if (item.event === 'provider_suspended') return 'Modelo suspenso temporariamente'
+  if (item.event === 'browser_qa_deferred') return 'QA visual atribuído à revisão posterior'
+  if (item.event === 'workspace_context_resolved') return 'Diretório do comando identificado: '+(item.cwd||'raiz')
   if (item.event === 'failover') return 'Tentando outro provedor'
   if (item.event === 'workspace_approval_required') return 'Aguardando aprovação'
   if (item.event === 'workspace_feedback_applied') return 'Ajuste recebido pelo trabalhador'
@@ -30,7 +32,7 @@ export function compactActivityEvents(events) {
     'provider_error','failover','workspace_approval_required','workspace_feedback_applied',
     'worker_checkpoint_restored','worker_budget_warning','run_paused_limit','run_failed',
     'run_completed','step_status','skill_context_selected','workspace_action_requested',
-    'worker_context_compacted','provider_suspended'])
+    'worker_context_compacted','provider_suspended','browser_qa_deferred','workspace_context_resolved'])
   const skills = new Set()
   return events.filter((item, index) => {
     if (!visible.has(item.event)) return false

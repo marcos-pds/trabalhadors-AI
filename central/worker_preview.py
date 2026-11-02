@@ -106,12 +106,15 @@ def _execute(db, user_id, run_id, request, cancelled, step_id=None):
             cwd = request['cwd']
             target(folder, cwd, directory=True)
             token = object()
+            api = api_preview.status(db, user_id, run_id, folder)
+            api_url = api.get('api_url') if api.get('api_status') == 'running' else None
 
             def authorize():
                 return _authorize(db, user_id, run_id, start=True, step_id=step_id) == folder
 
             live_preview.start(db, user_id, cwd, owner=token,
-                               authorize=authorize, expected_folder=folder)
+                               authorize=authorize, expected_folder=folder,
+                               api_url=api_url)
             with live_preview._LOCK:
                 entry = live_preview._SESSIONS.get(user_id)
                 if (not entry or entry.get('owner') is not token
@@ -187,7 +190,9 @@ def worker_instruction():
             'Para FastAPI use {"action":"preview","operation":"start_api","cwd":"backend"}: '
             'exige backend/main.py, app FastAPI e .venv criada/instalada nesse cwd por '
             'venv_create e pip_requirements. O retorno traz api_url com porta livre; '
-            'configure o proxy /api do Vite para essa URL antes de testar login/CRUD. '
+            'no vite.config.js do projeto, configure proxy /api com '
+            'process.env.CENTRAL_PREVIEW_API_URL; inicie a API antes do frontend. '
+            'Se a API for iniciada depois, pare e reinicie a previa frontend para atualizar o proxy. '
             'Uma prévia Vite não inicia a API automaticamente. Não adivinhe localhost:8000. '
             'preview status também informa api_status/api_url. stop encerra só o frontend; '
             'stop_api encerra só a API desta etapa. '

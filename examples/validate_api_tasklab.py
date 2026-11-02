@@ -7,6 +7,8 @@ Worktree promotion and dependency installs require concrete operator decisions.
 import argparse
 import asyncio
 import json
+import hashlib
+from datetime import datetime,timedelta,timezone
 import os
 from pathlib import Path
 import subprocess
@@ -161,6 +163,18 @@ def local_preview_decision(request, preview):
         return False
 
 
+def pip_recipe(folder,step_id,request):
+    """Remember only a concretely reviewed requirements file in this step's folder."""
+    if (request.get('action')!='command' or request.get('command')!='pip_requirements'
+            or set(request)-{'action','command','cwd'}):return None
+    from central.workspace_tools import target
+    root=target(folder,request.get('cwd',''),directory=True)
+    path=target(str(root),'requirements.txt')
+    if path.stat().st_size>256*1024:return None
+    return {'folder':folder,'step_id':step_id,'request':request,
+            'requirements_sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 async def process(args):
     from central.engine import Engine
     from central.security import Security
@@ -179,16 +193,24 @@ async def process(args):
     rid, user = state['run_id'], state['user_id']
 
     def resolve_approval(approval_id):
-        row = db.one("SELECT request_json,folder FROM workspace_action_approvals WHERE id=? AND run_id=? AND status='pending' AND expires_at>?", (approval_id, rid, utcnow()))
+        row = db.one("SELECT request_json,folder,step_id FROM workspace_action_approvals WHERE id=? AND run_id=? AND status='pending' AND expires_at>?", (approval_id, rid, utcnow()))
         if not row:
             return
         from central.api_preview import status as api_status
         preview=dict(live_preview.info(user),**api_status(db,user,rid,row['folder']))
-        decision = local_preview_decision(json.loads(row['request_json']), preview)
+        request=json.loads(row['request_json'])
+        decision = local_preview_decision(request, preview)
+        policy_name='isolated_local_preview_browser_only'
+        if decision is None and request.get('command')=='pip_requirements':
+            recipe=pip_recipe(row['folder'],row['step_id'],request)
+            for event in db.all("SELECT payload FROM events WHERE run_id=? AND event='test_install_authorized' ORDER BY seq DESC LIMIT 100",(rid,)):
+                receipt=json.loads(event['payload'])
+                if recipe and receipt.get('recipe')==recipe and receipt.get('expires_at','')>utcnow():
+                    decision=True;policy_name='reviewed_requirements_digest';break
         if decision is not None:
             decide(db, user, rid, approval_id, decision)
             original(rid, 'test_operator_approval', {'approval_id': approval_id,
-                     'policy': 'isolated_local_preview_browser_only', 'approved': decision})
+                     'policy': policy_name, 'approved': decision})
 
     def emit(run_id, kind, payload):
         original(run_id, kind, payload)
@@ -235,6 +257,7 @@ async def main(argv=None):
     parser.add_argument('--step-id')
     parser.add_argument('--confirmation')
     parser.add_argument('--approval-id')
+    parser.add_argument('--remember-install',action='store_true',help='Remember this reviewed requirements digest for three hours in this run only.')
     args = parser.parse_args(argv)
     args.destination = args.destination.resolve()
     if not 1 <= args.max_calls <= 200 or not 1 <= args.timeout <= 1800:
@@ -269,7 +292,17 @@ async def main(argv=None):
             from central.approval_engine import decide
             if not args.approval_id:
                 parser.error('--approval-id of the inspected request is required')
+            recipe=None
+            if args.remember_install:
+                row=db.one('SELECT folder,step_id,request_json FROM workspace_action_approvals WHERE id=? AND run_id=? AND user_id=?',
+                           (args.approval_id,state['run_id'],state['user_id']))
+                if not row:raise ValueError('Approval not owned.')
+                recipe=pip_recipe(row['folder'],row['step_id'],json.loads(row['request_json']))
+                if not recipe:raise ValueError('Only a reviewed requirements digest may be remembered.')
             decide(db, state['user_id'], state['run_id'], args.approval_id, True)
+            if recipe:
+                db.event(state['run_id'],'test_install_authorized',{'recipe':recipe,
+                         'expires_at':(datetime.now(timezone.utc)+timedelta(hours=3)).isoformat()})
             result = {'approved': True, 'approval_id': args.approval_id}
         print(json.dumps(result, ensure_ascii=False), flush=True)
     finally:

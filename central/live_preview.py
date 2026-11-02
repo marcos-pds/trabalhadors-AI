@@ -189,16 +189,23 @@ def stop_all():
         stop(user)
 
 
-def _environment():
+def _environment(*, api_url=None):
     # npm scripts must not inherit API keys, DB settings, NODE_OPTIONS or tokens.
     names = {'PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP',
              'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'LC_ALL'}
     env = {key: value for key, value in os.environ.items() if key.upper() in names}
     env.update(BROWSER='none', HOST='127.0.0.1')
+    if api_url is not None:
+        if not re.fullmatch(r'http://127\.0\.0\.1:[1-9][0-9]{0,4}', api_url):
+            raise HTTPException(422, 'Endereco da API invalido para a previa.')
+        if int(api_url.rsplit(':', 1)[1]) > 65535:
+            raise HTTPException(422, 'Porta da API invalida para a previa.')
+        env['CENTRAL_PREVIEW_API_URL'] = api_url
     return env
 
 
-def start(db, user_id, relative, *, owner=None, authorize=None, expected_folder=None):
+def start(db, user_id, relative, *, owner=None, authorize=None, expected_folder=None,
+          api_url=None):
     permission = policy(db, user_id)
     if permission['mode'] not in ('full', 'ask'):
         raise HTTPException(403, 'Autorize uma pasta no Computador.')
@@ -233,7 +240,8 @@ def start(db, user_id, relative, *, owner=None, authorize=None, expected_folder=
         if _alive(previous):
             if (previous.get('owner') == owner and previous['cwd'] == relative
                     and previous['folder'] == folder
-                    and previous.get('backend', 'host') == runner):
+                    and previous.get('backend', 'host') == runner
+                    and previous.get('api_url') == api_url):
                 return info(user_id, expected=previous)
             raise HTTPException(409, 'Pare a previa atual antes de iniciar outra.')
         if previous:
@@ -241,6 +249,8 @@ def start(db, user_id, relative, *, owner=None, authorize=None, expected_folder=
         if len(_SESSIONS) >= 4:
             raise HTTPException(429, 'Limite de quatro previas simultaneas atingido.')
         if runner == 'docker':
+            if api_url is not None:
+                raise HTTPException(409, 'API local exige previa frontend no executor host.')
             entry = docker_preview.start(directory, authorized)
         else:
             port = _port()
@@ -251,13 +261,13 @@ def start(db, user_id, relative, *, owner=None, authorize=None, expected_folder=
                     args, cwd=directory, stdout=subprocess.PIPE, bufsize=0,
                     stderr=subprocess.STDOUT, shell=False,
                     creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0),
-                    start_new_session=(os.name != 'nt'), env=_environment())
+                    start_new_session=(os.name != 'nt'), env=_environment(api_url=api_url))
             except OSError as exc:
                 raise HTTPException(422, 'Falha ao iniciar a previa: ' + str(exc)[:200]) from exc
             entry = {'process': process, 'port': port}
             if getattr(process, 'stdout', None) is not None:
                 entry['logs'] = _PreviewLogs(process)
-        entry.update(folder=folder, cwd=relative, backend=runner,
+        entry.update(folder=folder, cwd=relative, backend=runner, api_url=api_url,
                      authorized=authorized, owner=owner)
         _SESSIONS[user_id] = entry
         timer = threading.Timer(1800, stop, args=(user_id, entry))

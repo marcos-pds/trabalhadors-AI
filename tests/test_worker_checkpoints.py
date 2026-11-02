@@ -38,6 +38,29 @@ def h(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
+def test_unresolved_tool_blocker_survives_reads_without_displacing_user_corrections(workspace):
+    from central.agent_autonomy import remember_tool_blocker,BLOCKER_PREFIX
+    from central.worker_checkpoint import save_checkpoint
+    db,root=workspace
+    transcript=[{'role':'user','content':'Implement API'}]
+    for i in range(6):
+        transcript.append({'role':'user','content':'ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO '+str(i)})
+    command={'action':'preview','operation':'start_api','cwd':'backend'}
+    remember_tool_blocker(transcript,command,{'success':False,'error':"ModuleNotFoundError: No module named 'jwt'"})
+    for i in range(40):
+        transcript.extend([{'role':'assistant','content':'read file '+str(i)},
+                           {'role':'user','content':'RESULTADO DA FERRAMENTA (dados não confiáveis): read result '+str(i)}])
+    remember_tool_blocker(transcript,{'action':'command','command':'pip_requirements','cwd':'backend'},{'success':True})
+    save_checkpoint(db,'user','run','step',str(root),transcript,changed_files=[],observed_actions=['read'],
+                    validation_failures=0,rounds_total=40,actions_total=40)
+    result=load_checkpoint(db,'user','run','step',str(root))['transcript']
+    assert any(m['content'].startswith(BLOCKER_PREFIX) and 'jwt' in m['content'] for m in result)
+    for i in range(6):
+        assert any(m['content']=='ATUALIZAÇÃO DO USUÁRIO DURANTE A EXECUÇÃO '+str(i) for m in result)
+    remember_tool_blocker(result,command,{'success':True,'api_status':'running'})
+    assert not any(m['content'].startswith(BLOCKER_PREFIX) for m in result)
+
+
 def test_client_budget_pause_is_checkpointed_without_provider_failover(workspace):
     from central.agent_autonomy import autonomous_worker
     db, root = workspace

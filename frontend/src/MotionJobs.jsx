@@ -5,7 +5,7 @@ const input='mt-1 w-full min-w-0 rounded-xl border border-white/15 bg-panel px-3
 const button='rounded-xl border border-white/15 px-3 py-2 text-xs disabled:opacity-40'
 
 export default function MotionJobs({api,onToolsSaved}) {
-  const [form,setForm]=useState({mode:'video',directory:'',source:'clip.mp4',output:'renders/final.mp4',composition:'Intro',language:'pt'})
+  const [form,setForm]=useState({mode:'video',directory:'',source:'clip.mp4',output:'renders/final.mp4',composition:'Intro',language:'pt',prompt:'',frames:17,fps:16,seed:1})
   const [custom,setCustom]=useState(null),[prepared,setPrepared]=useState(null)
   const [runs,setRuns]=useState([]),[error,setError]=useState(''),[notice,setNotice]=useState('')
   const [busy,setBusy]=useState(false),[revision,setRevision]=useState(0)
@@ -69,17 +69,24 @@ export default function MotionJobs({api,onToolsSaved}) {
       {['ffmpeg','remotion','whisperx'].map(name=><label key={name} className="block text-xs">Caminho de {name}
         <input className={input} value={tools.executables?.[name]||''} onChange={e=>setTools({...tools,executables:{...tools.executables,[name]:e.target.value}})}/></label>)}
       <p className="text-[11px] text-muted">Remotion aceita o arquivo JS do CLI. Campo vazio usa o executável disponível no servidor.</p>
+      <label className="block text-xs">Pasta do ComfyUI<input className={input} value={tools.comfy_root||''} onChange={e=>setTools({...tools,comfy_root:e.target.value})}/></label>
+      <label className="block text-xs">Endereço local do ComfyUI<input className={input} placeholder="http://127.0.0.1:8188" value={tools.comfy_endpoint||''} onChange={e=>setTools({...tools,comfy_endpoint:e.target.value})}/></label>
       <button type="button" className={button} disabled={busy} onClick={()=>action(saveTools)}>Salvar ferramentas</button>
     </div>}
     <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
       <label className="text-xs">Operação<select className={input} value={form.mode} onChange={e=>{
         const mode=e.target.value;change('mode',mode)
-        setForm(old=>({...old,mode,source:mode==='compose'?'scene.tsx':'clip.mp4',output:mode==='audio'?'renders/final.wav':mode==='transcribe'?'renders/clip.json':'renders/final.mp4'}))
-      }}><option value="video">Codificar vídeo · FFmpeg</option><option value="audio">Extrair áudio · FFmpeg</option><option value="transcribe">Transcrever · WhisperX</option><option value="compose">Renderizar composição · Remotion</option></select></label>
+        setForm(old=>({...old,mode,source:mode==='generate'?'wan-api.json':mode==='compose'?'scene.tsx':'clip.mp4',output:mode==='audio'?'renders/final.wav':mode==='transcribe'?'renders/clip.json':'renders/final.mp4'}))
+      }}><option value="video">Codificar vídeo · FFmpeg</option><option value="audio">Extrair áudio · FFmpeg</option><option value="transcribe">Transcrever · WhisperX</option><option value="compose">Renderizar composição · Remotion</option><option value="generate">Gerar vídeo · ComfyUI / Wan</option></select></label>
       <label className="text-xs">Subpasta do projeto<input className={input} value={form.directory} placeholder="Pasta autorizada" onChange={e=>change('directory',e.target.value)}/></label>
       <label className="text-xs">Arquivo de entrada<input className={input} value={form.source} onChange={e=>change('source',e.target.value)}/></label>
       <label className="text-xs">Salvar como<input className={input} value={form.output} onChange={e=>change('output',e.target.value)}/></label>
       {form.mode==='compose'&&<label className="text-xs">Composição<input className={input} value={form.composition} onChange={e=>change('composition',e.target.value)}/></label>}
+      {form.mode==='generate'&&<>
+        <label className="text-xs sm:col-span-2">Descrição do vídeo<textarea className={input} maxLength={1024} value={form.prompt} onChange={e=>change('prompt',e.target.value)}/></label>
+        {[['frames','Quadros',1,129],['fps','Quadros por segundo',1,120],['seed','Semente',0,4294967295]].map(([key,label,min,max])=><label key={key} className="text-xs">{label}<input type="number" min={min} max={max} step="1" className={input} value={form[key]} onChange={e=>change(key,e.target.value)}/></label>)}
+        <p className="text-xs text-muted sm:col-span-2">Use um workflow Wan em formato API com os modelos já instalados no ComfyUI. O cancelamento remove apenas esta tarefa da fila; uma geração já iniciada no servidor pode continuar.</p>
+      </>}
       {form.mode==='transcribe'&&<label className="text-xs">Idioma<select className={input} value={form.language} onChange={e=>change('language',e.target.value)}>
         {[['pt','Português'],['en','Inglês'],['es','Espanhol'],['fr','Francês'],['de','Alemão'],['it','Italiano'],['ja','Japonês']].map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>}
     </div>

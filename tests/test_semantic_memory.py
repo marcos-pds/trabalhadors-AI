@@ -24,13 +24,24 @@ def test_opt_in_semantic_recall_never_embeds_other_users_or_projects(monkeypatch
     semantic.preference(db, 'alice', 'alice', True)
     result = semantic.retrieve(db, 'alice', 'alice', 'alice-new', 'login')
     assert len(result) == 1 and result[0]['retrieval'] == 'semantic'
+    assert calls[0]=='search_query: login'
+    assert calls[1].startswith('search_document: ')
     assert not any('BOB SECRET' in text for text in calls)
     calls.clear()
     semantic.retrieve(db, 'alice', 'alice', 'alice-new', 'login')
-    assert calls == ['login']  # immutable source fingerprint cache
+    assert calls == ['search_query: login']  # immutable source fingerprint cache
+    db.execute("UPDATE messages SET content=? WHERE conversation_id='alice-old'",('Authentication now uses passkeys',))
+    calls.clear()
+    semantic.retrieve(db,'alice','alice','alice-new','login')
+    assert calls==['search_query: login','search_document: Authentication now uses passkeys']
     with pytest.raises(HTTPException):
         semantic.preference(db, 'bob', 'alice', True)
     db.close()
+
+
+def test_embedding_convention_is_specific_to_nomic():
+    assert semantic.retrieval_text('text','other-model',query=True)=='text'
+    assert semantic.retrieval_text('text','nomic-embed-text:latest')=='search_document: text'
 
 
 def test_local_embedding_endpoint_rejects_remote_origin(monkeypatch):
