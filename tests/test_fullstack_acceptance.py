@@ -148,6 +148,26 @@ def test_independent_verifier_uses_an_email_domain_accepted_by_emailstr():
     assert "@example.invalid" not in SCRIPT
 
 
+def test_independent_verifier_accepts_sqlite_integer_ids():
+    from examples.verify_fullstack_acceptance import SCRIPT
+    assert "Number.isSafeInteger(teamId)" in SCRIPT
+    assert "Number.isSafeInteger(taskId)" in SCRIPT
+
+
+def test_independent_verifier_uses_unique_team_names_for_repeat_runs():
+    from examples.verify_fullstack_acceptance import SCRIPT
+    assert "Acceptance Team '+randomUUID().slice(0,8)" in SCRIPT
+
+
+def test_independent_verifier_creates_a_team_before_creating_a_browser_task():
+    from examples.verify_fullstack_acceptance import SCRIPT
+    assert SCRIPT.index("getByRole('button',{name:'Criar Equipe'}).click()") < SCRIPT.index(
+        "getByTestId('create-task-button').click()")
+    assert "getByLabel('Nome da equipe')" in SCRIPT
+    assert "getByLabel('Equipe da nova tarefa').selectOption" in SCRIPT
+    assert "waitForResponse(response=>" in SCRIPT
+
+
 def test_read_only_evidence_database_cannot_write(tmp_path):
     import sqlite3
     from examples.verify_fullstack_acceptance import ReadOnlyDatabase

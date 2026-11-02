@@ -45,13 +45,15 @@ try {
  const token=tokenObject.access_token;
  api.login=res.ok()&&typeof token==='string'&&token.length>10;
  if(api.login){
-   res=await send('post','/api/teams',{name:'Acceptance Team'},token);
+   res=await send('post','/api/teams',{name:'Acceptance Team '+randomUUID().slice(0,8)},token);
    const team=await body(res),teamId=team.id;
-   api.team_create=[200,201].includes(res.status())&&typeof teamId==='string';
+   api.team_create=[200,201].includes(res.status())&&
+     (typeof teamId==='string'||Number.isSafeInteger(teamId));
    if(api.team_create){
      res=await send('post','/api/tasks',{title,team_id:teamId,status:'todo'},token);
      const task=await body(res),taskId=task.id;
-     api.task_create=[200,201].includes(res.status())&&typeof taskId==='string';
+     api.task_create=[200,201].includes(res.status())&&
+       (typeof taskId==='string'||Number.isSafeInteger(taskId));
      if(api.task_create){
        res=await send('patch','/api/tasks/'+encodeURIComponent(taskId),{status:'doing'},token);
        api.task_update=res.ok()&&(await body(res)).status==='doing';
@@ -91,9 +93,19 @@ try {
        await page.getByTestId('login-button').click();
        await page.getByTestId('task-card').filter({hasText:title}).waitFor({timeout:15000});
        flags.login=true;flags.task_visible=true;
+       const teamName='Browser Team '+randomUUID().slice(0,8);
+       await page.getByLabel('Nome da equipe').fill(teamName);
+       await page.getByRole('button',{name:'Criar Equipe'}).click();
+       await page.locator('li').filter({hasText:teamName}).waitFor({timeout:15000});
+       const teamOption=page.getByLabel('Equipe da nova tarefa').locator('option').filter({hasText:teamName});
+       await teamOption.waitFor({state:'attached',timeout:15000});
+       await page.getByLabel('Equipe da nova tarefa').selectOption(await teamOption.getAttribute('value'));
        const fresh='Browser-'+randomUUID().slice(0,8);
        await page.getByTestId('create-task-title').fill(fresh);
+       const taskResponse=page.waitForResponse(response=>
+         response.url().includes('/api/tasks')&&response.request().method()==='POST');
        await page.getByTestId('create-task-button').click();
+       if(!(await taskResponse).ok())throw new Error('Task creation request failed');
        await page.getByTestId('task-card').filter({hasText:fresh}).waitFor({timeout:15000});
        flags.task_created=true;
        flags.no_overflow=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
