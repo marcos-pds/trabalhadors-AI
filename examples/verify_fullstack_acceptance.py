@@ -23,7 +23,7 @@ const names=['health','anonymous_denied','register','login','team_create',
  'task_create','task_update','task_list_persisted','task_filter'];
 const api=Object.fromEntries(names.map(n=>[n,false]));
 const devices={};const errors=[];
-const email='test-'+randomUUID()+'@example.invalid';
+const email='test-'+randomUUID()+'@example.com';
 const password='AcceptanceTest!2468';
 const title='Card-'+randomUUID().slice(0,8);
 const client=await request.newContext({baseURL:apiURL,timeout:12000,ignoreHTTPSErrors:false});

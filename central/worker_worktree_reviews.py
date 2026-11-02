@@ -94,7 +94,7 @@ def _safe_path(root, relative, *, parent_may_be_missing=False):
             raise WorktreeError('Conflito: objeto existente tem tipo inesperado.')
         if not result.exists() and not parent_may_be_missing:
             raise WorktreeError('Caminho de origem inexistente.')
-    if result.suffix.lower() not in _ALLOWED_SUFFIX:
+    if relative != '.gitignore' and result.suffix.lower() not in _ALLOWED_SUFFIX:
         raise WorktreeError('Extensão não autorizada para integrar.')
     return result
 

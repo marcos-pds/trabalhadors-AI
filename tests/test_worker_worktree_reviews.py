@@ -172,6 +172,13 @@ def test_windows_path_aliases_are_rejected(repo, relative):
         _safe_path(repo, relative, parent_may_be_missing=True)
 
 
+def test_gitignore_and_react_sources_are_integrable(repo):
+    from central.worker_worktree_reviews import _safe_path
+    assert _safe_path(repo, '.gitignore', parent_may_be_missing=True) == repo / '.gitignore'
+    assert _safe_path(repo, 'frontend/src/App.tsx', parent_may_be_missing=True) == (
+        repo / 'frontend' / 'src' / 'App.tsx')
+
+
 def test_apply_preserves_existing_file_permissions(repo):
     import os
     import stat

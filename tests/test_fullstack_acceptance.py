@@ -142,6 +142,12 @@ def test_independent_verifier_accepts_loopback_targets():
     assert local_url("http://[::1]:8000/") == "http://[::1]:8000/"
 
 
+def test_independent_verifier_uses_an_email_domain_accepted_by_emailstr():
+    from examples.verify_fullstack_acceptance import SCRIPT
+    assert "@example.com" in SCRIPT
+    assert "@example.invalid" not in SCRIPT
+
+
 def test_read_only_evidence_database_cannot_write(tmp_path):
     import sqlite3
     from examples.verify_fullstack_acceptance import ReadOnlyDatabase
