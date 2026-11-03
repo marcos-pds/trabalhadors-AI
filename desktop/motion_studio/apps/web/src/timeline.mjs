@@ -51,3 +51,42 @@ export function updateGraphemeStyle(timeline, clipId, graphemeIndex, patch) {
     })),
   };
 }
+
+/** Build a same-origin playback URL from server-issued identifiers, never disk paths. */
+export function wanVideoPreviewUrl(runId, artifactId) {
+  const safe = (value) => typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+  if (!safe(runId) || !safe(artifactId)) return null;
+  return `/api/motion/runs/${runId}/artifacts/${artifactId}/preview`;
+}
+
+/** Preserve generated scenes on the project video track without duplicate imports. */
+export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps }) {
+  if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error("Invalid generated video reference");
+  if (!Number.isInteger(frames) || frames < 1 || frames > 3600 ||
+      !Number.isInteger(fps) || fps < 1 || fps > 120) {
+    throw new Error("Invalid generated video timing");
+  }
+  const track = timeline.tracks.find((item) => item.kind === "video");
+  if (!track) throw new Error("A timeline precisa ter uma trilha de vídeo.");
+  if (track.clips.some((clip) => clip.style?.motion_run_id === runId &&
+      clip.style?.motion_artifact_id === artifactId)) return timeline;
+  const start = track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
+  const clip = {
+    id: makeId("wan"),
+    kind: "video",
+    name: String(name || "Cena Wan").slice(0, 160),
+    start_frame: start,
+    duration_frames: Math.max(1, Math.round(frames / fps * timeline.fps)),
+    style: {
+      motion_run_id: runId,
+      motion_artifact_id: artifactId,
+      source_frames: frames,
+      source_fps: fps,
+    },
+  };
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((item) => item.id === track.id ?
+      { ...item, clips: [...item.clips, clip] } : item),
+  };
+}
