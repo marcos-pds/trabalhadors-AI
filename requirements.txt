@@ -7,3 +7,4 @@ python-multipart>=0.0.9,<1
 pywin32>=306; sys_platform == "win32"
 mcp==1.30.0
 pytest>=8,<10
+huggingface_hub>=0.32,<1

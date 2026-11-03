@@ -12,7 +12,8 @@ type Clip = {
   style: Record<string, any>;
 };
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
-type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "upload" };
+type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload" };
+type ReferenceProvider = "local_comfyui" | "huggingface";
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
@@ -143,6 +144,8 @@ export default function App() {
   const [planValidated, setPlanValidated] = useState(false);
   const [referenceKind, setReferenceKind] = useState<VisualReference["kind"]>("character");
   const [referenceName, setReferenceName] = useState("");
+  const [referenceProvider, setReferenceProvider] = useState<ReferenceProvider>("local_comfyui");
+  const [referenceBusy, setReferenceBusy] = useState(false);
   const [publication, setPublication] = useState({ cover_text: "", caption: "", hashtags: "" });
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -237,6 +240,19 @@ export default function App() {
       ? `Character sheet for ${name}, consistent identity for a vertical cinematic mini-series, front profile and three-quarter view, wardrobe, hair, age, silhouette, expressive neutral face, clean studio lighting, no text.`
       : `Environment reference for ${name}, recurring location in a vertical cinematic mini-series, architecture, props, lighting, color palette, atmosphere, wide and close composition, no text.`;
     saveReference({ id: makeId("ref"), kind: referenceKind, name, prompt, source: "generated_brief" });
+  }
+
+  async function generateReferenceImage() {
+    const name = referenceName.trim() || (referenceKind === "character" ? "Personagem principal" : "Cenário principal");
+    const prompt = referenceKind === "character"
+      ? `Character sheet for ${name}, consistent identity for a vertical cinematic mini-series, front profile and three-quarter view, wardrobe, hair, age, silhouette, expressive neutral face, clean illustrated 2D/3D animation, soft painterly shading, no text.`
+      : `Environment reference for ${name}, recurring location in a vertical cinematic mini-series, architecture, props, lighting, color palette, atmosphere, wide and close composition, clean illustrated 2D/3D animation, no text.`;
+    setReferenceBusy(true);
+    try {
+      const result = await centralRequest<{ image_data: string }>("/api/motion/references/generate", { method: "POST", body: JSON.stringify({ provider: referenceProvider, prompt }) });
+      saveReference({ id: makeId("ref"), kind: referenceKind, name, prompt, image_data: result.image_data, source: "generated_image" });
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível gerar a referência."); }
+    finally { setReferenceBusy(false); }
   }
 
   function uploadReference(event: ChangeEvent<HTMLInputElement>) {
@@ -774,8 +790,9 @@ export default function App() {
               <div className="section-label">REFERÊNCIAS VISUAIS</div>
               <p className="helper-text">Fixe personagens e cenários para manter identidade entre as cenas Wan.</p>
               <div className="property-grid reference-controls"><div><label className="field-label" htmlFor="reference-kind">TIPO</label><select id="reference-kind" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select></div><div><label className="field-label" htmlFor="reference-name">NOME</label><input id="reference-name" value={referenceName} maxLength={80} placeholder="Lara / apartamento" onChange={(event) => setReferenceName(event.target.value)} /></div></div>
-              <div className="property-grid"><button className="quiet-button reference-action" onClick={generateReferenceBrief}>✦ GERAR BRIEF</button><label className="quiet-button reference-action">＋ ENVIAR IMAGEM<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadReference} /></label></div>
-              {visualReferences.length > 0 && <div className="reference-grid">{visualReferences.map((reference) => <article className="reference-card" key={reference.id}>{reference.image_data ? <img src={reference.image_data} alt={reference.name} /> : <div className="reference-placeholder">{reference.kind === "character" ? "✦" : "▦"}</div>}<b>{reference.name}</b><small>{reference.kind === "character" ? "PERSONAGEM" : "CENÁRIO"} · {reference.source === "upload" ? "ENVIADA" : "BRIEF GERADO"}</small><p>{reference.prompt}</p></article>)}</div>}
+              <label className="field-label" htmlFor="reference-provider">PROVEDOR DE IMAGEM</label><select id="reference-provider" value={referenceProvider} onChange={(event) => setReferenceProvider(event.target.value as ReferenceProvider)}><option value="local_comfyui">Local · ComfyUI</option><option value="huggingface">Gratuito · Hugging Face</option></select>
+              <div className="property-grid"><button className="quiet-button reference-action" onClick={generateReferenceBrief}>✦ GERAR BRIEF</button><button className="quiet-button reference-action" onClick={() => void generateReferenceImage()} disabled={!embedded || referenceBusy}>{referenceBusy ? "GERANDO…" : "✦ GERAR IMAGEM"}</button></div><label className="quiet-button reference-action">＋ ENVIAR IMAGEM<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadReference} /></label>
+              {visualReferences.length > 0 && <div className="reference-grid">{visualReferences.map((reference) => <article className="reference-card" key={reference.id}>{reference.image_data ? <img src={reference.image_data} alt={reference.name} /> : <div className="reference-placeholder">{reference.kind === "character" ? "✦" : "▦"}</div>}<b>{reference.name}</b><small>{reference.kind === "character" ? "PERSONAGEM" : "CENÁRIO"} · {reference.source === "upload" ? "ENVIADA" : reference.source === "generated_image" ? "IMAGEM GERADA" : "BRIEF GERADO"}</small><p>{reference.prompt}</p></article>)}</div>}
               <div className="property-divider" />
               <div className="section-label">PLANEJAMENTO COM TRABALHADORES</div>
               <label className="field-label" htmlFor="episode-theme">TEMA DA MINISSÉRIE</label>

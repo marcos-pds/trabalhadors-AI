@@ -1819,6 +1819,12 @@ class MotionToolsIn(BaseModel):
     comfy_root: str | None = Field(default=None,max_length=512)
 
 
+class MotionReferenceIn(BaseModel):
+    provider: Literal['local_comfyui', 'huggingface']
+    prompt: str = Field(min_length=1, max_length=4096)
+    model: str | None = Field(default=None, max_length=160)
+
+
 class MotionWanSceneIn(BaseModel):
     project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
     episode: int = Field(ge=1, le=99)
@@ -1870,6 +1876,20 @@ def motion_tools(request: Request,user=Depends(current_user)):
 def motion_tools_save(data:MotionToolsIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
     return motion_call(lambda:MOTION.settings(user['id'],data.model_dump()))
+
+
+@app.get('/api/motion/reference-providers')
+def motion_reference_providers(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .motion_references import provider_status
+    return provider_status()
+
+
+@app.post('/api/motion/references/generate')
+def motion_reference_generate(data: MotionReferenceIn, request: Request, user=Depends(current_user)):
+    require_csrf(request); local_only(request)
+    from .motion_references import generate_reference
+    return motion_call(lambda: generate_reference(data.provider, data.prompt, data.model))
 
 
 @app.post('/api/motion/plan')
