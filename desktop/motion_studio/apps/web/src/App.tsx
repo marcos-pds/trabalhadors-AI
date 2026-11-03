@@ -285,7 +285,12 @@ export default function App() {
     if (!embedded || !project?.id) return;
     let active = true;
     void centralRequest<MotionRun[]>("/api/motion/runs")
-      .then((runs) => active ? syncCompletedVideos(runs, project.id) : undefined)
+      .then((runs) => {
+        if (!active) return;
+        const completedEpisode = runs.find((run) => wanRunMatchesProject(run.project_id, project.id) && run.state === "completed" && run.jobs.some((job) => job.id === "assemble" && job.artifact));
+        if (completedEpisode) setWanRun(completedEpisode);
+        return syncCompletedVideos(runs, project.id);
+      })
       .catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : "Não foi possível recuperar as cenas Wan.");
       });
