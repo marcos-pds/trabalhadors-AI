@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
 import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
@@ -12,7 +12,8 @@ type Clip = {
   style: Record<string, any>;
 };
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
+type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "upload" };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
@@ -140,6 +141,8 @@ export default function App() {
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planChecks, setPlanChecks] = useState<PlanCheck[]>([]);
   const [planValidated, setPlanValidated] = useState(false);
+  const [referenceKind, setReferenceKind] = useState<VisualReference["kind"]>("character");
+  const [referenceName, setReferenceName] = useState("");
   const [publication, setPublication] = useState({ cover_text: "", caption: "", hashtags: "" });
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -217,7 +220,34 @@ export default function App() {
   const fps = project?.timeline.fps ?? 24;
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
+  const visualReferences = project?.timeline.storyboard?.references ?? [];
   const plannedScenesComplete = !episodePlan.length || episodePlan.every((scene) => videoClips.some((clip) => clip.style.scene_number === scene.scene));
+
+  function saveReference(reference: VisualReference) {
+    if (!project) return;
+    const storyboard = project.timeline.storyboard ?? { theme: themeDraft, scenes: episodePlan };
+    void persist({ ...project, timeline: { ...project.timeline, storyboard: { ...storyboard, references: [...(storyboard.references ?? []), reference] } } });
+    setReferenceName("");
+    setImportNotice(`Referência ${reference.name} adicionada ao projeto.`);
+  }
+
+  function generateReferenceBrief() {
+    const name = referenceName.trim() || (referenceKind === "character" ? "Personagem principal" : "Cenário principal");
+    const prompt = referenceKind === "character"
+      ? `Character sheet for ${name}, consistent identity for a vertical cinematic mini-series, front profile and three-quarter view, wardrobe, hair, age, silhouette, expressive neutral face, clean studio lighting, no text.`
+      : `Environment reference for ${name}, recurring location in a vertical cinematic mini-series, architecture, props, lighting, color palette, atmosphere, wide and close composition, no text.`;
+    saveReference({ id: makeId("ref"), kind: referenceKind, name, prompt, source: "generated_brief" });
+  }
+
+  function uploadReference(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !file.type.startsWith("image/")) { setError("Envie uma imagem PNG, JPG ou WebP."); return; }
+    if (file.size > 6 * 1024 * 1024) { setError("A referência deve ter no máximo 6 MB."); return; }
+    const reader = new FileReader();
+    reader.onload = () => saveReference({ id: makeId("ref"), kind: referenceKind, name: referenceName.trim() || file.name.replace(/\.[^.]+$/, ""), prompt: "Referência enviada pelo usuário; preserve identidade, aparência e composição.", image_data: String(reader.result), source: "upload" });
+    reader.readAsDataURL(file);
+  }
   const episodeApproved = project?.timeline.storyboard?.episode_status === "approved";
   const finalArtifact = wanRun?.state === "completed" && episodeApproved ? wanRun.jobs.find((job) => job.id === "assemble" && job.artifact)?.artifact : null;
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
@@ -740,6 +770,12 @@ export default function App() {
                 <div className="selected-label"><span className="tag">TIMELINE</span><b>{selected?.name ?? "Composição"}</b></div><div className="section-label">DIREÇÃO DE MOTION</div><p className="helper-text">Adicione um título para editar cor, animação e estilo de cada grafema.</p><label className="field-label" htmlFor="title-draft">NOVO TÍTULO</label><textarea id="title-draft" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} /><button className="primary-wide" onClick={addTitle}>＋ ADICIONAR À TIMELINE</button>
               </>}
               <div className="property-divider" /><div className="section-label">PROJETO</div><div className="project-meta"><span>FORMATO</span><b>{project.timeline.width} × {project.timeline.height}</b><span>FRAME RATE</span><b>{project.timeline.fps} FPS</b></div>
+              <div className="property-divider" />
+              <div className="section-label">REFERÊNCIAS VISUAIS</div>
+              <p className="helper-text">Fixe personagens e cenários para manter identidade entre as cenas Wan.</p>
+              <div className="property-grid reference-controls"><div><label className="field-label" htmlFor="reference-kind">TIPO</label><select id="reference-kind" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select></div><div><label className="field-label" htmlFor="reference-name">NOME</label><input id="reference-name" value={referenceName} maxLength={80} placeholder="Lara / apartamento" onChange={(event) => setReferenceName(event.target.value)} /></div></div>
+              <div className="property-grid"><button className="quiet-button reference-action" onClick={generateReferenceBrief}>✦ GERAR BRIEF</button><label className="quiet-button reference-action">＋ ENVIAR IMAGEM<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadReference} /></label></div>
+              {visualReferences.length > 0 && <div className="reference-grid">{visualReferences.map((reference) => <article className="reference-card" key={reference.id}>{reference.image_data ? <img src={reference.image_data} alt={reference.name} /> : <div className="reference-placeholder">{reference.kind === "character" ? "✦" : "▦"}</div>}<b>{reference.name}</b><small>{reference.kind === "character" ? "PERSONAGEM" : "CENÁRIO"} · {reference.source === "upload" ? "ENVIADA" : "BRIEF GERADO"}</small><p>{reference.prompt}</p></article>)}</div>}
               <div className="property-divider" />
               <div className="section-label">PLANEJAMENTO COM TRABALHADORES</div>
               <label className="field-label" htmlFor="episode-theme">TEMA DA MINISSÉRIE</label>
