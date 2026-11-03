@@ -14,7 +14,8 @@ type Clip = {
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload" };
 type ReferenceProvider = "local_comfyui" | "huggingface";
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
+type VoiceProfile = string;
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
@@ -43,6 +44,7 @@ const episodeDialogue = [
   { start: 44, speaker: "Lara", text: "Meu Deus... quem tá aí?" },
   { start: 51, speaker: "Voz atrás da porta", text: "Lara... abre. Eu sou você." },
 ];
+const speakers = [...new Set(episodeDialogue.map((cue) => cue.speaker))];
 
 function request<T>(url: string, init?: RequestInit): Promise<T> {
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
@@ -139,6 +141,9 @@ export default function App() {
     "Vertical 9:16 cinematic horror finale, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, recoils as the locked apartment door handle turns by itself, a silhouette identical to Lara appears through the narrow gap, abrupt cut to total black at the end, ominous impact feeling, no text, no subtitles.",
   ].join("\n"));
   const [episodeRun, setEpisodeRun] = useState(false);
+  const [voicePreview, setVoicePreview] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceCatalog, setVoiceCatalog] = useState<{ ready: boolean; voices: { id: string; name: string }[] }>({ ready: false, voices: [] });
   const [themeDraft, setThemeDraft] = useState("");
   const [episodePlan, setEpisodePlan] = useState<PlannedScene[]>([]);
   const [planningBusy, setPlanningBusy] = useState(false);
@@ -176,6 +181,8 @@ export default function App() {
 
   useEffect(() => {
     if (!embedded) return;
+    void centralRequest<{ ready: boolean; voices: { id: string; name: string }[] }>("/api/motion/voices")
+      .then(setVoiceCatalog).catch(() => setVoiceCatalog({ ready: false, voices: [] }));
     let active = true;
     void centralRequest<MotionTools>("/api/motion/tools")
       .then((config) => {
@@ -561,6 +568,35 @@ export default function App() {
     setPlanValidated(!checks.some((check) => check.level === "error"));
   }
 
+  function setCharacterVoice(speaker: string, profile: VoiceProfile) {
+    if (!project) return;
+    const storyboard = project.timeline.storyboard ?? { theme: themeDraft, scenes: episodePlan };
+    void persist({ ...project, timeline: { ...project.timeline, storyboard: {
+      ...storyboard, voice_profiles: { ...storyboard.voice_profiles, [speaker]: profile }, episode_status: "draft",
+    } } });
+    setVoicePreview(null);
+  }
+
+  async function previewCharacterVoice(speaker: string) {
+    if (!project) return;
+    setVoiceBusy(true);
+    setVoicePreview(null);
+    try {
+      const profile = project.timeline.storyboard?.voice_profiles?.[speaker];
+      if (!profile) throw new Error(`Escolha uma voz do VoiceStudio para ${speaker}.`);
+      const text = episodeDialogue.find((cue) => cue.speaker === speaker)?.text ?? "Teste de voz.";
+      const result = await centralRequest<{ audio_data: string }>("/api/motion/voices/preview", {
+        method: "POST", body: JSON.stringify({ profile, text, engine: "voicestudio" }),
+      });
+      setVoicePreview(`data:audio/wav;base64,${result.audio_data}`);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível ouvir a voz.");
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
   async function renderWanEpisode() {
     if (!project || wanBusy) return;
     const prompts = episodePromptDraft.split(/\r?\n/).map((prompt) => prompt.trim()).filter(Boolean);
@@ -574,7 +610,7 @@ export default function App() {
     try {
       const run = await centralRequest<MotionRun>("/api/motion/wan/episodes", {
         method: "POST",
-        body: JSON.stringify({ project_id: project.id, episode: episodeNumber, scene_prompts: prompts, dialogue: episodeDialogue }),
+        body: JSON.stringify({ project_id: project.id, episode: episodeNumber, scene_prompts: prompts, dialogue: episodeDialogue, voice_profiles: project.timeline.storyboard?.voice_profiles ?? {}, voice_engine: "voicestudio" }),
       });
       setWanRun(run);
       setError("");
@@ -859,10 +895,21 @@ export default function App() {
               {videoModel === "ltxv" && <><label className="field-label" htmlFor="character-reference">IMAGEM MESTRA DA PERSONAGEM</label><select id="character-reference" value={characterReference?.id ?? ""} onChange={(event) => setCharacterReferenceId(event.target.value)}><option value="">Selecione uma imagem</option>{characterReferences.map((reference) => <option key={reference.id} value={reference.id}>{reference.name}</option>)}</select><p className="helper-text">Cada cena parte desta imagem. Para continuar um movimento, envie o último quadro da cena anterior como nova referência.</p></>}
               <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
               <div className="property-divider" />
+              <div className="section-label">VOZES DOS PERSONAGENS</div>
+              <p className="helper-text">Motor: VoiceStudio local. Salve uma voz diferente para cada personagem; o ID permanece no projeto e nas legendas.</p>
+              {!voiceCatalog.ready && <p className="helper-text text-amber-200">Inicie o VoiceStudio e instale um modelo de voz para carregar os perfis.</p>}
+              {voiceCatalog.ready && voiceCatalog.voices.length === 0 && <p className="helper-text text-amber-200">Crie e salve perfis de voz no VoiceStudio. Os nomes aparecerão aqui.</p>}
+              <button className="quiet-button voice-refresh" onClick={() => void centralRequest<typeof voiceCatalog>("/api/motion/voices").then(setVoiceCatalog).catch(() => setVoiceCatalog({ ready: false, voices: [] }))}>ATUALIZAR VOZES</button>
+              {speakers.map((speaker) => <div key={speaker} className="voice-row">
+                <div><label className="field-label" htmlFor={`voice-${speaker}`}>{speaker}</label><select id={`voice-${speaker}`} value={project.timeline.storyboard?.voice_profiles?.[speaker] ?? ""} onChange={(event) => setCharacterVoice(speaker, event.target.value)}><option value="">Selecione uma voz</option>{voiceCatalog.voices.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></div>
+                <button className="quiet-button" disabled={!voiceCatalog.ready || voiceBusy || !project.timeline.storyboard?.voice_profiles?.[speaker]} onClick={() => void previewCharacterVoice(speaker)}>OUVIR</button>
+              </div>)}
+              {voicePreview && <audio controls autoPlay src={voicePreview} aria-label="Prévia da voz do personagem" />}
+              <div className="property-divider" />
               <label className="field-label" htmlFor="wan-episode-prompts">ROTEIRO VISUAL · 8 CENAS, UMA DIREÇÃO POR LINHA</label>
               <textarea id="wan-episode-prompts" value={episodePromptDraft} maxLength={8192} rows={10} onChange={(event) => setEpisodePromptDraft(event.target.value)} />
               <p className="helper-text">7 cenas de 121 quadros + 1 de 113 = 60 s exatos. Narração pt-BR, efeitos sonoros e legendas entram automaticamente no MP4 final.</p>
-              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || (episodePlan.length > 0 && (!planValidated || planChecks.some((check) => check.level === "error")))}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
+              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || !voiceCatalog.ready || speakers.some((speaker) => !project.timeline.storyboard?.voice_profiles?.[speaker]) || wanBusy || !project || (episodePlan.length > 0 && (!planValidated || planChecks.some((check) => check.level === "error")))}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
               {wanRun && <div className="helper-text" role="status">
                 <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila de vídeo"}: ${wanRun.state}.`}</b>
                 {wanRun.error && <span> {wanRun.error}</span>}

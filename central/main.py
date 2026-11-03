@@ -1852,7 +1852,44 @@ class MotionWanEpisodeIn(BaseModel):
     episode: int = Field(ge=1, le=99)
     scene_prompts: list[str] = Field(min_length=8, max_length=8)
     dialogue: list[MotionWanDialogueIn] | None = Field(default=None, max_length=12)
+    voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
+    voice_engine: Literal['sapi', 'voicestudio'] = 'sapi'
     seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
+
+
+class MotionVoicePreviewIn(BaseModel):
+    text: str = Field(min_length=1, max_length=180)
+    profile: str = Field(min_length=1, max_length=128)
+    engine: Literal['sapi', 'voicestudio'] = 'sapi'
+
+
+@app.get('/api/motion/voices')
+def motion_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_voicestudio import VoiceStudioError, available_voices, engine_ready
+    try:
+        return {'engine':'voicestudio','ready':engine_ready(),'voices':available_voices()}
+    except VoiceStudioError:
+        return {'engine':'voicestudio','ready':False,'voices':[]}
+
+
+@app.post('/api/motion/voices/preview')
+def motion_voice_preview(data:MotionVoicePreviewIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import base64
+    import tempfile
+    from .motion_speech import SpeechError, synthesize_episode
+    from .motion_contracts import ContractError, _text
+    try:
+        spoken=_text(data.text.strip(),180)
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'A fala precisa conter texto válido.') from None
+    with tempfile.TemporaryDirectory(prefix='motion-voice-preview-') as directory:
+        try:
+            audio,_=synthesize_episode(directory,'preview',[{'start':0,'speaker':'Prévia','text':spoken}],0,{'Prévia':data.profile},12,data.engine)
+        except SpeechError as exc:
+            raise HTTPException(503,str(exc)) from None
+        return {'audio_data':base64.b64encode(audio.read_bytes()).decode('ascii')}
 
 
 def motion_call(operation):
@@ -2070,7 +2107,7 @@ def motion_wan_episode(data:MotionWanEpisodeIn,request:Request,user=Depends(curr
     episode_folder=target(grant,f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}',directory=True)
     try:
         audio_path,captions_path=synthesize_episode(
-            episode_folder,run_id,dialogue,data.seed)
+            episode_folder,run_id,dialogue,data.seed,data.voice_profiles,60,data.voice_engine)
     except SpeechError as exc:
         raise HTTPException(503,str(exc)) from None
     manifest,workflows=build_episode_manifest(

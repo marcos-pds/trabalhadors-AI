@@ -101,6 +101,7 @@ class Storyboard(BaseModel):
     references: list[VisualReference] = Field(default_factory=list, max_length=32)
     episode_status: Literal["draft", "approved"] = "draft"
     publication: Publication | None = None
+    voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
 
 
 class Timeline(BaseModel):
