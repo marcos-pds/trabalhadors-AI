@@ -12,7 +12,7 @@ type Clip = {
   style: Record<string, any>;
 };
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[] } };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; episode_status?: "draft" | "approved" } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
@@ -558,6 +558,13 @@ export default function App() {
     void persist({ ...project, timeline: restoreClipVersion(project.timeline, selected.id, version) });
   }
 
+  function approveEpisode() {
+    if (!project || !videoClips.length || videoClips.some((clip) => clip.style.review_status !== "approved")) return;
+    void persist({ ...project, timeline: { ...project.timeline, storyboard: {
+      ...(project.timeline.storyboard ?? { theme: "", scenes: [] }), episode_status: "approved",
+    } } });
+  }
+
   return (
     <main className="studio" data-theme={theme}>
       <header className="topbar">
@@ -682,6 +689,8 @@ export default function App() {
                 {planChecks.length > 0 && <div className="helper-text" role="status">{planChecks.map((check, index) => <p key={`${check.scene ?? "all"}-${index}`} className={check.level === "error" ? "text-rose-300" : check.level === "warning" ? "text-amber-200" : "text-emerald-200"}>{check.scene ? `Cena ${String(check.scene).padStart(2, "0")}: ` : ""}{check.message}</p>)}</div>}
               </>}
               <div className="property-divider" /><div className="section-label">PRODUÇÃO WAN · TERROR</div>
+              <div className="helper-text" role="status">Cenas aprovadas: {videoClips.filter((clip) => clip.style.review_status === "approved").length}/{videoClips.length || 0}</div>
+              <button className="primary-wide" onClick={approveEpisode} disabled={!videoClips.length || videoClips.some((clip) => clip.style.review_status !== "approved") || project.timeline.storyboard?.episode_status === "approved"}>{project.timeline.storyboard?.episode_status === "approved" ? "✓ EPISÓDIO APROVADO" : "APROVAR EPISÓDIO"}</button>
               <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
               <p className="helper-text" role="status">{wanConfigStatus}</p>
               <div className="property-grid">
