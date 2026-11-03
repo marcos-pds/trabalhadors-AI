@@ -465,6 +465,12 @@ export default function App() {
     });
   }
 
+  function usePlannedScene(scene: PlannedScene) {
+    setSceneNumber(scene.scene);
+    setScenePrompt(scene.prompt);
+    setImportNotice(`Cena ${String(scene.scene).padStart(2, "0")} carregada para produção.`);
+  }
+
   function validateEpisodePlan() {
     const checks: PlanCheck[] = [];
     if (episodePlan.length !== 8) checks.push({ level: "error", message: "O episódio precisa conter exatamente 8 cenas." });
@@ -687,6 +693,7 @@ export default function App() {
                 <input id={`scene-hook-${scene.scene}`} value={scene.hook ?? ""} maxLength={250} onChange={(event) => updatePlannedScene(index, { hook: event.target.value })} />
                 <label className="field-label" htmlFor={`scene-cliffhanger-${scene.scene}`}>CLIFFHANGER</label>
                 <input id={`scene-cliffhanger-${scene.scene}`} value={scene.cliffhanger ?? ""} maxLength={250} onChange={(event) => updatePlannedScene(index, { cliffhanger: event.target.value })} />
+                <button className="quiet-button" onClick={() => usePlannedScene(scene)}>USAR NA GERAÇÃO</button>
               </article>)}</div>}
               {episodePlan.length > 0 && <>
                 <button className="quiet-button" onClick={validateEpisodePlan}>✓ VALIDAR CONTINUIDADE</button>
