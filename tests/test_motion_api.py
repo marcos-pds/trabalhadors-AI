@@ -37,7 +37,18 @@ def test_motion_api_requires_auth_scope_csrf_and_keeps_artifacts_private(tmp_pat
         assert other.get(url).status_code==404
         download=owner.get(url)
         assert download.status_code==200 and download.headers['content-disposition'].startswith('attachment;')
+        inline_url=url+'/preview'
+        assert anonymous.get(inline_url).status_code==401
+        assert other.get(inline_url).status_code==404
+        inline=owner.get(inline_url)
+        assert inline.status_code==200
+        assert inline.headers['content-disposition'].startswith('inline;')
+        assert inline.headers['content-type'].startswith('video/mp4')
+        assert inline.headers['cache-control']=='private, no-store'
+        assert inline.content==download.content
         (root/'render.mp4').write_bytes(b'changed')
         assert owner.get(url).status_code==409
+        assert owner.get(inline_url).status_code==409
         set_policy(DB,user,'blocked','')
         assert owner.get(url).status_code==403
+        assert owner.get(inline_url).status_code==403
