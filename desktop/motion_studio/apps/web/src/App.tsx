@@ -610,6 +610,23 @@ export default function App() {
     } } });
   }
 
+  function downloadPublicationPackage() {
+    if (!project || !publication.caption) return;
+    const payload = {
+      project_id: project.id,
+      episode: episodeNumber,
+      theme: themeDraft,
+      publication,
+      scenes: episodePlan.map(({ scene, title, hook, cliffhanger }) => ({ scene, title, hook, cliffhanger })),
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `motion-episode-${String(episodeNumber).padStart(2, "0")}-publication.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="studio" data-theme={theme}>
       <header className="topbar">
@@ -745,7 +762,7 @@ export default function App() {
               {!plannedScenesComplete && <p className="helper-text text-amber-200">Gere todas as cenas planejadas antes de aprovar o episódio.</p>}
               <button className="primary-wide" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved") || project.timeline.storyboard?.episode_status === "approved"}>{project.timeline.storyboard?.episode_status === "approved" ? "✓ EPISÓDIO APROVADO" : "APROVAR EPISÓDIO"}</button>
               <button className="quiet-button" onClick={preparePublication}>PREPARAR PUBLICAÇÃO</button>
-              {publication.caption && <div className="publication-fields"><label className="field-label" htmlFor="publication-cover">TEXTO DA CAPA</label><input id="publication-cover" value={publication.cover_text} maxLength={120} onChange={(event) => updatePublication({ cover_text: event.target.value })} /><label className="field-label" htmlFor="publication-caption">LEGENDA</label><textarea id="publication-caption" value={publication.caption} maxLength={2200} rows={4} onChange={(event) => updatePublication({ caption: event.target.value })} /><label className="field-label" htmlFor="publication-hashtags">HASHTAGS</label><input id="publication-hashtags" value={publication.hashtags} maxLength={500} onChange={(event) => updatePublication({ hashtags: event.target.value })} /></div>}
+              {publication.caption && <div className="publication-fields"><label className="field-label" htmlFor="publication-cover">TEXTO DA CAPA</label><input id="publication-cover" value={publication.cover_text} maxLength={120} onChange={(event) => updatePublication({ cover_text: event.target.value })} /><label className="field-label" htmlFor="publication-caption">LEGENDA</label><textarea id="publication-caption" value={publication.caption} maxLength={2200} rows={4} onChange={(event) => updatePublication({ caption: event.target.value })} /><label className="field-label" htmlFor="publication-hashtags">HASHTAGS</label><input id="publication-hashtags" value={publication.hashtags} maxLength={500} onChange={(event) => updatePublication({ hashtags: event.target.value })} /><button className="quiet-button" onClick={downloadPublicationPackage}>BAIXAR PACOTE DE PUBLICAÇÃO</button></div>}
               <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
               <p className="helper-text" role="status">{wanConfigStatus}</p>
               <div className="property-grid">
