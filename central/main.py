@@ -2028,6 +2028,18 @@ def motion_artifact(rid:str,aid:str,request:Request,user=Depends(current_user)):
     return FileResponse(path,filename=path.name)
 
 
+@app.get('/api/motion/runs/{rid}/artifacts/{aid}/preview')
+def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_user)):
+    """Stream an authorized, immutable MP4 inline without changing its download route."""
+    local_only(request)
+    path=motion_call(lambda:MOTION.artifact_path(user['id'],rid,aid))
+    if path.suffix.lower() != '.mp4':
+        raise HTTPException(415,'Prévia disponível somente para vídeos MP4.')
+    return FileResponse(path,filename=path.name,media_type='video/mp4',
+                        content_disposition_type='inline',
+                        headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
 @app.post('/api/runtimes/codex/probe')
 def probe_codex_runtime(request: Request, user=Depends(current_user)):
     require_csrf(request)
