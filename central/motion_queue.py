@@ -167,12 +167,17 @@ class MotionQueue:
         return self.get(user,rid)
 
     def get(self,user,rid):
-        run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
+        run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested,manifest FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
         if not run:raise HTTPException(404,'Renderização não encontrada.')
+        manifest=json.loads(run.pop('manifest'))
+        planned={item['id']:item for item in manifest.get('jobs',[])}
         jobs=self.db.all('SELECT id,adapter,state,artifact,error,started_at,finished_at,remote_id FROM motion_jobs WHERE run_id=? ORDER BY rowid',(rid,))
         for job in jobs:
             job['artifact']=json.loads(job['artifact']) if job['artifact'] else None
-        return dict(run,jobs=jobs)
+            params=planned.get(job['id'],{}).get('params',{})
+            job['frames']=params.get('frames')
+            job['fps']=params.get('fps')
+        return dict(run,project_id=manifest.get('project_id'),jobs=jobs)
 
     def list(self,user):
         return [self.get(user,r['id']) for r in self.db.all('SELECT id FROM motion_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 30',(user,))]
