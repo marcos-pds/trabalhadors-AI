@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { addTextClip, addWanVideoClip, makeId, updateGraphemeStyle, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, makeId, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -228,7 +228,7 @@ export default function App() {
   // A saved scene remains available after a refresh; imports are deduplicated by run and artifact ID.
   const syncCompletedVideos = useCallback(async (runs: MotionRun[], targetProjectId: string) => {
     const videos = [...runs].reverse()
-      .filter((run) => run.project_id === targetProjectId)
+      .filter((run) => wanRunMatchesProject(run.project_id, targetProjectId))
       .flatMap((run) => run.jobs.filter((job) =>
         job.adapter === "comfyui_wan" && job.state === "completed" && job.artifact &&
         Number.isInteger(job.frames) && Number.isInteger(job.fps),
