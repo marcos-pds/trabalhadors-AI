@@ -90,3 +90,9 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       { ...item, clips: [...item.clips, clip] } : item),
   };
 }
+
+/** Single-scene runs use the legacy "motion-" prefix; episode runs use the raw project ID. */
+export function wanRunMatchesProject(runProjectId, projectId) {
+  return typeof runProjectId === "string" && typeof projectId === "string" &&
+    projectId.length > 0 && (runProjectId === projectId || runProjectId === "motion-" + projectId);
+}
