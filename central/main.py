@@ -1929,7 +1929,7 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
         ],
         'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow'],'outputs':['video'],
                  'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
-                           'replace_clip_id':data.replace_clip_id}}],
+                           'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
     }
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
 

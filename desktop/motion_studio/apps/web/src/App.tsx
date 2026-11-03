@@ -15,7 +15,7 @@ type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[] } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 type PlannedScene = { scene: number; title: string; prompt: string; hook?: string; cliffhanger?: string };
 type PlanCheck = { scene?: number; level: "ok" | "warning" | "error"; message: string };
@@ -246,14 +246,18 @@ export default function App() {
         Number.isInteger(job.frames) && Number.isInteger(job.fps),
       ).map((job) => ({
         runId: run.id, artifactId: job.artifact!.id,
-        name: "Cena Wan " + job.id.replace("scene_", ""),
+        name: "Cena " + String(job.scene_number ?? job.id.replace("scene_", "")).padStart(2, "0"),
         frames: job.frames!, fps: job.fps!,
+        sceneNumber: job.scene_number ?? (Number(job.id.replace("scene_", "")) || undefined),
         replaceClipId: job.replace_clip_id ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
     let timeline = fresh.timeline;
-    for (const video of videos) timeline = addWanVideoClip(timeline, video);
+    for (const video of videos) {
+      const planned = timeline.storyboard?.scenes.find((scene) => scene.scene === video.sceneNumber);
+      timeline = addWanVideoClip(timeline, { ...video, name: planned?.title || video.name, plannedPrompt: planned?.prompt, plannedTitle: planned?.title });
+    }
     if (timeline === fresh.timeline) return;
     const updated = await request<Project>("/api/projects/" + targetProjectId, {
       method: "PUT",

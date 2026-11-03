@@ -24,7 +24,7 @@ export function updateGraphemeStyle<T extends TimelineShape>(
 export function wanVideoPreviewUrl(runId: string, artifactId: string): string | null;
 export function addWanVideoClip<T extends TimelineShape>(
   timeline: T,
-  video: { runId: string; artifactId: string; name: string; frames: number; fps: number; replaceClipId?: string },
+  video: { runId: string; artifactId: string; name: string; frames: number; fps: number; replaceClipId?: string; sceneNumber?: number; plannedPrompt?: string; plannedTitle?: string },
 ): T;
 
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;
