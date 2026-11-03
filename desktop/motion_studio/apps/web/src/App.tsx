@@ -410,7 +410,7 @@ export default function App() {
 
   async function regenerateSelectedScene() {
     if (!selected || selected.kind !== "video" || wanBusy) return;
-    const direction = scenePrompt.trim();
+    const direction = String(selected.style.planned_prompt ?? scenePrompt).trim();
     const revision = reviewComment.trim();
     const revisedPrompt = revision ? `${direction}\nRevision requested: ${revision}`.slice(0, 1024) : direction;
     setScenePrompt(revisedPrompt);
@@ -661,6 +661,8 @@ export default function App() {
                 <div className="property-grid"><div><span className="field-label">VERSÃO</span><b>{Number(selected.style.version ?? 1)}</b></div><div><span className="field-label">STATUS</span><b>{selected.style.review_status === "approved" ? "Aprovada" : selected.style.review_status === "needs_revision" ? "Revisão" : "Pendente"}</b></div></div>
                 <label className="field-label" htmlFor="scene-review-comment">OBSERVAÇÃO DA REVISÃO</label>
                 <textarea id="scene-review-comment" value={reviewComment} maxLength={2000} placeholder="O que deve ser mantido ou alterado nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
+                <label className="field-label" htmlFor="scene-planned-prompt">PROMPT PLANEJADO</label>
+                <textarea id="scene-planned-prompt" value={String(selected.style.planned_prompt ?? "Prompt não registrado nesta versão")} readOnly rows={4} />
                 <div className="property-grid"><button className="primary-wide" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR PARA REVISÃO</button></div>
                 {Array.isArray(selected.style.previous_versions) && selected.style.previous_versions.length > 0 && <div className="version-history"><span className="field-label">VERSÕES ANTERIORES</span>{[...selected.style.previous_versions].reverse().map((version: any) => <div className="version-row" key={version.version}><span>Versão {version.version}</span><button className="quiet-button" onClick={() => restoreSelectedVersion(Number(version.version))}>RESTAURAR</button></div>)}</div>}
                 <p className="helper-text">A revisão fica salva apenas nesta cena. As outras cenas e seus artefatos permanecem intactos.</p>
