@@ -450,13 +450,45 @@ export default function App() {
         </aside>
         <section className="center-column">
           <div className="preview-panel panel">
-            <div className="panel-heading"><span>02 / MONITOR</span><span className="resolution">1280 × 720 · 24 FPS</span></div>
-            <Preview timeline={project?.timeline ?? initialTimeline()} />
-            <div className="transport"><button aria-label="Voltar ao início">|◀</button><button className="transport-play" aria-label="Reproduzir prévia" disabled>▶</button><button aria-label="Avançar">▶|</button><span>00:00:00:00 <b>/</b> 00:00:15:00</span><button className="quiet-button" aria-label="Ajustar monitor">⛶</button></div>
+            <div className="panel-heading"><span>02 / MONITOR</span><span className="resolution">{project?.timeline.width ?? 1280} × {project?.timeline.height ?? 720} · {fps} FPS</span></div>
+            <Preview
+              timeline={project?.timeline ?? initialTimeline()}
+              frame={playheadFrame}
+              videoClip={activeVideoClip} videoRef={videoRef}
+              onVideoTime={(seconds) => {
+                if (activeVideoClip) setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
+              }}
+              onVideoEnded={() => { setPlaying(false); if (activeVideoClip) setPlayheadFrame(activeVideoClip.start_frame + activeVideoClip.duration_frames - 1); }}
+              onVideoReady={() => {
+                if (videoRef.current && activeVideoClip) {
+                  videoRef.current.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
+                }
+              }}
+            />
+            <div className="transport">
+              <button aria-label="Voltar ao início" onClick={() => seekTo(0)}>|◀</button>
+              <button className="transport-play" aria-label={playing ? "Pausar prévia" : "Reproduzir prévia"}
+                disabled={!activeVideoClip} onClick={() => void togglePlayback()}>{playing ? "Ⅱ" : "▶"}</button>
+              <button aria-label="Próxima cena" disabled={!videoClips.length}
+                onClick={() => seekTo(videoClips.find((clip) => clip.start_frame > playheadFrame)?.start_frame ?? 0)}>▶|</button>
+              <span>{timecode(playheadFrame, fps)} <b>/</b> {timecode(projectLength, fps)}</span>
+            </div>
+            <input className="timeline-scrubber" aria-label="Posição da prévia na timeline" type="range"
+              min={0} max={projectLength} step={1} value={Math.min(playheadFrame, projectLength)}
+              onChange={(event) => seekTo(Number(event.target.value))} disabled={!project} />
+            {activeVideoClip && wanVideoPreviewUrl(activeVideoClip.style.motion_run_id, activeVideoClip.style.motion_artifact_id) && (
+              <div className="render-meta">
+                <span>{activeVideoClip.name} · Vídeo Wan</span>
+                <a href={wanVideoPreviewUrl(activeVideoClip.style.motion_run_id, activeVideoClip.style.motion_artifact_id)!.replace(/\/preview$/, "")}>
+                  Baixar MP4
+                </a>
+              </div>
+            )}
+            {importNotice && <p className="preview-import-notice" role="status">{importNotice}</p>}
           </div>
           <div className="timeline-panel panel">
             <div className="timeline-toolbar"><div className="panel-heading"><span>03 / TIMELINE</span><span className="timeline-hint">TEMPO EM FRAMES · {project?.timeline.fps ?? 24} FPS</span></div><div className="timeline-tools"><button onClick={addTitle} disabled={!project}>＋ TÍTULO</button><button disabled>MARCADOR</button><button disabled title="Atalho: Ctrl+Z">↶</button><button disabled title="Atalho: Ctrl+Shift+Z">↷</button></div></div>
-            <div className="ruler"><span>00:00</span><span>00:03</span><span>00:06</span><span>00:09</span><span>00:12</span><span>00:15</span></div>
+            <div className="ruler">{Array.from({ length: 6 }, (_, index) => <span key={index}>{clock(Math.round(index * projectLength / (5 * fps)))}</span>)}</div>
             <div className="tracks">{project?.timeline.tracks.map((track) => (
               <div className="track-row" key={track.id}><div className="track-label"><b>{track.name}</b><button aria-label={`Bloquear trilha ${track.name}`} disabled>⌑</button></div><div className="track-lane">{track.clips.map((clip) => {
                 const left = clip.start_frame / projectLength * 100;
@@ -464,7 +496,7 @@ export default function App() {
                 const isSelected = selectedClip === clip.id;
                 const className = `clip clip-${clip.kind} ${isSelected ? "selected" : ""}`;
                 const style = { left: `${left}%`, width: `${width}%` };
-                return <button key={clip.id} className={className} style={style} onClick={() => setSelectedClip(clip.id)} title={clip.name}><span>{clip.kind === "text" ? "T " : "◧ "}{clip.name}</span></button>;
+                return <button key={clip.id} className={className} style={style} onClick={() => { seekTo(clip.start_frame); setSelectedClip(clip.id); }} title={clip.name}><span>{clip.kind === "text" ? "T " : "◧ "}{clip.name}</span></button>;
               })}</div></div>
             )) ?? <div className="empty-project"><b>Crie um projeto para começar.</b><button onClick={() => void createProject()}>NOVO PROJETO</button></div>}</div>
           </div>
