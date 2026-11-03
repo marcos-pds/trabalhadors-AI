@@ -65,6 +65,24 @@ test("reviews one scene without changing neighboring clips", () => {
   assert.throws(() => updateClipReview(timeline, "one", { review_status: "invalid" }), /Invalid scene review status/);
 });
 
+test("regenerating a scene replaces it in place and keeps its previous version reference", () => {
+  const timeline = { fps: 24, tracks: [{ id: "video", kind: "video", clips: [
+    { id: "old", start_frame: 12, duration_frames: 24, style: {
+      motion_run_id: "run-old", motion_artifact_id: "video-old", version: 1,
+    } },
+  ] }] };
+  const next = addWanVideoClip(timeline, {
+    runId: "run-new", artifactId: "video-new", name: "Cena revisada", frames: 81, fps: 16, replaceClipId: "old",
+  });
+  const clip = next.tracks[0].clips[0];
+  assert.equal(next.tracks[0].clips.length, 1);
+  assert.equal(clip.start_frame, 12);
+  assert.equal(clip.style.version, 2);
+  assert.deepEqual(clip.style.previous_versions[0], {
+    clip_id: "old", run_id: "run-old", artifact_id: "video-old", version: 1,
+  });
+});
+
 test("video URLs remain same-origin and reject non-identifier paths", () => {
   assert.equal(wanVideoPreviewUrl("run-1", "video_01"),
     "/api/motion/runs/run-1/artifacts/video_01/preview");

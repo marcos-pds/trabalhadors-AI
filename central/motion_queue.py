@@ -177,6 +177,7 @@ class MotionQueue:
             params=planned.get(job['id'],{}).get('params',{})
             job['frames']=params.get('frames')
             job['fps']=params.get('fps')
+            job['replace_clip_id']=params.get('replace_clip_id')
         return dict(run,project_id=manifest.get('project_id'),jobs=jobs)
 
     def list(self,user):

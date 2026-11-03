@@ -1827,6 +1827,7 @@ class MotionWanSceneIn(BaseModel):
     seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
     frames: int = Field(default=81, ge=5, le=129)
     fps: int = Field(default=16, ge=12, le=60)
+    replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -1927,7 +1928,8 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
             {'id':'video','kind':'video','path':f'episodes/{data.project_id}/episode_{data.episode:02d}/scene_{data.scene:02d}_{run_id}.mp4','provenance':{'source':'planned','job_id':'generate','inputs':['workflow']}},
         ],
         'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow'],'outputs':['video'],
-                 'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt}}],
+                 'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
+                           'replace_clip_id':data.replace_clip_id}}],
     }
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
 

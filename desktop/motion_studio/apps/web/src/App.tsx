@@ -15,7 +15,7 @@ type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[] };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 
 const initialTimeline = (): Timeline => ({
@@ -234,6 +234,7 @@ export default function App() {
         runId: run.id, artifactId: job.artifact!.id,
         name: "Cena Wan " + job.id.replace("scene_", ""),
         frames: job.frames!, fps: job.fps!,
+        replaceClipId: job.replace_clip_id ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
@@ -359,8 +360,9 @@ export default function App() {
     }
   }
 
-  async function renderWanScene() {
-    if (!project || !scenePrompt.trim() || wanBusy) return;
+  async function renderWanScene(replaceClipId?: string, promptOverride?: string) {
+    const prompt = (promptOverride ?? scenePrompt).trim();
+    if (!project || !prompt || wanBusy) return;
     setWanBusy(true);
     setEpisodeRun(false);
     setWanRun(null);
@@ -371,9 +373,10 @@ export default function App() {
           project_id: project.id,
           episode: episodeNumber,
           scene: sceneNumber,
-          prompt: scenePrompt.trim(),
+          prompt,
           frames: 81,
           fps: 16,
+          replace_clip_id: replaceClipId ?? null,
         }),
       });
       setWanRun(run);
@@ -383,6 +386,15 @@ export default function App() {
       setWanBusy(false);
       setError(reason instanceof Error ? reason.message : "Não foi possível iniciar a cena Wan.");
     }
+  }
+
+  async function regenerateSelectedScene() {
+    if (!selected || selected.kind !== "video" || wanBusy) return;
+    const direction = scenePrompt.trim();
+    const revision = reviewComment.trim();
+    const revisedPrompt = revision ? `${direction}\nRevision requested: ${revision}`.slice(0, 1024) : direction;
+    setScenePrompt(revisedPrompt);
+    await renderWanScene(selected.id, revisedPrompt);
   }
 
   async function renderWanEpisode() {
@@ -553,6 +565,7 @@ export default function App() {
                 <textarea id="scene-review-comment" value={reviewComment} maxLength={2000} placeholder="O que deve ser mantido ou alterado nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
                 <div className="property-grid"><button className="primary-wide" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR PARA REVISÃO</button></div>
                 <p className="helper-text">A revisão fica salva apenas nesta cena. As outras cenas e seus artefatos permanecem intactos.</p>
+                <button className="primary-wide" onClick={() => void regenerateSelectedScene()} disabled={!embedded || !wanConfigSaved || wanBusy}>↻ REGENERAR ESTA CENA</button>
               </> : <>
                 <div className="selected-label"><span className="tag">TIMELINE</span><b>{selected?.name ?? "Composição"}</b></div><div className="section-label">DIREÇÃO DE MOTION</div><p className="helper-text">Adicione um título para editar cor, animação e estilo de cada grafema.</p><label className="field-label" htmlFor="title-draft">NOVO TÍTULO</label><textarea id="title-draft" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} /><button className="primary-wide" onClick={addTitle}>＋ ADICIONAR À TIMELINE</button>
               </>}

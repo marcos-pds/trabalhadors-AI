@@ -60,7 +60,7 @@ export function wanVideoPreviewUrl(runId, artifactId) {
 }
 
 /** Preserve generated scenes on the project video track without duplicate imports. */
-export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps }) {
+export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId }) {
   if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error("Invalid generated video reference");
   if (!Number.isInteger(frames) || frames < 1 || frames > 3600 ||
       !Number.isInteger(fps) || fps < 1 || fps > 120) {
@@ -70,7 +70,14 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
   if (!track) throw new Error("A timeline precisa ter uma trilha de vídeo.");
   if (track.clips.some((clip) => clip.style?.motion_run_id === runId &&
       clip.style?.motion_artifact_id === artifactId)) return timeline;
-  const start = track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
+  const replaced = replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null;
+  const start = replaced?.start_frame ?? track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
+  const priorVersions = replaced ? [...(replaced.style?.previous_versions ?? []), {
+    clip_id: replaced.id,
+    run_id: replaced.style?.motion_run_id ?? null,
+    artifact_id: replaced.style?.motion_artifact_id ?? null,
+    version: Number(replaced.style?.version ?? 1),
+  }] : [];
   const clip = {
     id: makeId("wan"),
     kind: "video",
@@ -82,7 +89,8 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       motion_artifact_id: artifactId,
       source_frames: frames,
       source_fps: fps,
-      version: 1,
+      version: Number(replaced?.style?.version ?? 0) + 1,
+      previous_versions: priorVersions,
       review_status: "pending",
       review_comment: "",
     },
@@ -90,7 +98,9 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
   return {
     ...timeline,
     tracks: timeline.tracks.map((item) => item.id === track.id ?
-      { ...item, clips: [...item.clips, clip] } : item),
+      { ...item, clips: replaced
+        ? item.clips.map((candidate) => candidate.id === replaced.id ? clip : candidate)
+        : [...item.clips, clip] } : item),
   };
 }
 
