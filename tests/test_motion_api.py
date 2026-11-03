@@ -31,6 +31,9 @@ def test_motion_api_requires_auth_scope_csrf_and_keeps_artifacts_private(tmp_pat
         def controlled_fixture(row,command,stop):
             from pathlib import Path
             Path(command.argv[-1]).write_bytes(b'\x00\x00\x00\x18ftypisom\x00\x00\x00\x00fixture')
+        monkeypatch.setattr('central.motion_queue.validate_media_with_ffprobe', lambda *args, **kwargs: {
+            'duration': 5.0, 'fps': '30/1', 'width': 720, 'height': 1280, 'audio': False,
+        })
         monkeypatch.setattr(MOTION,'_command',controlled_fixture)
         assert MOTION.process_one()
         url='/api/motion/runs/'+rid+'/artifacts/output'
