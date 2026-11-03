@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanVideoClip, segmentGraphemes, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, segmentGraphemes, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+
+test("composition duration follows clips, frame rate, and empty projects", () => {
+  assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
+  const timeline = { fps: 30, tracks: [{ clips: [
+    { start_frame: 0, duration_frames: 150 },
+    { start_frame: 150, duration_frames: 45 },
+  ] }] };
+  assert.equal(compositionEndFrame(timeline), 195);
+  assert.equal(formatTimecode(195, 30), "00:00:06:15");
+  assert.equal(formatTimecode(0, 24), "00:00:00:00");
+});
 
 test("segments composed and accented text as Unicode graphemes", () => {
   assert.deepEqual(segmentGraphemes("Ação 👩🏽‍🚀 e\u0301"), ["A", "ç", "ã", "o", " ", "👩🏽‍🚀", " ", "é"]);

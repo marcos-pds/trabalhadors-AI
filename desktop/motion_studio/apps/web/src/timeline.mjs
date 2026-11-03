@@ -96,3 +96,18 @@ export function wanRunMatchesProject(runProjectId, projectId) {
   return typeof runProjectId === "string" && typeof projectId === "string" &&
     projectId.length > 0 && (runProjectId === projectId || runProjectId === "motion-" + projectId);
 }
+
+/** Return the exact composition end, or zero for an empty project. */
+export function compositionEndFrame(timeline) {
+  return (timeline?.tracks ?? []).flatMap((track) => track.clips ?? [])
+    .reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
+}
+
+/** Format frame-accurate timecode as HH:MM:SS:FF. */
+export function formatTimecode(frame, fps) {
+  const rate = Number.isFinite(fps) && fps > 0 ? Math.floor(fps) : 1;
+  const value = Math.max(0, Math.floor(frame));
+  const seconds = Math.floor(value / rate);
+  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60, value % rate]
+    .map((part) => String(part).padStart(2, "0")).join(":");
+}

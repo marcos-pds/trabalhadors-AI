@@ -28,3 +28,5 @@ export function addWanVideoClip<T extends TimelineShape>(
 ): T;
 
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;
+export function compositionEndFrame(timeline: TimelineShape): number;
+export function formatTimecode(frame: number, fps: number): string;

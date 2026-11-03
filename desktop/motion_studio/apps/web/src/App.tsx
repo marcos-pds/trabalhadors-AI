@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { addTextClip, addWanVideoClip, makeId, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -70,13 +70,6 @@ function clipAtFrame(timeline: Timeline, frame: number, kind: Clip["kind"]): Cli
     .find((clip) => frame >= clip.start_frame && frame < clip.start_frame + clip.duration_frames);
 }
 
-function timecode(frame: number, fps: number): string {
-  const value = Math.max(0, Math.floor(frame));
-  const seconds = Math.floor(value / fps);
-  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60, value % fps]
-    .map((part) => String(part).padStart(2, "0")).join(":");
-}
-
 function clock(seconds: number): string {
   return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
 }
@@ -108,7 +101,7 @@ function Preview({
       {textClip && <div className="preview-title" style={{ color: String(textClip.style.color ?? "#f8fafc") }}>
         {words.map((word, index) => <span key={word + "-" + index} style={{ color: textClip.style.word_colors?.[index] ?? textClip.style.color }}>{word} </span>)}
       </div>}
-      <span className="preview-time">{timecode(frame, timeline.fps)}</span>
+      <span className="preview-time">{formatTimecode(frame, timeline.fps)}</span>
     </div>
   );
 }
@@ -213,7 +206,7 @@ export default function App() {
     [project, selectedClip],
   );
   const fps = project?.timeline.fps ?? 24;
-  const projectLength = project ? Math.max(fps * 15, ...project.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.start_frame + clip.duration_frames))) : fps * 15;
+  const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
     (selected?.kind === "video" ? selected : undefined)) : undefined;
@@ -284,6 +277,19 @@ export default function App() {
     }
   }
 
+  async function playActiveClip() {
+    const player = videoRef.current;
+    if (!player || !activeVideoClip) return;
+    player.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
+    try {
+      await player.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+      setError("O navegador não conseguiu reproduzir o MP4. Confira a autorização de pasta e o arquivo.");
+    }
+  }
+
   async function togglePlayback() {
     const player = videoRef.current;
     if (!player || !activeVideoClip) return;
@@ -293,13 +299,22 @@ export default function App() {
       return;
     }
     try {
-      if (player.currentTime >= player.duration - 0.1) player.currentTime = 0;
-      await player.play();
-      setPlaying(true);
-    } catch {
+      await playActiveClip();
+    } catch { setPlaying(false); }
+  }
+
+  async function handleVideoEnded() {
+    if (!project || !activeVideoClip) return;
+    const next = videoClips.find((clip) => clip.start_frame >= activeVideoClip.start_frame + activeVideoClip.duration_frames);
+    if (!next) {
       setPlaying(false);
-      setError("O navegador não conseguiu reproduzir o MP4. Confira a autorização de pasta e o arquivo.");
+      setPlayheadFrame(projectLength);
+      return;
     }
+    setSelectedClip(next.id);
+    setPlayheadFrame(next.start_frame);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await playActiveClip();
   }
 
   async function createProject() {
@@ -458,7 +473,7 @@ export default function App() {
               onVideoTime={(seconds) => {
                 if (activeVideoClip) setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
               }}
-              onVideoEnded={() => { setPlaying(false); if (activeVideoClip) setPlayheadFrame(activeVideoClip.start_frame + activeVideoClip.duration_frames - 1); }}
+              onVideoEnded={() => { void handleVideoEnded(); }}
               onVideoReady={() => {
                 if (videoRef.current && activeVideoClip) {
                   videoRef.current.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
@@ -471,7 +486,7 @@ export default function App() {
                 disabled={!activeVideoClip} onClick={() => void togglePlayback()}>{playing ? "Ⅱ" : "▶"}</button>
               <button aria-label="Próxima cena" disabled={!videoClips.length}
                 onClick={() => seekTo(videoClips.find((clip) => clip.start_frame > playheadFrame)?.start_frame ?? 0)}>▶|</button>
-              <span>{timecode(playheadFrame, fps)} <b>/</b> {timecode(projectLength, fps)}</span>
+              <span>{formatTimecode(playheadFrame, fps)} <b>/</b> {formatTimecode(projectLength, fps)}</span>
             </div>
             <input className="timeline-scrubber" aria-label="Posição da prévia na timeline" type="range"
               min={0} max={projectLength} step={1} value={Math.min(playheadFrame, projectLength)}
@@ -488,11 +503,11 @@ export default function App() {
           </div>
           <div className="timeline-panel panel">
             <div className="timeline-toolbar"><div className="panel-heading"><span>03 / TIMELINE</span><span className="timeline-hint">TEMPO EM FRAMES · {project?.timeline.fps ?? 24} FPS</span></div><div className="timeline-tools"><button onClick={addTitle} disabled={!project}>＋ TÍTULO</button><button disabled>MARCADOR</button><button disabled title="Atalho: Ctrl+Z">↶</button><button disabled title="Atalho: Ctrl+Shift+Z">↷</button></div></div>
-            <div className="ruler">{Array.from({ length: 6 }, (_, index) => <span key={index}>{clock(Math.round(index * projectLength / (5 * fps)))}</span>)}</div>
+            <div className="ruler">{Array.from({ length: 6 }, (_, index) => <span key={index}>{clock(projectLength ? Math.round(index * projectLength / (5 * fps)) : 0)}</span>)}</div>
             <div className="tracks">{project?.timeline.tracks.map((track) => (
               <div className="track-row" key={track.id}><div className="track-label"><b>{track.name}</b><button aria-label={`Bloquear trilha ${track.name}`} disabled>⌑</button></div><div className="track-lane">{track.clips.map((clip) => {
-                const left = clip.start_frame / projectLength * 100;
-                const width = Math.max(3, clip.duration_frames / projectLength * 100);
+                const left = projectLength ? clip.start_frame / projectLength * 100 : 0;
+                const width = projectLength ? Math.max(3, clip.duration_frames / projectLength * 100) : 0;
                 const isSelected = selectedClip === clip.id;
                 const className = `clip clip-${clip.kind} ${isSelected ? "selected" : ""}`;
                 const style = { left: `${left}%`, width: `${width}%` };
