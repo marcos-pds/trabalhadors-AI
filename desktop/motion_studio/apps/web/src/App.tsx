@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { addTextClip, makeId, updateGraphemeStyle } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, makeId, updateGraphemeStyle, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -15,7 +15,7 @@ type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[] };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; state: string; error: string | null; jobs: Array<{ id: string; state: string; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 
 const initialTimeline = (): Timeline => ({
@@ -65,22 +65,50 @@ function centralRequest<T>(url: string, init?: RequestInit): Promise<T> {
   });
 }
 
-function clipAtFrame(timeline: Timeline, frame: number): Clip | undefined {
-  return timeline.tracks.flatMap((track) => track.clips).find((clip) => frame >= clip.start_frame && frame < clip.start_frame + clip.duration_frames);
+function clipAtFrame(timeline: Timeline, frame: number, kind: Clip["kind"]): Clip | undefined {
+  return timeline.tracks.filter((track) => track.kind === kind).flatMap((track) => track.clips)
+    .find((clip) => frame >= clip.start_frame && frame < clip.start_frame + clip.duration_frames);
 }
 
-function Preview({ timeline }: { timeline: Timeline }) {
-  const clip = clipAtFrame(timeline, Math.floor(timeline.fps * 1.1));
-  const words = clip?.text?.split(" ") ?? [];
+function timecode(frame: number, fps: number): string {
+  const value = Math.max(0, Math.floor(frame));
+  const seconds = Math.floor(value / fps);
+  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60, value % fps]
+    .map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function clock(seconds: number): string {
+  return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
+}
+
+function Preview({
+  timeline, frame, videoClip, videoRef, onVideoTime, onVideoEnded, onVideoReady,
+}: {
+  timeline: Timeline;
+  frame: number;
+  videoClip?: Clip;
+  videoRef: RefObject<HTMLVideoElement | null>;
+  onVideoTime: (seconds: number) => void;
+  onVideoEnded: () => void;
+  onVideoReady: () => void;
+}) {
+  const textClip = clipAtFrame(timeline, frame, "text");
+  const words = textClip?.text?.split(" ") ?? [];
+  const src = videoClip && wanVideoPreviewUrl(videoClip.style.motion_run_id, videoClip.style.motion_artifact_id);
   return (
-    <div className="preview-frame">
+    <div className={"preview-frame" + (src ? " preview-has-video" : "")}>
       <div className="preview-grid" />
-      {clip?.kind === "text" ? (
-        <div className="preview-title" style={{ color: String(clip.style.color ?? "#f8fafc") }}>
-          {words.map((word, index) => <span key={`${word}-${index}`} style={{ color: clip.style.word_colors?.[index] ?? clip.style.color }}>{word} </span>)}
-        </div>
-      ) : <div className="preview-empty"><span className="play-glyph">▶</span><strong>PREVIEW DA COMPOSIÇÃO</strong><small>Adicione um título à timeline para visualizar o motion.</small></div>}
-      <span className="preview-time">00:00:01:02</span>
+      {src && videoClip && <video
+        key={videoClip.id} ref={videoRef} className="preview-video" src={src}
+        playsInline preload="metadata" aria-label={"Vídeo " + videoClip.name}
+        onTimeUpdate={(event) => onVideoTime(event.currentTarget.currentTime)}
+        onLoadedMetadata={onVideoReady} onEnded={onVideoEnded}
+      />}
+      {!src && !textClip && <div className="preview-empty"><span className="play-glyph">▶</span><strong>PREVIEW DA COMPOSIÇÃO</strong><small>Gere uma cena Wan ou adicione um título à timeline.</small></div>}
+      {textClip && <div className="preview-title" style={{ color: String(textClip.style.color ?? "#f8fafc") }}>
+        {words.map((word, index) => <span key={word + "-" + index} style={{ color: textClip.style.word_colors?.[index] ?? textClip.style.color }}>{word} </span>)}
+      </div>}
+      <span className="preview-time">{timecode(frame, timeline.fps)}</span>
     </div>
   );
 }
@@ -112,6 +140,10 @@ export default function App() {
     "Vertical 9:16 cinematic horror finale, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, recoils as the locked apartment door handle turns by itself, a silhouette identical to Lara appears through the narrow gap, abrupt cut to total black at the end, ominous impact feeling, no text, no subtitles.",
   ].join("\n"));
   const [episodeRun, setEpisodeRun] = useState(false);
+  const [playheadFrame, setPlayheadFrame] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [importNotice, setImportNotice] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
 
   const load = useCallback(async () => {
@@ -180,7 +212,18 @@ export default function App() {
     () => project?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClip),
     [project, selectedClip],
   );
-  const projectLength = project ? Math.max(12, ...project.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.start_frame + clip.duration_frames))) : 12;
+  const fps = project?.timeline.fps ?? 24;
+  const projectLength = project ? Math.max(fps * 15, ...project.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.start_frame + clip.duration_frames))) : fps * 15;
+  const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
+  const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
+    (selected?.kind === "video" ? selected : undefined)) : undefined;
+
+  useEffect(() => {
+    videoRef.current?.pause();
+    setPlaying(false);
+    setPlayheadFrame(0);
+    setSelectedClip(null);
+  }, [project?.id]);
 
   async function createProject() {
     try {
