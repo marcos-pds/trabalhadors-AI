@@ -34,3 +34,4 @@ export function updateClipReview<T extends TimelineShape>(timeline: T, clipId: s
   review_status?: "pending" | "approved" | "needs_revision";
   review_comment?: string;
 }): T;
+export function restoreClipVersion<T extends TimelineShape>(timeline: T, clipId: string, version: number): T;

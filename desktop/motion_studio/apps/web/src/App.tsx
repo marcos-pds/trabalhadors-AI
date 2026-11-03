@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -469,6 +469,11 @@ export default function App() {
     }) });
   }
 
+  function restoreSelectedVersion(version: number) {
+    if (!project || !selected || selected.kind !== "video") return;
+    void persist({ ...project, timeline: restoreClipVersion(project.timeline, selected.id, version) });
+  }
+
   return (
     <main className="studio" data-theme={theme}>
       <header className="topbar">
@@ -564,6 +569,7 @@ export default function App() {
                 <label className="field-label" htmlFor="scene-review-comment">OBSERVAÇÃO DA REVISÃO</label>
                 <textarea id="scene-review-comment" value={reviewComment} maxLength={2000} placeholder="O que deve ser mantido ou alterado nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
                 <div className="property-grid"><button className="primary-wide" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR PARA REVISÃO</button></div>
+                {Array.isArray(selected.style.previous_versions) && selected.style.previous_versions.length > 0 && <div className="version-history"><span className="field-label">VERSÕES ANTERIORES</span>{[...selected.style.previous_versions].reverse().map((version: any) => <div className="version-row" key={version.version}><span>Versão {version.version}</span><button className="quiet-button" onClick={() => restoreSelectedVersion(Number(version.version))}>RESTAURAR</button></div>)}</div>}
                 <p className="helper-text">A revisão fica salva apenas nesta cena. As outras cenas e seus artefatos permanecem intactos.</p>
                 <button className="primary-wide" onClick={() => void regenerateSelectedScene()} disabled={!embedded || !wanConfigSaved || wanBusy}>↻ REGENERAR ESTA CENA</button>
               </> : <>

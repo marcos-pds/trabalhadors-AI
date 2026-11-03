@@ -77,6 +77,10 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
     run_id: replaced.style?.motion_run_id ?? null,
     artifact_id: replaced.style?.motion_artifact_id ?? null,
     version: Number(replaced.style?.version ?? 1),
+    name: replaced.name,
+    start_frame: replaced.start_frame,
+    duration_frames: replaced.duration_frames,
+    style: { ...replaced.style },
   }] : [];
   const clip = {
     id: makeId("wan"),
@@ -120,6 +124,29 @@ export function updateClipReview(timeline, clipId, patch) {
       clips: track.clips.map((clip) => clip.id === clipId
         ? { ...clip, style: { ...clip.style, ...patch } }
         : clip),
+    })),
+  };
+}
+
+/** Restore a previous scene snapshot while retaining the selected clip identity. */
+export function restoreClipVersion(timeline, clipId, version) {
+  const target = timeline.tracks.flatMap((track) => track.clips)
+    .find((clip) => clip.id === clipId);
+  const snapshot = target?.style?.previous_versions?.find((item) => item.version === version);
+  if (!target || !snapshot || !snapshot.style) throw new Error("Scene version not found");
+  const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: (target.style.previous_versions ?? [])
+    .filter((item) => item.version !== snapshot.version) };
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => clip.id === clipId ? {
+        ...clip,
+        name: snapshot.name ?? clip.name,
+        start_frame: snapshot.start_frame,
+        duration_frames: snapshot.duration_frames,
+        style: restoredStyle,
+      } : clip),
     })),
   };
 }

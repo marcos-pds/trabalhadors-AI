@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -67,7 +67,7 @@ test("reviews one scene without changing neighboring clips", () => {
 
 test("regenerating a scene replaces it in place and keeps its previous version reference", () => {
   const timeline = { fps: 24, tracks: [{ id: "video", kind: "video", clips: [
-    { id: "old", start_frame: 12, duration_frames: 24, style: {
+    { id: "old", name: "Cena antiga", start_frame: 12, duration_frames: 24, style: {
       motion_run_id: "run-old", motion_artifact_id: "video-old", version: 1,
     } },
   ] }] };
@@ -80,7 +80,12 @@ test("regenerating a scene replaces it in place and keeps its previous version r
   assert.equal(clip.style.version, 2);
   assert.deepEqual(clip.style.previous_versions[0], {
     clip_id: "old", run_id: "run-old", artifact_id: "video-old", version: 1,
+    name: "Cena antiga", start_frame: 12, duration_frames: 24,
+    style: { motion_run_id: "run-old", motion_artifact_id: "video-old", version: 1 },
   });
+  const restored = restoreClipVersion(next, clip.id, 1).tracks[0].clips[0];
+  assert.equal(restored.style.motion_artifact_id, "video-old");
+  assert.equal(restored.style.version, 1);
 });
 
 test("video URLs remain same-origin and reject non-identifier paths", () => {
