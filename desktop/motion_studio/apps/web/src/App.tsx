@@ -262,6 +262,9 @@ export default function App() {
       timeline = addWanVideoClip(timeline, { ...video, name: planned?.title || video.name, plannedPrompt: planned?.prompt, plannedTitle: planned?.title });
     }
     if (timeline === fresh.timeline) return;
+    if (timeline.storyboard?.episode_status === "approved") {
+      timeline = { ...timeline, storyboard: { ...timeline.storyboard, episode_status: "draft" } };
+    }
     const updated = await request<Project>("/api/projects/" + targetProjectId, {
       method: "PUT",
       body: JSON.stringify({ title: fresh.title, summary: fresh.summary, timeline }),
@@ -556,15 +559,19 @@ export default function App() {
 
   function saveSceneReview(status: "pending" | "approved" | "needs_revision") {
     if (!project || !selected || selected.kind !== "video") return;
-    void persist({ ...project, timeline: updateClipReview(project.timeline, selected.id, {
+    const reviewedTimeline = updateClipReview(project.timeline, selected.id, {
       review_status: status,
       review_comment: reviewComment.trim(),
-    }) });
+    });
+    void persist({ ...project, timeline: { ...reviewedTimeline, storyboard: reviewedTimeline.storyboard
+      ? { ...reviewedTimeline.storyboard, episode_status: "draft" } : reviewedTimeline.storyboard } });
   }
 
   function restoreSelectedVersion(version: number) {
     if (!project || !selected || selected.kind !== "video") return;
-    void persist({ ...project, timeline: restoreClipVersion(project.timeline, selected.id, version) });
+    const restoredTimeline = restoreClipVersion(project.timeline, selected.id, version);
+    void persist({ ...project, timeline: { ...restoredTimeline, storyboard: restoredTimeline.storyboard
+      ? { ...restoredTimeline.storyboard, episode_status: "draft" } : restoredTimeline.storyboard } });
   }
 
   function approveEpisode() {
