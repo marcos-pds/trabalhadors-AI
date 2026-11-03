@@ -20,3 +20,9 @@ export function updateGraphemeStyle<T extends TimelineShape>(
   graphemeIndex: number,
   patch: Record<string, string>,
 ): T;
+
+export function wanVideoPreviewUrl(runId: string, artifactId: string): string | null;
+export function addWanVideoClip<T extends TimelineShape>(
+  timeline: T,
+  video: { runId: string; artifactId: string; name: string; frames: number; fps: number },
+): T;
