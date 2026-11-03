@@ -152,6 +152,7 @@ export default function App() {
   const [importNotice, setImportNotice] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingPlaybackClipRef = useRef<string | null>(null);
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
 
   const load = useCallback(async () => {
@@ -348,11 +349,12 @@ export default function App() {
 
   function seekTo(frame: number) {
     const next = Math.max(0, Math.min(projectLength, Math.floor(frame)));
+    pendingPlaybackClipRef.current = null;
     videoRef.current?.pause();
     setPlaying(false);
     setPlayheadFrame(next);
     if (!project) return;
-    const clip = clipAtFrame(project.timeline, next, "video");
+    const clip = clipAtFrame(project.timeline, Math.min(next, Math.max(0, projectLength - 1)), "video");
     if (clip) {
       setSelectedClip(clip.id);
       if (clip.id === activeVideoClip?.id && videoRef.current) {
@@ -387,18 +389,18 @@ export default function App() {
     } catch { setPlaying(false); }
   }
 
-  async function handleVideoEnded() {
+  function handleVideoEnded() {
     if (!project || !activeVideoClip) return;
     const next = videoClips.find((clip) => clip.start_frame >= activeVideoClip.start_frame + activeVideoClip.duration_frames);
     if (!next) {
+      pendingPlaybackClipRef.current = null;
       setPlaying(false);
       setPlayheadFrame(projectLength);
       return;
     }
+    pendingPlaybackClipRef.current = next.id;
     setSelectedClip(next.id);
     setPlayheadFrame(next.start_frame);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await playActiveClip();
   }
 
   async function createProject() {
@@ -711,10 +713,20 @@ export default function App() {
               onVideoTime={(seconds) => {
                 if (activeVideoClip) setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
               }}
-              onVideoEnded={() => { void handleVideoEnded(); }}
+              onVideoEnded={handleVideoEnded}
               onVideoReady={() => {
                 if (videoRef.current && activeVideoClip) {
-                  videoRef.current.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
+                  const player = videoRef.current;
+                  if (pendingPlaybackClipRef.current === activeVideoClip.id) {
+                    pendingPlaybackClipRef.current = null;
+                    player.currentTime = 0;
+                    void player.play().then(() => setPlaying(true)).catch(() => {
+                      setPlaying(false);
+                      setError("O navegador não conseguiu reproduzir a próxima cena Wan.");
+                    });
+                  } else {
+                    player.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
+                  }
                 }
               }}
             />
@@ -788,7 +800,7 @@ export default function App() {
               <div className="property-divider" /><div className="section-label">PROJETO</div><div className="project-meta"><span>FORMATO</span><b>{project.timeline.width} × {project.timeline.height}</b><span>FRAME RATE</span><b>{project.timeline.fps} FPS</b></div>
               <div className="property-divider" />
               <div className="section-label">REFERÊNCIAS VISUAIS</div>
-              <p className="helper-text">Fixe personagens e cenários para manter identidade entre as cenas Wan.</p>
+              <p className="helper-text">Use as imagens para revisar personagens e cenários. O Wan T2V desta instalação recebe os prompts textuais, sem condicionamento direto pelas imagens.</p>
               <div className="property-grid reference-controls"><div><label className="field-label" htmlFor="reference-kind">TIPO</label><select id="reference-kind" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select></div><div><label className="field-label" htmlFor="reference-name">NOME</label><input id="reference-name" value={referenceName} maxLength={80} placeholder="Lara / apartamento" onChange={(event) => setReferenceName(event.target.value)} /></div></div>
               <label className="field-label" htmlFor="reference-provider">PROVEDOR DE IMAGEM</label><select id="reference-provider" value={referenceProvider} onChange={(event) => setReferenceProvider(event.target.value as ReferenceProvider)}><option value="local_comfyui">Local · ComfyUI</option><option value="huggingface">Gratuito · Hugging Face</option></select>
               <div className="property-grid"><button className="quiet-button reference-action" onClick={generateReferenceBrief}>✦ GERAR BRIEF</button><button className="quiet-button reference-action" onClick={() => void generateReferenceImage()} disabled={!embedded || referenceBusy}>{referenceBusy ? "GERANDO…" : "✦ GERAR IMAGEM"}</button></div><label className="quiet-button reference-action">＋ ENVIAR IMAGEM<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadReference} /></label>
