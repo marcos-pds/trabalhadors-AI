@@ -15,6 +15,8 @@ type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[] };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
+type MotionRun = { id: string; state: string; error: string | null; jobs: Array<{ id: string; state: string; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -29,6 +31,15 @@ const initialTimeline = (): Timeline => ({
   ],
 });
 
+const episodeDialogue = [
+  { start: 10.5, speaker: "Lara", text: "Ué... como assim? Esse é o meu número." },
+  { start: 20, speaker: "Voz desconhecida", text: "Lara... sou eu. Você precisa me escutar." },
+  { start: 28, speaker: "Lara", text: "Quem tá falando?" },
+  { start: 32.5, speaker: "Voz desconhecida", text: "Não abre a porta. Não importa quem seja." },
+  { start: 44, speaker: "Lara", text: "Meu Deus... quem tá aí?" },
+  { start: 51, speaker: "Voz atrás da porta", text: "Lara... abre. Eu sou você." },
+];
+
 function request<T>(url: string, init?: RequestInit): Promise<T> {
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
   const endpoint = embedded ? `/api/motion-studio${url}` : url;
@@ -39,6 +50,17 @@ function request<T>(url: string, init?: RequestInit): Promise<T> {
   };
   return fetch(endpoint, { ...init, headers }).then(async (response) => {
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    return response.json() as Promise<T>;
+  });
+}
+
+function centralRequest<T>(url: string, init?: RequestInit): Promise<T> {
+  const headers = { "Content-Type": "application/json", ...init?.headers, "X-Central-Request": "1" };
+  return fetch(url, { ...init, headers }).then(async (response) => {
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.detail ?? `HTTP ${response.status}`);
+    }
     return response.json() as Promise<T>;
   });
 }
@@ -72,6 +94,25 @@ export default function App() {
   const [titleDraft, setTitleDraft] = useState("O FUTURO COMEÇA AGORA");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(true);
+  const [wanConfigSaved, setWanConfigSaved] = useState(false);
+  const [wanConfigStatus, setWanConfigStatus] = useState("Iniciando automaticamente os motores locais…");
+  const [scenePrompt, setScenePrompt] = useState("Vertical cinematic 3D horror scene, a small geometric glass figure crossing a dim abandoned hallway, cold blue moonlight, deep shadows, slow camera push, unsettling atmosphere, polished motion design, no text.");
+  const [episodeNumber, setEpisodeNumber] = useState(1);
+  const [sceneNumber, setSceneNumber] = useState(1);
+  const [wanRun, setWanRun] = useState<MotionRun | null>(null);
+  const [wanBusy, setWanBusy] = useState(false);
+  const [episodePromptDraft, setEpisodePromptDraft] = useState([
+    "Vertical 9:16 cinematic photoreal horror, a dark small Brazilian apartment during a violent rainstorm at night, slow camera dolly down a narrow corridor toward a bright digital clock with clearly visible seven-segment digits 03:17, a smartphone vibrates alone on a table, cold blue lightning, realistic wet window reflections, no other readable text, no subtitles.",
+    "Vertical 9:16 cinematic horror, Lara, a young Brazilian woman with shoulder-length dark brown hair wearing a red cardigan, wakes in the dim bedroom and sees her smartphone ringing, close-up of the screen with an incoming call from her own contact, screen text indistinct, storm light, no subtitles.",
+    "Vertical 9:16 cinematic horror, Lara, the same young Brazilian woman with shoulder-length dark brown hair and the red cardigan from the previous scene, answers the phone with trembling hands, tight close-up on her worried face and the phone, rain and static atmosphere, warm bedside lamp fighting cold blue shadows, no visible text, no subtitles.",
+    "Vertical 9:16 cinematic horror close-up, Lara, the same woman with shoulder-length dark brown hair and red cardigan, listens to a whisper through the phone, her eyes shift toward the apartment door at the end of the corridor, tense shallow depth of field, no subtitles.",
+    "Vertical 9:16 cinematic horror, three violent knocks shake the closed apartment door, camera jolts subtly, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, stands frozen in the deep background, lightning flashes through the corridor, dramatic shadows, no subtitles.",
+    "Vertical 9:16 cinematic horror close-up, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, whispers in fear while staring at the apartment door, pale face, trembling phone in foreground, slow camera push, no subtitles.",
+    "Vertical 9:16 cinematic horror, view of the apartment door from inside, the peephole is dark and a human silhouette matching Lara, the same young woman with shoulder-length dark brown hair and red cardigan, stands motionless outside, a second shadow appears behind the frosted glass, lightning, no subtitles.",
+    "Vertical 9:16 cinematic horror finale, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, recoils as the locked apartment door handle turns by itself, a silhouette identical to Lara appears through the narrow gap, abrupt cut to total black at the end, ominous impact feeling, no text, no subtitles.",
+  ].join("\n"));
+  const [episodeRun, setEpisodeRun] = useState(false);
+  const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +130,34 @@ export default function App() {
   }, [project]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!embedded) return;
+    let active = true;
+    void centralRequest<MotionTools>("/api/motion/tools")
+      .then((config) => {
+        if (!active) return;
+        const configured = Boolean(config.comfy_endpoint && config.comfy_root);
+        setWanConfigSaved(configured);
+        setCapabilities((current) => current ? {
+          ...current,
+          comfyui: { ...current.comfyui, status: config.comfy_status === "running" ? "available" : "unavailable" },
+        } : current);
+        setWanConfigStatus(configured && config.comfy_status === "running"
+          ? "ComfyUI/Wan iniciado automaticamente e pronto."
+          : "Motores locais iniciados automaticamente.");
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setWanConfigSaved(false);
+        setCapabilities((current) => current ? {
+          ...current,
+          comfyui: { ...current.comfyui, status: "unavailable" },
+        } : current);
+        setWanConfigStatus(reason instanceof Error ? reason.message : "Não foi possível carregar a configuração local.");
+      });
+    return () => { active = false; };
+  }, [embedded]);
 
   const persist = useCallback(async (next: Project) => {
     setProject(next);
@@ -132,6 +201,86 @@ export default function App() {
     }
   }
 
+  async function refreshWanRun(runId: string) {
+    try {
+      const latest = await centralRequest<MotionRun>(`/api/motion/runs/${runId}`);
+      setWanRun(latest);
+      if (latest.state === "queued" || latest.state === "running") {
+        window.setTimeout(() => void refreshWanRun(runId), 1500);
+      } else {
+        setWanBusy(false);
+      }
+    } catch (reason) {
+      setWanBusy(false);
+      setError(reason instanceof Error ? reason.message : "Não foi possível consultar a renderização.");
+    }
+  }
+
+  async function renderWanScene() {
+    if (!project || !scenePrompt.trim() || wanBusy) return;
+    setWanBusy(true);
+    setEpisodeRun(false);
+    setWanRun(null);
+    try {
+      const run = await centralRequest<MotionRun>("/api/motion/wan/scenes", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: project.id,
+          episode: episodeNumber,
+          scene: sceneNumber,
+          prompt: scenePrompt.trim(),
+          frames: 81,
+          fps: 16,
+        }),
+      });
+      setWanRun(run);
+      setError("");
+      void refreshWanRun(run.id);
+    } catch (reason) {
+      setWanBusy(false);
+      setError(reason instanceof Error ? reason.message : "Não foi possível iniciar a cena Wan.");
+    }
+  }
+
+  async function renderWanEpisode() {
+    if (!project || wanBusy) return;
+    const prompts = episodePromptDraft.split(/\r?\n/).map((prompt) => prompt.trim()).filter(Boolean);
+    if (prompts.length !== 8) {
+      setError("Informe exatamente oito direções, uma por linha, para gerar o episódio de 60 s.");
+      return;
+    }
+    setWanBusy(true);
+    setEpisodeRun(true);
+    setWanRun(null);
+    try {
+      const run = await centralRequest<MotionRun>("/api/motion/wan/episodes", {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, episode: episodeNumber, scene_prompts: prompts, dialogue: episodeDialogue }),
+      });
+      setWanRun(run);
+      setError("");
+      void refreshWanRun(run.id);
+    } catch (reason) {
+      setWanBusy(false);
+      setError(reason instanceof Error ? reason.message : "Não foi possível iniciar o episódio Wan.");
+    }
+  }
+
+  async function cancelWanRun() {
+    if (!wanRun) return;
+    try {
+      const run = await centralRequest<MotionRun>(`/api/motion/runs/${wanRun.id}/cancel`, {
+        method: "POST",
+        body: "{}",
+      });
+      setWanRun(run);
+      setWanBusy(run.state === "running");
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível cancelar a renderização.");
+    }
+  }
+
   function addTitle() {
     if (!project || !titleDraft.trim()) return;
     const timeline = project.timeline.tracks.some((track) => track.kind === "text")
@@ -171,10 +320,10 @@ export default function App() {
           <div className="library-tabs"><button className="active">MÍDIA</button><button disabled>TEXTO</button><button disabled>EFEITOS</button></div>
           <button className="media-import" disabled><span>＋</span><b>IMPORTAR MÍDIA</b><small>Vídeo, imagem ou áudio</small></button>
           <div className="section-label">MOTORES LOCAIS</div>
-          <div className="engine-row"><span className="engine-icon">W</span><span><b>ComfyUI / Wan 2.1</b><small>{capabilities?.wan21_t2v_13b.installed ? "Modelo encontrado" : "Modelo não localizado"}</small></span><i className={`dot ${capabilities?.comfyui.status === "available" ? "online" : ""}`} /></div>
-          <div className="engine-row"><span className="engine-icon">F</span><span><b>FFmpeg</b><small>{capabilities?.ffmpeg.installed ? "Instalado" : "Não encontrado"}</small></span><i className={`dot ${capabilities?.ffmpeg.installed ? "online" : ""}`} /></div>
+          <div className="engine-row"><span className="engine-icon">W</span><span><b>ComfyUI / Wan 2.1</b><small>{wanConfigStatus}</small></span><i className={`dot ${wanConfigSaved ? "online" : ""}`} /></div>
+          <div className="engine-row"><span className="engine-icon">F</span><span><b>Montagem local</b><small>PyAV e H.264 no runtime instalado</small></span><i className="dot online" /></div>
           <div className="engine-row"><span className="engine-icon">R</span><span><b>Remotion</b><small>Player configurado</small></span><i className="dot online" /></div>
-          <div className="notice"><b>Geração Wan indisponível</b><p>O serviço ComfyUI precisa estar iniciado localmente. O Studio não simula resultados.</p></div>
+          <div className="notice"><b>Produção automática</b><p>O Studio inicia os motores locais e gera vídeo, voz pt-BR, efeitos, legendas e montagem final.</p></div>
         </aside>
         <section className="center-column">
           <div className="preview-panel panel">
@@ -218,6 +367,28 @@ export default function App() {
                 <div className="selected-label"><span className="tag">TIMELINE</span><b>{selected?.name ?? "Composição"}</b></div><div className="section-label">DIREÇÃO DE MOTION</div><p className="helper-text">Adicione um título para editar cor, animação e estilo de cada grafema.</p><label className="field-label" htmlFor="title-draft">NOVO TÍTULO</label><textarea id="title-draft" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} /><button className="primary-wide" onClick={addTitle}>＋ ADICIONAR À TIMELINE</button>
               </>}
               <div className="property-divider" /><div className="section-label">PROJETO</div><div className="project-meta"><span>FORMATO</span><b>{project.timeline.width} × {project.timeline.height}</b><span>FRAME RATE</span><b>{project.timeline.fps} FPS</b></div>
+              <div className="property-divider" />
+              <div className="section-label">PRODUÇÃO WAN · TERROR</div>
+              <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
+              <p className="helper-text" role="status">{wanConfigStatus}</p>
+              <div className="property-grid">
+                <div><label className="field-label" htmlFor="episode-number">EPISÓDIO</label><input id="episode-number" type="number" min="1" max="99" value={episodeNumber} onChange={(event) => setEpisodeNumber(Number(event.target.value))} /></div>
+                <div><label className="field-label" htmlFor="scene-number">CENA</label><input id="scene-number" type="number" min="1" max="64" value={sceneNumber} onChange={(event) => setSceneNumber(Number(event.target.value))} /></div>
+              </div>
+              <label className="field-label" htmlFor="wan-scene-prompt">DIREÇÃO DA CENA</label>
+              <textarea id="wan-scene-prompt" value={scenePrompt} maxLength={1024} onChange={(event) => setScenePrompt(event.target.value)} />
+              <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim()}>{wanBusy ? "RENDERIZANDO CENA…" : "GERAR CENA WAN · 5 S"}</button>
+              <div className="property-divider" />
+              <label className="field-label" htmlFor="wan-episode-prompts">ROTEIRO VISUAL · 8 CENAS, UMA DIREÇÃO POR LINHA</label>
+              <textarea id="wan-episode-prompts" value={episodePromptDraft} maxLength={8192} rows={10} onChange={(event) => setEpisodePromptDraft(event.target.value)} />
+              <p className="helper-text">7 cenas de 121 quadros + 1 de 113 = 60 s exatos. Narração pt-BR, efeitos sonoros e legendas entram automaticamente no MP4 final.</p>
+              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
+              {wanRun && <div className="helper-text" role="status">
+                <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila Wan"}: ${wanRun.state}.`}</b>
+                {wanRun.error && <span> {wanRun.error}</span>}
+                {wanRun.jobs.filter((job) => job.artifact).map((job) => <a key={job.artifact!.id} href={`/api/motion/runs/${wanRun.id}/artifacts/${job.artifact!.id}`}> Baixar {job.id === "assemble" ? "episódio final MP4" : job.id.replace("scene_", "cena ")}</a>)}
+                {(wanRun.state === "queued" || wanRun.state === "running") && <button className="quiet-button" onClick={() => void cancelWanRun()}>CANCELAR</button>}
+              </div>}
             </div>}
         </aside>
       </section>

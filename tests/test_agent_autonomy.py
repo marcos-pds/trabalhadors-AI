@@ -70,6 +70,21 @@ def test_replace_diff_revision_and_no_unapproved_directory_creation(workspace):
     assert not (root/'missing').exists()
 
 
+def test_mjs_workspace_files_can_be_read_and_edited(workspace):
+    _, root = workspace
+    path = root / 'timeline.mjs'
+    original = 'export const fps = 24;\n'
+    path.write_bytes(original.encode('utf-8'))
+
+    read = execute(str(root), {'action':'read','path':'timeline.mjs'})
+    assert read['content'] == original
+    change = {'action':'replace','path':'timeline.mjs','old':'24','new':'30',
+              'expected_sha256':read['sha256']}
+    assert '30' in preview(str(root), change)['diff']
+    execute(str(root), change)
+    assert path.read_bytes() == b'export const fps = 30;\n'
+
+
 def test_run_command_is_not_arbitrary_shell(workspace):
     db, root = workspace
     for shell in ('powershell', 'cmd', 'rm', 'python -c', 'curl'):

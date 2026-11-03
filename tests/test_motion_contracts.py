@@ -19,6 +19,26 @@ def manifest(adapter='ffmpeg'):
              'whisperx': ('video', 'clip.mp4', 'captions', 'out/clip.json', {'language': 'pt', 'model': 'small'}),
              'remotion': ('composition', 'scene.tsx', 'video', 'render.mp4', {'composition': 'Intro', 'fps': 30}),
              'comfyui_wan': ('workflow', 'workflow.json', 'video', 'render.mp4', {'model': 'wan', 'seed': 1, 'frames': 81, 'fps': 24})}
+    if adapter == 'episode_assembly':
+        inputs = [
+            {'id': f'video_{index:02d}', 'kind': 'video', 'path': f'scene_{index:02d}.mp4',
+             'provenance': {'source': 'local'}}
+            for index in range(1, 9)
+        ]
+        inputs.extend((
+            {'id': 'narration', 'kind': 'audio', 'path': 'narration.wav',
+             'provenance': {'source': 'local'}},
+            {'id': 'captions', 'kind': 'captions', 'path': 'captions.json',
+             'provenance': {'source': 'local'}},
+        ))
+        job = {'id': 'assemble', 'adapter': adapter, 'stage': 'assemble',
+               'inputs': [item['id'] for item in inputs], 'outputs': ['output'],
+               'params': {'frames': 960, 'fps': 16}}
+        return {'schema_version': 1, 'project_id': 'demo', 'artifacts': [
+            *inputs, {'id': 'output', 'kind': 'video', 'path': 'render.mp4',
+                      'provenance': {'source': 'planned', 'job_id': 'assemble',
+                                     'inputs': job['inputs']}}],
+                'jobs': [job]}
     kind, path, output_kind, output, params = kinds[adapter]
     return {'schema_version': 1, 'project_id': 'demo', 'artifacts': [
         {'id': 'input', 'kind': kind, 'path': path, 'provenance': {'source': 'local'}},
@@ -31,29 +51,58 @@ def manifest(adapter='ffmpeg'):
 @pytest.mark.parametrize('adapter', list(motion.ADAPTERS))
 def test_contracts_validate_and_missing_runtimes_are_unavailable(project, monkeypatch, adapter):
     data = manifest(adapter)
-    (project / data['artifacts'][0]['path']).write_text('{}')
+    monkeypatch.setenv('LOCALAPPDATA', str(project))
+    for artifact in data['artifacts']:
+        if artifact['provenance']['source'] == 'local':
+            path = project / artifact['path']
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture')
     monkeypatch.setattr(motion.shutil, 'which', lambda _: None)
     result = motion.validate_manifest(data, project)
     assert result == data and result is not data
     plan, = motion.plan_jobs(data, project)
     assert plan.status == 'unavailable'
     assert plan.command is None and plan.service_operation is None
-    assert not (project / data['artifacts'][1]['path']).exists()
+    output = next(item for item in data['artifacts'] if item['provenance']['source'] == 'planned')
+    assert not (project / output['path']).exists()
 
 
-@pytest.mark.parametrize('adapter', ['ffmpeg', 'whisperx', 'remotion'])
+@pytest.mark.parametrize('adapter', ['ffmpeg', 'whisperx', 'remotion', 'episode_assembly'])
 def test_typed_commands_pending_only(project, monkeypatch, adapter):
     data = manifest(adapter)
-    (project / data['artifacts'][0]['path']).write_text('{}')
+    for artifact in data['artifacts']:
+        if artifact['provenance']['source'] == 'local':
+            path = project / artifact['path']
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture')
     monkeypatch.setattr(motion.shutil, 'which', lambda name: str(project / (name + '.exe')))
-    plan, = motion.plan_jobs(data, project)
+    if adapter == 'episode_assembly':
+        executable = project / 'python.exe'
+        executable.write_bytes(b'inert runtime fixture')
+        config = motion.MotionConfig(executables={'episode_assembly': str(executable)})
+    else:
+        config = None
+    plan, = motion.plan_jobs(data, project, config)
     assert plan.status == 'planned' and plan.reason == 'service_pending'
     assert plan.command.shell is False
     assert isinstance(plan.command.argv, tuple)
     assert all(isinstance(arg, str) for arg in plan.command.argv)
     assert plan.command.cwd == str(project.resolve())
-    assert str(project / data['artifacts'][1]['path']) in plan.command.argv or adapter == 'whisperx'
-    assert not (project / data['artifacts'][1]['path']).exists()
+    output = next(item for item in data['artifacts'] if item['provenance']['source'] == 'planned')
+    assert str(project / output['path']) in plan.command.argv or adapter == 'whisperx'
+    assert not (project / output['path']).exists()
+
+
+def test_episode_assembly_requires_exactly_sixty_seconds(project):
+    data = manifest('episode_assembly')
+    for artifact in data['artifacts']:
+        if artifact['provenance']['source'] == 'local':
+            path = project / artifact['path']
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture')
+    data['jobs'][0]['params']['frames'] = 959
+    with pytest.raises(motion.ContractError, match='60 seconds'):
+        motion.validate_manifest(data, project)
 
 
 def test_comfy_service_is_declarative(project):

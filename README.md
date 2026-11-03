@@ -86,7 +86,16 @@ central-trabalhadores-ia/
 
 O item **Motion Studio** abre diretamente o editor dentro da Central. O frontend e a API mantidos em `desktop/motion_studio` são incluídos no repositório e no instalador desktop; a API usa um banco separado em `data/motion-studio/ai-motion-studio.sqlite3`, dentro da pasta de dados da Central.
 
-`npm ci --prefix desktop/motion_studio/apps/web` prepara as dependências do editor; depois, `npm run build` compila a Central e o frontend incorporado em `static/motion-studio/`. O instalador Windows executa a instalação e essas etapas automaticamente. ComfyUI, os pesos Wan e FFmpeg continuam sendo dependências locais opcionais: não são instalados nem incluídos no instalador, e a geração de vídeo permanece indisponível sem a configuração desses componentes.
+`npm ci --prefix desktop/motion_studio/apps/web` prepara as dependências do editor; depois, `npm run build` compila a Central e o frontend incorporado em `static/motion-studio/`. O instalador Windows executa a instalação e essas etapas automaticamente. ComfyUI e os pesos Wan não acompanham o instalador. Quando já estão no perfil local padrão (`%LOCALAPPDATA%\Central-IA\motion-studio`), o Studio os detecta e inicia o ComfyUI sem exigir configuração de caminho ou abertura manual do servidor. Uma máquina sem esse runtime e os modelos ainda precisa instalá-los antes de renderizar; o Studio informa a ausência em vez de simular uma renderização. A montagem usa PyAV no runtime local do ComfyUI e não exige FFmpeg.
+
+Para gerar o piloto de episódio:
+
+1. Inicie a Central, entre na sua conta e autorize uma pasta local específica em **Computador** com acesso completo. Não autorize a unidade inteira nem a pasta do usuário. Essa autorização protege os arquivos gerados.
+2. Abra **Motion Studio**. Ao abrir, o Studio encontra e inicia ComfyUI/Wan localmente em `127.0.0.1:8188`; não é necessário abrir um terminal, iniciar o ComfyUI ou configurar caminhos.
+
+3. Crie ou selecione um projeto, mantenha o roteiro visual do episódio 1 ou ajuste as oito cenas e clique em **Gerar 8 cenas Wan · 60 s**. A fila gera as cenas, sintetiza a narração pt-BR com a voz local do Windows, cria efeitos sonoros e legendas e monta automaticamente o MP4 final.
+
+O episódio usa sete cenas de 121 quadros e uma de 113 quadros a 16 fps (960 quadros), é vertical 9:16 e termina com legendas em português queimadas no vídeo. ComfyUI é iniciado pelo Studio e encerrado junto com a Central; FFmpeg não é necessário, pois a montagem usa PyAV/H.264 no runtime local. A autorização da pasta em **Computador** continua necessária para proteger a gravação dos arquivos.
 
 ## Provedores e modelos
 

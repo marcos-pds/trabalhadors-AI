@@ -14,6 +14,7 @@ MAX_ARTIFACTS = 128
 MAX_JOBS = 64
 ADAPTERS = {
     'comfyui_wan': ('generate', {'workflow'}, {'video'}),
+    'episode_assembly': ('assemble', {'video', 'audio', 'captions'}, {'video'}),
     'remotion': ('compose', {'composition', 'video', 'audio', 'captions'}, {'video'}),
     'whisperx': ('transcribe', {'audio', 'video'}, {'captions'}),
     'ffmpeg': ('encode', {'audio', 'video'}, {'video', 'audio'}),
@@ -117,7 +118,7 @@ class MotionConfig:
 
     def __post_init__(self):
         if self.executables is not None:
-            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','remotion','whisperx'}:
+            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','remotion','whisperx','episode_assembly'}:
                 raise ContractError('invalid executable configuration')
             for value in self.executables.values():
                 if not isinstance(value, str):
@@ -183,15 +184,45 @@ def capability_inventory(config=None):
 
 
 def runtime_path(adapter, config):
-    return (config.executables or {}).get(adapter) or shutil.which(adapter)
+    configured = (config.executables or {}).get(adapter)
+    if configured:
+        return configured
+    if adapter == 'episode_assembly':
+        candidates = []
+        if config.comfy_root:
+            candidates.append(Path(config.comfy_root).parent / '.venv' / 'Scripts' / 'python.exe')
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        if local_app_data:
+            candidates.append(Path(local_app_data) / 'Central-IA' / 'motion-studio' /
+                              '.venv' / 'Scripts' / 'python.exe')
+        return next((str(path) for path in candidates
+                     if path.is_file() and not _reparse(path)), None)
+    return shutil.which(adapter)
 
 
 def configured_motion():
     """Administrator-owned paths, never a path submitted by a model or browser."""
     paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','remotion','whisperx')
              if os.environ.get('CENTRAL_MOTION_'+name.upper())}
-    return MotionConfig(comfy_endpoint=os.environ.get('CENTRAL_MOTION_COMFY_ENDPOINT'),
-                        comfy_root=os.environ.get('CENTRAL_MOTION_COMFY_ROOT'), executables=paths)
+    comfy_root = os.environ.get('CENTRAL_MOTION_COMFY_ROOT')
+    comfy_endpoint = os.environ.get('CENTRAL_MOTION_COMFY_ENDPOINT')
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if local_app_data and not comfy_root:
+        installation = Path(local_app_data) / 'Central-IA' / 'motion-studio'
+        candidate = installation / 'ComfyUI'
+        python = installation / '.venv' / 'Scripts' / 'python.exe'
+        models = (
+            candidate / 'models' / 'diffusion_models' / 'wan2.1_t2v_1.3B_fp16.safetensors',
+            candidate / 'models' / 'text_encoders' / 'umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+            candidate / 'models' / 'vae' / 'wan_2.1_vae.safetensors',
+        )
+        if (candidate.is_dir() and (candidate / 'main.py').is_file()
+                and python.is_file() and all(path.is_file() for path in models)):
+            comfy_root = str(candidate)
+            comfy_endpoint = comfy_endpoint or 'http://127.0.0.1:8188'
+            paths['episode_assembly'] = str(python)
+    return MotionConfig(comfy_endpoint=comfy_endpoint,
+                        comfy_root=comfy_root, executables=paths or None)
 
 
 def _bounded_manifest(manifest):
@@ -238,6 +269,12 @@ def _parameters(adapter, params):
         _integer(params['seed'], 0, 2**32 - 1)
         _integer(params['frames'], 1, 4096)
         _integer(params['fps'], 1, 120)
+    elif adapter == 'episode_assembly':
+        _keys(params, ('frames', 'fps'))
+        _integer(params['fps'], 1, 120)
+        _integer(params['frames'], 1, 4096)
+        if params['frames'] != params['fps'] * 60:
+            raise ContractError('episode assembly must be exactly 60 seconds')
     elif adapter == 'remotion':
         _keys(params, ('composition', 'fps'))
         _identifier(params['composition'])
@@ -314,6 +351,11 @@ def validate_manifest(manifest, project_root):
         if adapter == 'remotion':
             if sum(a['kind'] == 'composition' for a in inputs) != 1:
                 raise ContractError('one composition required')
+        elif adapter == 'episode_assembly':
+            if (sum(a['kind'] == 'video' for a in inputs) != 8
+                    or sum(a['kind'] == 'audio' for a in inputs) != 1
+                    or sum(a['kind'] == 'captions' for a in inputs) != 1):
+                raise ContractError('episode assembly requires eight scenes, narration and captions')
         elif len(inputs) != 1:
             raise ContractError('one input required')
         for artifact in inputs:
@@ -382,7 +424,15 @@ def plan_jobs(manifest, project_root, config=None):
             if not executable:
                 status, reason = 'unavailable', 'runtime_missing_or_unconfigured'
             else:
-                if adapter == 'ffmpeg':
+                if adapter == 'episode_assembly':
+                    audio = next(path for path, artifact in zip(paths, (artifacts[i] for i in job['inputs'])) if artifact['kind'] == 'audio')
+                    captions = next(path for path, artifact in zip(paths, (artifacts[i] for i in job['inputs'])) if artifact['kind'] == 'captions')
+                    videos = [path for path, artifact in zip(paths, (artifacts[i] for i in job['inputs'])) if artifact['kind'] == 'video']
+                    script = str(Path(__file__).with_name('motion_media.py'))
+                    args = [script, 'assemble', '--audio', audio, '--captions', captions,
+                            '--output', output, '--fps', str(params['fps']),
+                            '--frames', str(params['frames']), *videos]
+                elif adapter == 'ffmpeg':
                     args = ['-nostdin', '-n', '-protocol_whitelist', 'file', '-i', paths[0]]
                     args += ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'] if params['profile'] == 'h264' else ['-vn', '-c:a', 'pcm_s16le']
                     args += [output]

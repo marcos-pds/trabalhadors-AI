@@ -54,6 +54,7 @@ SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
 from .motion_queue import MotionQueue
 MOTION = MotionQueue(DB)
+from .comfy_runtime import COMFY_RUNTIME, ComfyStartupError
 
 
 async def knowledge_retention():
@@ -92,6 +93,7 @@ async def lifespan(app):
         motion_stop.set()
         if motion_task:
             await asyncio.gather(motion_task, return_exceptions=True)
+        COMFY_RUNTIME.stop()
         retention_task.cancel()
         await asyncio.gather(retention_task, return_exceptions=True)
         ENGINE.shutting_down = True
@@ -1817,6 +1819,30 @@ class MotionToolsIn(BaseModel):
     comfy_root: str | None = Field(default=None,max_length=512)
 
 
+class MotionWanSceneIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    episode: int = Field(ge=1, le=99)
+    scene: int = Field(ge=1, le=64)
+    prompt: str = Field(min_length=1, max_length=1024)
+    seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
+    frames: int = Field(default=81, ge=5, le=129)
+    fps: int = Field(default=16, ge=12, le=60)
+
+
+class MotionWanDialogueIn(BaseModel):
+    start: float = Field(ge=0, lt=60)
+    speaker: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=300)
+
+
+class MotionWanEpisodeIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    episode: int = Field(ge=1, le=99)
+    scene_prompts: list[str] = Field(min_length=8, max_length=8)
+    dialogue: list[MotionWanDialogueIn] | None = Field(default=None, max_length=12)
+    seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
+
+
 def motion_call(operation):
     from .motion_contracts import ContractError
     try:
@@ -1828,7 +1854,15 @@ def motion_call(operation):
 @app.get('/api/motion/tools')
 def motion_tools(request: Request,user=Depends(current_user)):
     local_only(request)
-    return motion_call(lambda:MOTION.settings(user['id']))
+    settings=motion_call(lambda:MOTION.settings(user['id']))
+    config=MOTION._config(user['id'])
+    if not config.comfy_endpoint or not config.comfy_root:
+        raise HTTPException(503,'Não encontrei a instalação local do ComfyUI e os modelos Wan.')
+    try:
+        status=COMFY_RUNTIME.ensure_started(config)
+    except ComfyStartupError as exc:
+        raise HTTPException(503,str(exc)) from None
+    return dict(settings,comfy_status=status,automatic_start=True)
 
 
 @app.post('/api/motion/tools')
@@ -1847,6 +1881,126 @@ def motion_plan(data:MotionPlanIn,request:Request,user=Depends(current_user)):
 def motion_enqueue(data:MotionPlanIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
     return motion_call(lambda:MOTION.enqueue(user['id'],data.manifest,data.request_id,data.directory))
+
+
+@app.post('/api/motion/wan/scenes')
+def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    if (data.frames-1)%4:
+        raise HTTPException(422,'A duração Wan precisa usar 1 + múltiplos de 4 quadros.')
+    prompt=data.prompt.strip()
+    if not prompt:
+        raise HTTPException(422,'Descreva a cena antes de enviar para renderização.')
+    from .motion_contracts import ContractError, _text
+    try:
+        prompt=_text(prompt,1024)
+    except ContractError:
+        raise HTTPException(422,'A direção da cena contém texto inválido ou credenciais.') from None
+    from .motion_queue import authorized_root
+    from .workspace_tools import target
+    _,grant=authorized_root(DB,user['id'])
+    config=MOTION._config(user['id'])
+    if not config.comfy_root or not config.comfy_endpoint:
+        raise HTTPException(503,'A instalação local do ComfyUI e os modelos Wan não foram encontrados.')
+    try:
+        COMFY_RUNTIME.ensure_started(config)
+    except ComfyStartupError as exc:
+        raise HTTPException(503,str(exc)) from None
+    studio_folder=Path(grant)/'MotionStudio'
+    if studio_folder.exists():
+        target(grant,'MotionStudio',directory=True)
+    else:
+        target(grant,'MotionStudio',creating=True).mkdir()
+        target(grant,'MotionStudio',directory=True)
+    run_id=uid()
+    workflow_name=f'wan_workflow_{run_id}.json'
+    workflow_path=target(grant,f'MotionStudio/{workflow_name}',creating=True)
+    from .motion_episodes import wan_workflow
+    graph=wan_workflow(prompt,data.seed,data.frames,data.fps,'central_motion_scene')
+    with workflow_path.open('x',encoding='utf-8') as workflow_file:
+        json.dump(graph,workflow_file,ensure_ascii=False,separators=(',',':'))
+    manifest={
+        'schema_version':1,
+        'project_id':f'motion-{data.project_id}',
+        'artifacts':[
+            {'id':'workflow','kind':'workflow','path':workflow_name,'provenance':{'source':'local'}},
+            {'id':'video','kind':'video','path':f'episodes/{data.project_id}/episode_{data.episode:02d}/scene_{data.scene:02d}_{run_id}.mp4','provenance':{'source':'planned','job_id':'generate','inputs':['workflow']}},
+        ],
+        'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow'],'outputs':['video'],
+                 'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt}}],
+    }
+    return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
+
+
+@app.post('/api/motion/wan/episodes')
+def motion_wan_episode(data:MotionWanEpisodeIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    from .motion_contracts import ContractError, _text
+    prompts=[]
+    try:
+        for value in data.scene_prompts:
+            prompts.append(_text(value.strip(),1024))
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'Cada uma das oito cenas precisa de uma direção válida.') from None
+    from .motion_queue import authorized_root
+    from .workspace_tools import target
+    _,grant=authorized_root(DB,user['id'])
+    config=MOTION._config(user['id'])
+    if not config.comfy_root or not config.comfy_endpoint:
+        raise HTTPException(503,'A instalação local do ComfyUI e os modelos Wan não foram encontrados.')
+    try:
+        COMFY_RUNTIME.ensure_started(config)
+    except ComfyStartupError as exc:
+        raise HTTPException(503,str(exc)) from None
+    for relative in (
+        'MotionStudio',
+        'MotionStudio/episodes',
+        f'MotionStudio/episodes/{data.project_id}',
+        f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}',
+    ):
+        try:
+            target(grant,relative,directory=True)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            folder=target(grant,relative,creating=True)
+            folder.mkdir()
+            target(grant,relative,directory=True)
+    from .motion_episodes import build_episode_manifest
+    from .motion_episodes import EPISODE_DIALOGUE
+    dialogue=[item.model_dump() for item in data.dialogue] if data.dialogue is not None else list(EPISODE_DIALOGUE)
+    try:
+        for item in dialogue:
+            item['speaker']=_text(item['speaker'].strip(),64)
+            item['text']=_text(item['text'].strip(),300)
+        if (not dialogue or any(dialogue[index]['start'] >= dialogue[index+1]['start']
+                                for index in range(len(dialogue)-1))):
+            raise ContractError('invalid dialogue timing')
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'Revise as falas e os tempos da narração do episódio.') from None
+    run_id=uid()
+    from .motion_speech import SpeechError, synthesize_episode
+    episode_folder=target(grant,f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}',directory=True)
+    try:
+        audio_path,captions_path=synthesize_episode(
+            episode_folder,run_id,dialogue,data.seed)
+    except SpeechError as exc:
+        raise HTTPException(503,str(exc)) from None
+    manifest,workflows=build_episode_manifest(
+        data.project_id,data.episode,prompts,data.seed,run_id)
+    for relative,workflow in workflows:
+        workflow_path=target(grant,f'MotionStudio/{relative}',creating=True)
+        with workflow_path.open('x',encoding='utf-8') as workflow_file:
+            json.dump(workflow,workflow_file,ensure_ascii=False,separators=(',',':'))
+    for artifact,source in (
+        (next(item for item in manifest['artifacts'] if item['id']=='narration'),audio_path),
+        (next(item for item in manifest['artifacts'] if item['id']=='captions'),captions_path),
+    ):
+        expected=target(grant,f"MotionStudio/{artifact['path']}",creating=True)
+        if source.resolve()!=expected.resolve():
+            raise HTTPException(500,'Os arquivos de voz do episódio não correspondem ao plano.')
+    return motion_call(lambda:MOTION.enqueue(
+        user['id'],manifest,f'wan-episode-{run_id}','MotionStudio'))
 
 
 @app.get('/api/motion/runs')

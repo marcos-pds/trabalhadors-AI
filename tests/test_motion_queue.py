@@ -112,3 +112,28 @@ def test_crashed_job_is_marked_interrupted_and_never_silently_replayed(queued):
     assert queue.get('u',run['id'])['state']=='interrupted'
     assert queue.get('u',run['id'])['jobs'][0]['state']=='interrupted'
     assert queue.calls==0
+
+
+def test_motion_settings_discover_local_comfyui_and_episode_runtime(queued,tmp_path,monkeypatch):
+    db,root,program,queue=queued
+    install=tmp_path/'Central-IA'/'motion-studio'
+    comfy=install/'ComfyUI'
+    python=install/'.venv'/'Scripts'/'python.exe'
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b'local runtime')
+    (comfy/'main.py').parent.mkdir(parents=True)
+    (comfy/'main.py').write_text('# ComfyUI',encoding='utf-8')
+    for folder,name in (
+        ('diffusion_models','wan2.1_t2v_1.3B_fp16.safetensors'),
+        ('text_encoders','umt5_xxl_fp8_e4m3fn_scaled.safetensors'),
+        ('vae','wan_2.1_vae.safetensors'),
+    ):
+        model=comfy/'models'/folder/name
+        model.parent.mkdir(parents=True,exist_ok=True)
+        model.write_bytes(b'model')
+    monkeypatch.setenv('LOCALAPPDATA',str(tmp_path))
+
+    settings=queue.settings('u')
+    assert settings['comfy_endpoint']=='http://127.0.0.1:8188'
+    assert settings['comfy_root']==str(comfy.resolve())
+    assert settings['executables']['episode_assembly']==str(python)

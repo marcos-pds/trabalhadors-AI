@@ -189,7 +189,7 @@ def preview(folder, request):
         return {'action': action, 'path': relative, 'description': 'Criar pasta ' + relative}
     if action == 'read':
         path = target(folder, relative)
-        if path.suffix.lower() not in {'.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json',
+        if path.suffix.lower() not in {'.py', '.ts', '.tsx', '.js', '.mjs', '.jsx', '.css', '.html', '.json',
                                       '.md', '.txt', '.yaml', '.yml', '.toml', '.sql', '.xml', '.ini',
                                       '.csv', '.bat', '.ps1', '.sh', '.go', '.rs', '.java', '.cpp', '.h'}:
             raise HTTPException(422, 'Somente leitura de texto e código é permitida.')
@@ -200,7 +200,7 @@ def preview(folder, request):
         content = request.get('content') if action == 'write' else request.get('new')
         if not isinstance(content, str) or len(content.encode('utf-8')) > MAX_WRITE_BYTES:
             raise HTTPException(413, 'O conteúdo deve ser texto UTF-8 com até 32 KB.')
-        if not relative.lower().endswith(('.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json',
+        if not relative.lower().endswith(('.py', '.ts', '.tsx', '.js', '.mjs', '.jsx', '.css', '.html', '.json',
                                          '.md', '.txt', '.yaml', '.yml', '.toml', '.sql', '.xml',
                                          '.ini', '.csv', '.go', '.rs', '.java', '.cpp', '.h')):
             raise HTTPException(422, 'Não é permitido criar scripts executáveis nem arquivos binários.')

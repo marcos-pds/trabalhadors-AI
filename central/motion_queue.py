@@ -77,13 +77,27 @@ class MotionQueue:
 
     def settings(self,user,config=None):
         authorized_root(self.db,user)
+        from dataclasses import asdict
+        row=self.db.one('SELECT config FROM motion_tool_settings WHERE user_id=?',(user,))
         if config is not None:
-            from dataclasses import asdict
             value=MotionConfig(**config)
+        elif row:
+            value=MotionConfig(**json.loads(row['config']))
+            discovered=configured_motion()
+            if not value.comfy_root and discovered.comfy_root:
+                merged={**(discovered.executables or {}),**(value.executables or {})}
+                value=MotionConfig(
+                    comfy_endpoint=value.comfy_endpoint or discovered.comfy_endpoint,
+                    comfy_root=discovered.comfy_root,
+                    allow_remote=value.allow_remote,
+                    executables=merged or None,
+                )
+        else:
+            value=configured_motion()
+        if config is not None or not row:
             self.db.execute('INSERT INTO motion_tool_settings(user_id,config,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET config=excluded.config,updated_at=excluded.updated_at',
                             (user,json.dumps(asdict(value)),utcnow()))
-        from dataclasses import asdict
-        return asdict(self._config(user))
+        return asdict(value)
 
     def preview(self,user,manifest,relative=''):
         root,_=authorized_root(self.db,user,relative)
@@ -128,6 +142,8 @@ class MotionQueue:
                   for p in plans}
         for p in plans:
             if p.adapter=='remotion' and len(p.command.argv)>1 and p.command.argv[1].endswith('.js'):
+                runtimes[p.job_id]['entry_sha256']=digest_file(Path(p.command.argv[1]))
+            if p.adapter=='episode_assembly':
                 runtimes[p.job_id]['entry_sha256']=digest_file(Path(p.command.argv[1]))
         rid=uid(); now=utcnow()
         with self.db.lock:
@@ -224,6 +240,11 @@ class MotionQueue:
                 if plan.command:self._command(row,plan.command,stop)
                 else:
                     if expected!={'endpoint':plan.endpoint,'service':'comfy_wan_v1'}:raise ContractError('runtime_changed')
+                    from .comfy_runtime import COMFY_RUNTIME
+                    try:
+                        COMFY_RUNTIME.ensure_started(self._config(row['user_id']))
+                    except Exception:
+                        raise ContractError('comfy_startup_failed') from None
                     from .comfy_motion import execute as render_comfy
                     source=job['inputs'][0]
                     provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
@@ -242,7 +263,7 @@ class MotionQueue:
         except Exception as exc:
             state='failed'
             # Do not persist subprocess output, paths, arbitrary error strings or secrets.
-            known={'input_changed','runtime_changed','runtime_unavailable','media_process_failed','process_output_limit','render_timeout'}
+            known={'input_changed','runtime_changed','runtime_unavailable','media_process_failed','process_output_limit','render_timeout','comfy_startup_failed'}
             from .comfy_motion import ERRORS
             known.update(ERRORS)
             error=exc.detail if isinstance(exc,HTTPException) else str(exc) if str(exc) in known else type(exc).__name__

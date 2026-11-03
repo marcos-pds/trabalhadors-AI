@@ -43,6 +43,7 @@ try {
     & node --test (Join-Path $PSScriptRoot 'main.test.cjs')
     if ($LASTEXITCODE -ne 0) { throw 'Teste do ciclo Electron falhou.' }
     $staticData = (Join-Path $root "static") + ";static"
+    $motionMediaData = (Join-Path $root "central\motion_media.py") + ";central"
     $pyiArgs = @(
         "--noconfirm", "--clean", "--onedir",
         "--name", "central-desktop-backend",
@@ -51,6 +52,7 @@ try {
         "--workpath", (Join-Path $PSScriptRoot ".pyinstaller-build"),
         "--specpath", $PSScriptRoot,
         "--add-data", $staticData,
+        "--add-data", $motionMediaData,
         (Join-Path $PSScriptRoot "backend_launcher.py")
     )
     & $python -m PyInstaller @pyiArgs
