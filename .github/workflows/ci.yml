@@ -35,6 +35,8 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Install frontend dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Motion Studio frontend dependencies
+        run: npm ci --prefix desktop/motion_studio/apps/web --ignore-scripts --no-audit --no-fund
       - name: Check Python syntax
         run: python -m compileall -q central
       - name: Build React frontend
@@ -70,6 +72,8 @@ jobs:
             })
       - name: Test frontend streams and resource import controls
         run: npm test
+      - name: Test Motion Studio timeline
+        run: npm --prefix desktop/motion_studio/apps/web test
       - name: Use Node 24 for the native URLPattern compatibility check
         uses: actions/setup-node@v4
         with:
