@@ -17,6 +17,7 @@ type Project = { id: string; title: string; summary: string; timeline: Timeline;
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
+type PlannedScene = { scene: number; title: string; prompt: string; hook?: string; cliffhanger?: string };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -133,6 +134,9 @@ export default function App() {
     "Vertical 9:16 cinematic horror finale, Lara, the same young woman with shoulder-length dark brown hair and red cardigan, recoils as the locked apartment door handle turns by itself, a silhouette identical to Lara appears through the narrow gap, abrupt cut to total black at the end, ominous impact feeling, no text, no subtitles.",
   ].join("\n"));
   const [episodeRun, setEpisodeRun] = useState(false);
+  const [themeDraft, setThemeDraft] = useState("");
+  const [episodePlan, setEpisodePlan] = useState<PlannedScene[]>([]);
+  const [planningBusy, setPlanningBusy] = useState(false);
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [importNotice, setImportNotice] = useState("");
@@ -397,6 +401,43 @@ export default function App() {
     await renderWanScene(selected.id, revisedPrompt);
   }
 
+  async function planEpisode() {
+    if (!project || !themeDraft.trim() || planningBusy) return;
+    setPlanningBusy(true);
+    setError("");
+    try {
+      const conversation = await centralRequest<{ id: string }>("/api/conversations", {
+        method: "POST", body: JSON.stringify({ title: `Planejamento Motion · ${themeDraft.trim().slice(0, 60)}`, project_id: project.id }),
+      });
+      const run = await centralRequest<{ id: string }>("/api/runs", {
+        method: "POST",
+        body: JSON.stringify({ conversation_id: conversation.id, mode: "auto", autonomous: false, prompt: [
+          "Você é o núcleo de planejamento de uma minissérie vertical para Instagram.",
+          "Não execute ferramentas e não gere arquivos. Trabalhe apenas como roteirista e diretor.",
+          `Tema: ${themeDraft.trim()}`,
+          "Crie exatamente 8 cenas conectadas. Responda SOMENTE com JSON válido, sem markdown, neste formato:",
+          '[{"scene":1,"title":"...","hook":"...","prompt":"prompt visual detalhado em inglês para Wan, sem texto na imagem","cliffhanger":"..."}]',
+          "Mantenha personagens, roupas, cenário e estilo consistentes. Cada prompt deve descrever ação, câmera, luz e continuidade.",
+        ].join("\n") }),
+      });
+      let status = "queued";
+      for (let attempt = 0; attempt < 120 && ["queued", "running", "awaiting_approval"].includes(status); attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const latest = await centralRequest<{ status: string }>(`/api/runs/${run.id}`);
+        status = latest.status;
+      }
+      if (status !== "completed") throw new Error(`O planejamento terminou com estado: ${status}.`);
+      const messages = await centralRequest<Array<{ role: string; content: string }>>(`/api/conversations/${conversation.id}/messages`);
+      const raw = messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
+      const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+      if (!Array.isArray(parsed) || parsed.length !== 8 || parsed.some((scene) => !scene?.prompt || !scene?.title)) throw new Error("O trabalhador não retornou oito cenas válidas.");
+      setEpisodePlan(parsed);
+      setEpisodePromptDraft(parsed.map((scene) => scene.prompt).join("\n"));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível planejar o episódio.");
+    } finally { setPlanningBusy(false); }
+  }
+
   async function renderWanEpisode() {
     if (!project || wanBusy) return;
     const prompts = episodePromptDraft.split(/\r?\n/).map((prompt) => prompt.trim()).filter(Boolean);
@@ -577,7 +618,12 @@ export default function App() {
               </>}
               <div className="property-divider" /><div className="section-label">PROJETO</div><div className="project-meta"><span>FORMATO</span><b>{project.timeline.width} × {project.timeline.height}</b><span>FRAME RATE</span><b>{project.timeline.fps} FPS</b></div>
               <div className="property-divider" />
-              <div className="section-label">PRODUÇÃO WAN · TERROR</div>
+              <div className="section-label">PLANEJAMENTO COM TRABALHADORES</div>
+              <label className="field-label" htmlFor="episode-theme">TEMA DA MINISSÉRIE</label>
+              <textarea id="episode-theme" value={themeDraft} maxLength={2000} placeholder="Ex.: uma jovem recebe ligações do próprio número durante uma tempestade" onChange={(event) => setThemeDraft(event.target.value)} />
+              <button className="primary-wide" onClick={() => void planEpisode()} disabled={planningBusy || !embedded || !project || !themeDraft.trim()}>{planningBusy ? "PLANEJANDO COM OS TRABALHADORES…" : "✦ GERAR ROTEIRO E 8 CENAS"}</button>
+              {episodePlan.length > 0 && <p className="helper-text" role="status">Plano gerado: {episodePlan.length} cenas. Revise as direções antes de iniciar a produção.</p>}
+              <div className="property-divider" /><div className="section-label">PRODUÇÃO WAN · TERROR</div>
               <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
               <p className="helper-text" role="status">{wanConfigStatus}</p>
               <div className="property-grid">
