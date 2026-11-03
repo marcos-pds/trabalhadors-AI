@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 from urllib.parse import urlsplit
 
 MAX_MANIFEST_BYTES = 256 * 1024
@@ -118,7 +119,7 @@ class MotionConfig:
 
     def __post_init__(self):
         if self.executables is not None:
-            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','remotion','whisperx','episode_assembly'}:
+            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','ffprobe','remotion','whisperx','episode_assembly'}:
                 raise ContractError('invalid executable configuration')
             for value in self.executables.values():
                 if not isinstance(value, str):
@@ -200,9 +201,45 @@ def runtime_path(adapter, config):
     return shutil.which(adapter)
 
 
+def validate_media_with_ffprobe(path, config, *, expected_fps=None, expected_duration=None, require_audio=False):
+    """Validate a produced MP4 with the trusted local ffprobe executable."""
+    probe = runtime_path('ffprobe', config) or shutil.which('ffprobe')
+    if not probe or not Path(probe).is_file():
+        raise ContractError('ffprobe_unavailable')
+    command = [probe, '-v', 'error', '-show_entries',
+               'format=duration:stream=index,codec_type,codec_name,width,height,avg_frame_rate,nb_frames',
+               '-of', 'json', str(path)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15, check=True)
+        data = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
+        raise ContractError('ffprobe_invalid_media') from None
+    streams = data.get('streams') if isinstance(data, dict) else None
+    if not isinstance(streams, list): raise ContractError('ffprobe_invalid_media')
+    video = next((item for item in streams if item.get('codec_type') == 'video'), None)
+    audio = next((item for item in streams if item.get('codec_type') == 'audio'), None)
+    if not video or video.get('codec_name') != 'h264' or int(video.get('width') or 0) < 2 or int(video.get('height') or 0) < 2:
+        raise ContractError('invalid_mp4_video_stream')
+    if require_audio and not audio: raise ContractError('missing_mp4_audio_stream')
+    duration = float((data.get('format') or {}).get('duration') or 0)
+    if duration <= 0: raise ContractError('invalid_mp4_duration')
+    if expected_duration is not None and abs(duration - expected_duration) > 0.15:
+        raise ContractError('invalid_mp4_duration')
+    if expected_fps is not None:
+        rate = str(video.get('avg_frame_rate') or '')
+        try:
+            numerator, denominator = rate.split('/', 1)
+            actual_fps = float(numerator) / float(denominator)
+        except (ValueError, ZeroDivisionError):
+            raise ContractError('invalid_mp4_fps') from None
+        if abs(actual_fps - expected_fps) > 0.5:
+            raise ContractError('invalid_mp4_fps')
+    return {'duration': duration, 'fps': video.get('avg_frame_rate'), 'width': video['width'], 'height': video['height'], 'audio': bool(audio)}
+
+
 def configured_motion():
     """Administrator-owned paths, never a path submitted by a model or browser."""
-    paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','remotion','whisperx')
+    paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','ffprobe','remotion','whisperx')
              if os.environ.get('CENTRAL_MOTION_'+name.upper())}
     comfy_root = os.environ.get('CENTRAL_MOTION_COMFY_ROOT')
     comfy_endpoint = os.environ.get('CENTRAL_MOTION_COMFY_ENDPOINT')

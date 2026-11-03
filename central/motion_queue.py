@@ -19,7 +19,8 @@ from fastapi import HTTPException
 from .computer_access import policy
 from .database import uid, utcnow
 from .motion_contracts import (ContractError, _root, configured_motion,
-                               plan_jobs, scoped_path, validate_manifest, MotionConfig, _bounded_manifest)
+                               plan_jobs, scoped_path, validate_manifest, MotionConfig, _bounded_manifest,
+                               validate_media_with_ffprobe)
 
 MAX_BYTES = 2 * 1024**3
 TERMINAL = {'completed','failed','cancelled','interrupted'}
@@ -261,6 +262,13 @@ class MotionQueue:
                         timeout=self.timeout,expected_digest=hashes[source])
                 self._check(row,stop)
                 path=scoped_path(root,output['path'])
+                if output['kind'] == 'video' and path.suffix.lower() == '.mp4':
+                    params = job['params']
+                    validate_media_with_ffprobe(
+                        path, self._config(row['user_id']),
+                        expected_fps=params.get('fps'),
+                        expected_duration=(params.get('frames') / params.get('fps')) if params.get('frames') and params.get('fps') else None,
+                        require_audio=job['adapter'] == 'episode_assembly')
                 artifact=receipt(path,output)
                 if provenance:artifact['provenance']=provenance
                 hashes[output['id']]=artifact['sha256']
