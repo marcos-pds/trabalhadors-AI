@@ -299,8 +299,10 @@ def _bounded_manifest(manifest):
 
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
-        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt',))
+        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number'))
         if 'prompt' in params:_text(params['prompt'],1024)
+        if params.get('replace_clip_id') is not None:_identifier(params['replace_clip_id'])
+        if 'scene_number' in params:_integer(params['scene_number'], 1, 64)
         if params['model'] != 'wan':
             raise ContractError('unsupported model family')
         _integer(params['seed'], 0, 2**32 - 1)
