@@ -41,6 +41,10 @@ jobs:
         run: python -m compileall -q central
       - name: Build React frontend
         run: npm run build
+      - name: Test Motion Studio timeline
+        run: npm --prefix desktop/motion_studio/apps/web test
+      - name: Smoke test Motion Studio API and Wan queue
+        run: python -m pytest -q tests/test_motion_api.py tests/test_motion_wan_scene.py tests/test_motion_wan_episode.py
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash
@@ -72,8 +76,6 @@ jobs:
             })
       - name: Test frontend streams and resource import controls
         run: npm test
-      - name: Test Motion Studio timeline
-        run: npm --prefix desktop/motion_studio/apps/web test
       - name: Use Node 24 for the native URLPattern compatibility check
         uses: actions/setup-node@v4
         with:
