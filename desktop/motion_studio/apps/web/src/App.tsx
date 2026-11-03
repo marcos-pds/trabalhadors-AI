@@ -683,8 +683,11 @@ export default function App() {
               <textarea id="episode-theme" value={themeDraft} maxLength={2000} placeholder="Ex.: uma jovem recebe ligações do próprio número durante uma tempestade" onChange={(event) => setThemeDraft(event.target.value)} />
               <button className="primary-wide" onClick={() => void planEpisode()} disabled={planningBusy || !embedded || !project || !themeDraft.trim()}>{planningBusy ? "PLANEJANDO COM OS TRABALHADORES…" : "✦ GERAR ROTEIRO E 8 CENAS"}</button>
               {episodePlan.length > 0 && <p className="helper-text" role="status">Plano gerado: {episodePlan.length} cenas. Revise as direções antes de iniciar a produção.</p>}
-              {episodePlan.length > 0 && <div className="scene-plan-list">{episodePlan.map((scene, index) => <article className="scene-plan-card" key={scene.scene}>
-                <div className="selected-label"><span className="tag">CENA {String(scene.scene).padStart(2, "0")}</span><b>{scene.title || "Sem título"}</b></div>
+              {episodePlan.length > 0 && <div className="scene-plan-list">{episodePlan.map((scene, index) => {
+                const generatedClip = videoClips.find((clip) => clip.style.scene_number === scene.scene);
+                const sceneStatus = generatedClip?.style.review_status === "approved" ? "APROVADA" : generatedClip ? "GERADA · REVISAR" : "PENDENTE";
+                return <article className="scene-plan-card" key={scene.scene}>
+                <div className="selected-label"><span className="tag">CENA {String(scene.scene).padStart(2, "0")}</span><b>{scene.title || "Sem título"}</b><small>{sceneStatus}</small></div>
                 <label className="field-label" htmlFor={`scene-title-${scene.scene}`}>TÍTULO</label>
                 <input id={`scene-title-${scene.scene}`} value={scene.title} maxLength={120} onChange={(event) => updatePlannedScene(index, { title: event.target.value })} />
                 <label className="field-label" htmlFor={`scene-prompt-${scene.scene}`}>PROMPT WAN</label>
@@ -694,7 +697,7 @@ export default function App() {
                 <label className="field-label" htmlFor={`scene-cliffhanger-${scene.scene}`}>CLIFFHANGER</label>
                 <input id={`scene-cliffhanger-${scene.scene}`} value={scene.cliffhanger ?? ""} maxLength={250} onChange={(event) => updatePlannedScene(index, { cliffhanger: event.target.value })} />
                 <button className="quiet-button" onClick={() => usePlannedScene(scene)}>USAR NA GERAÇÃO</button>
-              </article>)}</div>}
+              </article>})}</div>}
               {episodePlan.length > 0 && <>
                 <button className="quiet-button" onClick={validateEpisodePlan}>✓ VALIDAR CONTINUIDADE</button>
                 {planChecks.length > 0 && <div className="helper-text" role="status">{planChecks.map((check, index) => <p key={`${check.scene ?? "all"}-${index}`} className={check.level === "error" ? "text-rose-300" : check.level === "warning" ? "text-amber-200" : "text-emerald-200"}>{check.scene ? `Cena ${String(check.scene).padStart(2, "0")}: ` : ""}{check.message}</p>)}</div>}
