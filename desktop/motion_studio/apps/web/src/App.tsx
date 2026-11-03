@@ -688,6 +688,7 @@ export default function App() {
                 const sceneStatus = generatedClip?.style.review_status === "approved" ? "APROVADA" : generatedClip ? "GERADA · REVISAR" : "PENDENTE";
                 return <article className="scene-plan-card" key={scene.scene}>
                 <div className="selected-label"><span className="tag">CENA {String(scene.scene).padStart(2, "0")}</span><b>{scene.title || "Sem título"}</b><small>{sceneStatus}</small></div>
+                {generatedClip && <button className="quiet-button" onClick={() => { setSelectedClip(generatedClip.id); seekTo(generatedClip.start_frame); }}>ABRIR NA TIMELINE</button>}
                 <label className="field-label" htmlFor={`scene-title-${scene.scene}`}>TÍTULO</label>
                 <input id={`scene-title-${scene.scene}`} value={scene.title} maxLength={120} onChange={(event) => updatePlannedScene(index, { title: event.target.value })} />
                 <label className="field-label" htmlFor={`scene-prompt-${scene.scene}`}>PROMPT WAN</label>
