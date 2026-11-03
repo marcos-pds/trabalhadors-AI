@@ -12,7 +12,7 @@ type Clip = {
   style: Record<string, any>;
 };
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[] };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[] } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
@@ -221,6 +221,14 @@ export default function App() {
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
   }, [selected?.id, selected?.kind, selected?.style.review_comment]);
+
+  useEffect(() => {
+    const storyboard = project?.timeline.storyboard;
+    if (!storyboard) return;
+    setThemeDraft(storyboard.theme ?? "");
+    setEpisodePlan(storyboard.scenes ?? []);
+    setEpisodePromptDraft((storyboard.scenes ?? []).map((scene) => scene.prompt).join("\n"));
+  }, [project?.id]);
 
   useEffect(() => {
     videoRef.current?.pause();
@@ -436,6 +444,7 @@ export default function App() {
       setEpisodePlan(parsed);
       setEpisodePromptDraft(parsed.map((scene) => scene.prompt).join("\n"));
       setPlanChecks([]);
+      void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft.trim(), scenes: parsed } } });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível planejar o episódio.");
     } finally { setPlanningBusy(false); }
@@ -445,6 +454,7 @@ export default function App() {
     setEpisodePlan((current) => {
       const next = current.map((scene, sceneIndex) => sceneIndex === index ? { ...scene, ...patch } : scene);
       setEpisodePromptDraft(next.map((scene) => scene.prompt).join("\n"));
+      if (project) void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft, scenes: next } } });
       return next;
     });
   }
