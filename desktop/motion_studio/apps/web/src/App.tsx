@@ -139,6 +139,7 @@ export default function App() {
   const [episodePlan, setEpisodePlan] = useState<PlannedScene[]>([]);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [planChecks, setPlanChecks] = useState<PlanCheck[]>([]);
+  const [planValidated, setPlanValidated] = useState(false);
   const [publication, setPublication] = useState({ cover_text: "", caption: "", hashtags: "" });
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -461,6 +462,7 @@ export default function App() {
       setEpisodePlan(parsed);
       setEpisodePromptDraft(parsed.map((scene) => scene.prompt).join("\n"));
       setPlanChecks([]);
+      setPlanValidated(false);
       void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft.trim(), scenes: parsed } } });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível planejar o episódio.");
@@ -471,6 +473,7 @@ export default function App() {
     setEpisodePlan((current) => {
       const next = current.map((scene, sceneIndex) => sceneIndex === index ? { ...scene, ...patch } : scene);
       setEpisodePromptDraft(next.map((scene) => scene.prompt).join("\n"));
+      setPlanValidated(false);
       if (project) void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft, scenes: next } } });
       return next;
     });
@@ -498,6 +501,7 @@ export default function App() {
     });
     if (!checks.length) checks.push({ level: "ok", message: "Pré-validação aprovada: estrutura, prompts e ganchos estão completos." });
     setPlanChecks(checks);
+    setPlanValidated(!checks.some((check) => check.level === "error"));
   }
 
   async function renderWanEpisode() {
@@ -781,7 +785,7 @@ export default function App() {
               <label className="field-label" htmlFor="wan-episode-prompts">ROTEIRO VISUAL · 8 CENAS, UMA DIREÇÃO POR LINHA</label>
               <textarea id="wan-episode-prompts" value={episodePromptDraft} maxLength={8192} rows={10} onChange={(event) => setEpisodePromptDraft(event.target.value)} />
               <p className="helper-text">7 cenas de 121 quadros + 1 de 113 = 60 s exatos. Narração pt-BR, efeitos sonoros e legendas entram automaticamente no MP4 final.</p>
-              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || planChecks.some((check) => check.level === "error")}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
+              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || (episodePlan.length > 0 && (!planValidated || planChecks.some((check) => check.level === "error")))}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
               {wanRun && <div className="helper-text" role="status">
                 <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila Wan"}: ${wanRun.state}.`}</b>
                 {wanRun.error && <span> {wanRun.error}</span>}
