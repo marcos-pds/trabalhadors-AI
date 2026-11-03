@@ -509,7 +509,7 @@ export default function App() {
       setEpisodePromptDraft(parsed.map((scene) => scene.prompt).join("\n"));
       setPlanChecks([]);
       setPlanValidated(false);
-      void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft.trim(), scenes: parsed } } });
+      void persist({ ...project, timeline: { ...project.timeline, storyboard: { ...project.timeline.storyboard, theme: themeDraft.trim(), scenes: parsed, episode_status: "draft" } } });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível planejar o episódio.");
     } finally { setPlanningBusy(false); }
@@ -520,7 +520,7 @@ export default function App() {
       const next = current.map((scene, sceneIndex) => sceneIndex === index ? { ...scene, ...patch } : scene);
       setEpisodePromptDraft(next.map((scene) => scene.prompt).join("\n"));
       setPlanValidated(false);
-      if (project) void persist({ ...project, timeline: { ...project.timeline, storyboard: { theme: themeDraft, scenes: next } } });
+      if (project) void persist({ ...project, timeline: { ...project.timeline, storyboard: { ...project.timeline.storyboard, theme: themeDraft, scenes: next, episode_status: "draft" } } });
       return next;
     });
   }
