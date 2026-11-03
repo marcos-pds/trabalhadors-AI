@@ -617,7 +617,12 @@ export default function App() {
       episode: episodeNumber,
       theme: themeDraft,
       publication,
-      scenes: episodePlan.map(({ scene, title, hook, cliffhanger }) => ({ scene, title, hook, cliffhanger })),
+      final_video_url: finalArtifact && wanRun ? `/api/motion/runs/${wanRun.id}/artifacts/${finalArtifact.id}` : null,
+      scenes: episodePlan.map((planned) => {
+        const clip = videoClips.find((candidate) => candidate.style.scene_number === planned.scene);
+        return { scene: planned.scene, title: planned.title, hook: planned.hook, cliffhanger: planned.cliffhanger,
+          status: clip?.style.review_status ?? "pending", artifact_id: clip?.style.motion_artifact_id ?? null };
+      }),
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
