@@ -82,12 +82,35 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       motion_artifact_id: artifactId,
       source_frames: frames,
       source_fps: fps,
+      version: 1,
+      review_status: "pending",
+      review_comment: "",
     },
   };
   return {
     ...timeline,
     tracks: timeline.tracks.map((item) => item.id === track.id ?
       { ...item, clips: [...item.clips, clip] } : item),
+  };
+}
+
+/** Update review metadata for one scene without touching other clips or artifacts. */
+export function updateClipReview(timeline, clipId, patch) {
+  const allowed = new Set(["pending", "approved", "needs_revision"]);
+  if (patch.review_status !== undefined && !allowed.has(patch.review_status)) {
+    throw new Error("Invalid scene review status");
+  }
+  if (patch.review_comment !== undefined && (typeof patch.review_comment !== "string" || patch.review_comment.length > 2000)) {
+    throw new Error("Invalid scene review comment");
+  }
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => clip.id === clipId
+        ? { ...clip, style: { ...clip.style, ...patch } }
+        : clip),
+    })),
   };
 }
 

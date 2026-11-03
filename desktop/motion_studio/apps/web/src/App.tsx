@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -136,6 +136,7 @@ export default function App() {
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [importNotice, setImportNotice] = useState("");
+  const [reviewComment, setReviewComment] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
 
@@ -210,6 +211,10 @@ export default function App() {
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
     (selected?.kind === "video" ? selected : undefined)) : undefined;
+
+  useEffect(() => {
+    setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
+  }, [selected?.id, selected?.kind, selected?.style.review_comment]);
 
   useEffect(() => {
     videoRef.current?.pause();
@@ -444,6 +449,14 @@ export default function App() {
     void persist({ ...project, timeline: updateGraphemeStyle(project.timeline, selected.id, index, patch) });
   }
 
+  function saveSceneReview(status: "pending" | "approved" | "needs_revision") {
+    if (!project || !selected || selected.kind !== "video") return;
+    void persist({ ...project, timeline: updateClipReview(project.timeline, selected.id, {
+      review_status: status,
+      review_comment: reviewComment.trim(),
+    }) });
+  }
+
   return (
     <main className="studio" data-theme={theme}>
       <header className="topbar">
@@ -533,6 +546,13 @@ export default function App() {
                 <div className="property-grid"><div><label className="field-label" htmlFor="title-color">COR</label><input id="title-color" type="color" value={String(selected.style.color ?? "#f8fafc")} onChange={(event) => setTextStyle({ color: event.target.value })} /></div><div><label className="field-label" htmlFor="title-size">TAMANHO</label><input id="title-size" type="number" min="12" max="240" value={Number(selected.style.font_size ?? 72)} onChange={(event) => setTextStyle({ font_size: Number(event.target.value) })} /></div></div>
                 <label className="field-label" htmlFor="title-motion">ANIMAÇÃO</label><select id="title-motion" value={String(selected.style.animation ?? "fade")} onChange={(event) => setTextStyle({ animation: event.target.value })}><option value="fade">Fade</option><option value="spring">Spring</option><option value="typewriter">Typewriter</option><option value="glitch">Glitch</option></select>
                 <div className="property-divider" /><div className="field-label">ESTILO POR GRAFEMA</div><div className="grapheme-list">{(selected.style.graphemes ?? []).map((item: any, index: number) => <div className="grapheme-row" key={`${index}-${item.value}`}><code>{item.value === " " ? "␠" : item.value}</code><input aria-label={`Cor do grafema ${item.value || index}`} type="color" value={item.color ?? selected.style.color ?? "#f8fafc"} onChange={(event) => setGrapheme(index, { color: event.target.value })} /><select aria-label={`Animação do grafema ${item.value || index}`} value={item.animation ?? "fade"} onChange={(event) => setGrapheme(index, { animation: event.target.value })}><option value="fade">Fade</option><option value="spring">Spring</option><option value="glitch">Glitch</option></select></div>)}</div>
+              </> : selected?.kind === "video" ? <>
+                <div className="selected-label"><span className="tag">CENA WAN</span><b>{selected.name}</b></div>
+                <div className="property-grid"><div><span className="field-label">VERSÃO</span><b>{Number(selected.style.version ?? 1)}</b></div><div><span className="field-label">STATUS</span><b>{selected.style.review_status === "approved" ? "Aprovada" : selected.style.review_status === "needs_revision" ? "Revisão" : "Pendente"}</b></div></div>
+                <label className="field-label" htmlFor="scene-review-comment">OBSERVAÇÃO DA REVISÃO</label>
+                <textarea id="scene-review-comment" value={reviewComment} maxLength={2000} placeholder="O que deve ser mantido ou alterado nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
+                <div className="property-grid"><button className="primary-wide" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR PARA REVISÃO</button></div>
+                <p className="helper-text">A revisão fica salva apenas nesta cena. As outras cenas e seus artefatos permanecem intactos.</p>
               </> : <>
                 <div className="selected-label"><span className="tag">TIMELINE</span><b>{selected?.name ?? "Composição"}</b></div><div className="section-label">DIREÇÃO DE MOTION</div><p className="helper-text">Adicione um título para editar cor, animação e estilo de cada grafema.</p><label className="field-label" htmlFor="title-draft">NOVO TÍTULO</label><textarea id="title-draft" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} /><button className="primary-wide" onClick={addTitle}>＋ ADICIONAR À TIMELINE</button>
               </>}

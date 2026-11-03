@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, segmentGraphemes, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -51,6 +51,18 @@ test("imports a completed Wan scene at the end of the video track exactly once",
   assert.equal(second.tracks[0].clips[1].start_frame, 122);
   assert.equal(second.tracks[0].clips[1].duration_frames, 182);
   assert.equal(second.tracks[1].clips.length, 0);
+});
+
+test("reviews one scene without changing neighboring clips", () => {
+  const timeline = { fps: 24, tracks: [{ id: "video", kind: "video", clips: [
+    { id: "one", start_frame: 0, duration_frames: 24, style: { review_status: "pending" } },
+    { id: "two", start_frame: 24, duration_frames: 24, style: { review_status: "pending" } },
+  ] }] };
+  const reviewed = updateClipReview(timeline, "one", { review_status: "needs_revision", review_comment: "Trocar o enquadramento" });
+  assert.equal(reviewed.tracks[0].clips[0].style.review_status, "needs_revision");
+  assert.equal(reviewed.tracks[0].clips[0].style.review_comment, "Trocar o enquadramento");
+  assert.deepEqual(reviewed.tracks[0].clips[1], timeline.tracks[0].clips[1]);
+  assert.throws(() => updateClipReview(timeline, "one", { review_status: "invalid" }), /Invalid scene review status/);
 });
 
 test("video URLs remain same-origin and reject non-identifier paths", () => {

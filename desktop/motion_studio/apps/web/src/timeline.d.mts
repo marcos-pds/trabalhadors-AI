@@ -30,3 +30,7 @@ export function addWanVideoClip<T extends TimelineShape>(
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;
 export function compositionEndFrame(timeline: TimelineShape): number;
 export function formatTimecode(frame: number, fps: number): string;
+export function updateClipReview<T extends TimelineShape>(timeline: T, clipId: string, patch: {
+  review_status?: "pending" | "approved" | "needs_revision";
+  review_comment?: string;
+}): T;
