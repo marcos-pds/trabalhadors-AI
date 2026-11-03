@@ -68,8 +68,9 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
   }
   const track = timeline.tracks.find((item) => item.kind === "video");
   if (!track) throw new Error("A timeline precisa ter uma trilha de vídeo.");
-  if (track.clips.some((clip) => clip.style?.motion_run_id === runId &&
-      clip.style?.motion_artifact_id === artifactId)) return timeline;
+  if (track.clips.some((clip) =>
+      (clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === artifactId) ||
+      clip.style?.previous_versions?.some((version) => version.run_id === runId && version.artifact_id === artifactId))) return timeline;
   const replaced = replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null;
   const start = replaced?.start_frame ?? track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
   const priorVersions = replaced ? [...(replaced.style?.previous_versions ?? []), {

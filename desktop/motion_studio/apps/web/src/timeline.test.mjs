@@ -83,6 +83,9 @@ test("regenerating a scene replaces it in place and keeps its previous version r
     name: "Cena antiga", start_frame: 12, duration_frames: 24,
     style: { motion_run_id: "run-old", motion_artifact_id: "video-old", version: 1 },
   });
+  assert.strictEqual(addWanVideoClip(next, {
+    runId: "run-old", artifactId: "video-old", frames: 81, fps: 16,
+  }), next);
   const restored = restoreClipVersion(next, clip.id, 1).tracks[0].clips[0];
   assert.equal(restored.style.motion_artifact_id, "video-old");
   assert.equal(restored.style.version, 1);
