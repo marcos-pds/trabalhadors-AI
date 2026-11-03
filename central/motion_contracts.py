@@ -14,15 +14,15 @@ MAX_MANIFEST_BYTES = 256 * 1024
 MAX_ARTIFACTS = 128
 MAX_JOBS = 64
 ADAPTERS = {
-    'comfyui_wan': ('generate', {'workflow'}, {'video'}),
+    'comfyui_wan': ('generate', {'workflow', 'image'}, {'video'}),
     'episode_assembly': ('assemble', {'video', 'audio', 'captions'}, {'video'}),
     'remotion': ('compose', {'composition', 'video', 'audio', 'captions'}, {'video'}),
     'whisperx': ('transcribe', {'audio', 'video'}, {'captions'}),
     'ffmpeg': ('encode', {'audio', 'video'}, {'video', 'audio'}),
 }
-KINDS = {'workflow', 'composition', 'video', 'audio', 'captions'}
+KINDS = {'workflow', 'composition', 'video', 'audio', 'captions', 'image'}
 EXTENSIONS = {'workflow': {'.json'}, 'composition': {'.tsx', '.jsx', '.ts', '.js'},
-              'video': {'.mp4'}, 'audio': {'.wav'}, 'captions': {'.json'}}
+              'video': {'.mp4'}, 'audio': {'.wav'}, 'captions': {'.json'}, 'image': {'.jpg', '.jpeg', '.png', '.webp'}}
 _ID = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,63}\Z')
 _RESERVED = re.compile(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])(?:\.|$)', re.I)
 _SECRET = re.compile(r'(?i)(?:bearer\s+|sk-[a-z0-9]{8,}|(?:api[_-]?key|password|secret|token)\s*[:=])')
@@ -299,15 +299,17 @@ def _bounded_manifest(manifest):
 
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
-        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number'))
+        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number', 'image_sha256'))
         if 'prompt' in params:_text(params['prompt'],1024)
         if params.get('replace_clip_id') is not None:_identifier(params['replace_clip_id'])
         if 'scene_number' in params:_integer(params['scene_number'], 1, 64)
-        if params['model'] != 'wan':
+        if params['model'] not in ('wan', 'ltxv'):
             raise ContractError('unsupported model family')
         _integer(params['seed'], 0, 2**32 - 1)
         _integer(params['frames'], 1, 4096)
         _integer(params['fps'], 1, 120)
+        if params['model'] == 'ltxv' and (not isinstance(params.get('image_sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', params['image_sha256']) or (params['frames'] - 1) % 8):
+            raise ContractError('invalid image conditioned scene')
     elif adapter == 'episode_assembly':
         _keys(params, ('frames', 'fps'))
         _integer(params['fps'], 1, 120)
@@ -395,6 +397,10 @@ def validate_manifest(manifest, project_root):
                     or sum(a['kind'] == 'audio' for a in inputs) != 1
                     or sum(a['kind'] == 'captions' for a in inputs) != 1):
                 raise ContractError('episode assembly requires eight scenes, narration and captions')
+        elif adapter == 'comfyui_wan':
+            if (sum(a['kind']=='workflow' for a in inputs)!=1 or
+                sum(a['kind']=='image' for a in inputs)!=(1 if job['params'].get('model')=='ltxv' else 0)):
+                raise ContractError('invalid video model inputs')
         elif len(inputs) != 1:
             raise ContractError('one input required')
         for artifact in inputs:

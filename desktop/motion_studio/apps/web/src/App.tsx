@@ -124,6 +124,8 @@ export default function App() {
   const [scenePrompt, setScenePrompt] = useState("Vertical cinematic 3D horror scene, a small geometric glass figure crossing a dim abandoned hallway, cold blue moonlight, deep shadows, slow camera push, unsettling atmosphere, polished motion design, no text.");
   const [episodeNumber, setEpisodeNumber] = useState(1);
   const [sceneNumber, setSceneNumber] = useState(1);
+  const [videoModel, setVideoModel] = useState<"wan" | "ltxv">("wan");
+  const [characterReferenceId, setCharacterReferenceId] = useState("");
   const [wanRun, setWanRun] = useState<MotionRun | null>(null);
   const [wanBusy, setWanBusy] = useState(false);
   const [episodePromptDraft, setEpisodePromptDraft] = useState([
@@ -225,6 +227,8 @@ export default function App() {
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
   const visualReferences = project?.timeline.storyboard?.references ?? [];
+  const characterReferences = visualReferences.filter((reference) => reference.kind === "character" && reference.image_data);
+  const characterReference = characterReferences.find((reference) => reference.id === characterReferenceId) ?? characterReferences[0];
   const plannedScenesComplete = !episodePlan.length || episodePlan.every((scene) => videoClips.some((clip) => clip.style.scene_number === scene.scene));
 
   function saveReference(reference: VisualReference) {
@@ -443,19 +447,24 @@ export default function App() {
   async function renderWanScene(replaceClipId?: string, promptOverride?: string) {
     const prompt = (promptOverride ?? scenePrompt).trim();
     if (!project || !prompt || wanBusy) return;
+    if (videoModel === "ltxv" && !characterReference?.image_data) {
+      setError("Selecione uma imagem mestra da personagem para gerar com LTX.");
+      return;
+    }
     setWanBusy(true);
     setEpisodeRun(false);
     setWanRun(null);
     try {
-      const run = await centralRequest<MotionRun>("/api/motion/wan/scenes", {
+      const run = await centralRequest<MotionRun>(videoModel === "ltxv" ? "/api/motion/ltx/scenes" : "/api/motion/wan/scenes", {
         method: "POST",
         body: JSON.stringify({
           project_id: project.id,
           episode: episodeNumber,
-          scene: sceneNumber,
+          scene: replaceClipId ? Number(selected?.style.scene_number ?? sceneNumber) : sceneNumber,
           prompt,
           frames: 81,
           fps: 16,
+          ...(videoModel === "ltxv" ? { image_data: characterReference?.image_data } : {}),
           replace_clip_id: replaceClipId ?? null,
         }),
       });
@@ -472,7 +481,7 @@ export default function App() {
     if (!selected || selected.kind !== "video" || wanBusy) return;
     const direction = String(selected.style.planned_prompt ?? scenePrompt).trim();
     const revision = reviewComment.trim();
-    const revisedPrompt = revision ? `${direction}\nRevision requested: ${revision}`.slice(0, 1024) : direction;
+    const revisedPrompt = revision ? `${direction} Revision requested: ${revision}`.slice(0, 1024) : direction;
     setScenePrompt(revisedPrompt);
     await renderWanScene(selected.id, revisedPrompt);
   }
@@ -743,7 +752,7 @@ export default function App() {
               onChange={(event) => seekTo(Number(event.target.value))} disabled={!project} />
             {activeVideoClip && wanVideoPreviewUrl(activeVideoClip.style.motion_run_id, activeVideoClip.style.motion_artifact_id) && (
               <div className="render-meta">
-                <span>{activeVideoClip.name} · Vídeo Wan</span>
+                <span>{activeVideoClip.name} · Vídeo gerado</span>
                 <a href={wanVideoPreviewUrl(activeVideoClip.style.motion_run_id, activeVideoClip.style.motion_artifact_id)!.replace(/\/preview$/, "")}>
                   Baixar MP4
                 </a>
@@ -784,7 +793,7 @@ export default function App() {
                 <label className="field-label" htmlFor="title-motion">ANIMAÇÃO</label><select id="title-motion" value={String(selected.style.animation ?? "fade")} onChange={(event) => setTextStyle({ animation: event.target.value })}><option value="fade">Fade</option><option value="spring">Spring</option><option value="typewriter">Typewriter</option><option value="glitch">Glitch</option></select>
                 <div className="property-divider" /><div className="field-label">ESTILO POR GRAFEMA</div><div className="grapheme-list">{(selected.style.graphemes ?? []).map((item: any, index: number) => <div className="grapheme-row" key={`${index}-${item.value}`}><code>{item.value === " " ? "␠" : item.value}</code><input aria-label={`Cor do grafema ${item.value || index}`} type="color" value={item.color ?? selected.style.color ?? "#f8fafc"} onChange={(event) => setGrapheme(index, { color: event.target.value })} /><select aria-label={`Animação do grafema ${item.value || index}`} value={item.animation ?? "fade"} onChange={(event) => setGrapheme(index, { animation: event.target.value })}><option value="fade">Fade</option><option value="spring">Spring</option><option value="glitch">Glitch</option></select></div>)}</div>
               </> : selected?.kind === "video" ? <>
-                <div className="selected-label"><span className="tag">CENA WAN</span><b>{selected.name}</b></div>
+                <div className="selected-label"><span className="tag">CENA GERADA</span><b>{selected.name}</b></div>
                 <div className="property-grid"><div><span className="field-label">VERSÃO</span><b>{Number(selected.style.version ?? 1)}</b></div><div><span className="field-label">STATUS</span><b>{selected.style.review_status === "approved" ? "Aprovada" : selected.style.review_status === "needs_revision" ? "Revisão" : "Pendente"}</b></div></div>
                 <label className="field-label" htmlFor="scene-review-comment">OBSERVAÇÃO DA REVISÃO</label>
                 <textarea id="scene-review-comment" value={reviewComment} maxLength={2000} placeholder="O que deve ser mantido ou alterado nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
@@ -819,7 +828,7 @@ export default function App() {
                 {generatedClip && <button className="quiet-button" onClick={() => { setSelectedClip(generatedClip.id); seekTo(generatedClip.start_frame); }}>ABRIR NA TIMELINE</button>}
                 <label className="field-label" htmlFor={`scene-title-${scene.scene}`}>TÍTULO</label>
                 <input id={`scene-title-${scene.scene}`} value={scene.title} maxLength={120} onChange={(event) => updatePlannedScene(index, { title: event.target.value })} />
-                <label className="field-label" htmlFor={`scene-prompt-${scene.scene}`}>PROMPT WAN</label>
+                <label className="field-label" htmlFor={`scene-prompt-${scene.scene}`}>DIREÇÃO VISUAL</label>
                 <textarea id={`scene-prompt-${scene.scene}`} value={scene.prompt} maxLength={1024} rows={4} onChange={(event) => updatePlannedScene(index, { prompt: event.target.value })} />
                 <label className="field-label" htmlFor={`scene-hook-${scene.scene}`}>GANCHO</label>
                 <input id={`scene-hook-${scene.scene}`} value={scene.hook ?? ""} maxLength={250} onChange={(event) => updatePlannedScene(index, { hook: event.target.value })} />
@@ -845,14 +854,17 @@ export default function App() {
               </div>
               <label className="field-label" htmlFor="wan-scene-prompt">DIREÇÃO DA CENA</label>
               <textarea id="wan-scene-prompt" value={scenePrompt} maxLength={1024} onChange={(event) => setScenePrompt(event.target.value)} />
-              <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim()}>{wanBusy ? "RENDERIZANDO CENA…" : "GERAR CENA WAN · 5 S"}</button>
+              <label className="field-label" htmlFor="video-model">MODELO DE VÍDEO</label>
+              <select id="video-model" value={videoModel} onChange={(event) => setVideoModel(event.target.value as "wan" | "ltxv")}><option value="wan">Wan · texto para vídeo</option><option value="ltxv">LTX · imagem para vídeo</option></select>
+              {videoModel === "ltxv" && <><label className="field-label" htmlFor="character-reference">IMAGEM MESTRA DA PERSONAGEM</label><select id="character-reference" value={characterReference?.id ?? ""} onChange={(event) => setCharacterReferenceId(event.target.value)}><option value="">Selecione uma imagem</option>{characterReferences.map((reference) => <option key={reference.id} value={reference.id}>{reference.name}</option>)}</select><p className="helper-text">Cada cena parte desta imagem. Para continuar um movimento, envie o último quadro da cena anterior como nova referência.</p></>}
+              <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
               <div className="property-divider" />
               <label className="field-label" htmlFor="wan-episode-prompts">ROTEIRO VISUAL · 8 CENAS, UMA DIREÇÃO POR LINHA</label>
               <textarea id="wan-episode-prompts" value={episodePromptDraft} maxLength={8192} rows={10} onChange={(event) => setEpisodePromptDraft(event.target.value)} />
               <p className="helper-text">7 cenas de 121 quadros + 1 de 113 = 60 s exatos. Narração pt-BR, efeitos sonoros e legendas entram automaticamente no MP4 final.</p>
               <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || (episodePlan.length > 0 && (!planValidated || planChecks.some((check) => check.level === "error")))}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
               {wanRun && <div className="helper-text" role="status">
-                <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila Wan"}: ${wanRun.state}.`}</b>
+                <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila de vídeo"}: ${wanRun.state}.`}</b>
                 {wanRun.error && <span> {wanRun.error}</span>}
                 {wanRun.jobs.filter((job) => job.artifact).map((job) => <a key={job.artifact!.id} href={`/api/motion/runs/${wanRun.id}/artifacts/${job.artifact!.id}`}> Baixar {job.id === "assemble" ? "episódio final MP4" : job.id.replace("scene_", "cena ")}</a>)}
                 {(wanRun.state === "queued" || wanRun.state === "running") && <button className="quiet-button" onClick={() => void cancelWanRun()}>CANCELAR</button>}

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import ipaddress
 import logging
@@ -1836,6 +1837,10 @@ class MotionWanSceneIn(BaseModel):
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
+class MotionLtxSceneIn(MotionWanSceneIn):
+    image_data: str = Field(min_length=32, max_length=8_400_000)
+
+
 class MotionWanDialogueIn(BaseModel):
     start: float = Field(ge=0, lt=60)
     speaker: str = Field(min_length=1, max_length=64)
@@ -1952,6 +1957,66 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
                            'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
     }
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
+
+
+@app.post('/api/motion/ltx/scenes')
+def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    if (data.frames-1)%8:
+        raise HTTPException(422,'A duração LTX precisa usar 1 + múltiplos de 8 quadros.')
+    from .motion_contracts import ContractError, _text, scoped_path
+    from .motion_ltx import MODEL, ENCODER, ltx_workflow
+    from .motion_queue import authorized_root
+    from .workspace_tools import target
+    prompt=motion_call(lambda:_text(data.prompt.strip(),1024))
+    formats={'image/jpeg':('.jpg',b'\xff\xd8\xff'),'image/png':('.png',b'\x89PNG\r\n\x1a\n'),'image/webp':('.webp',b'RIFF')}
+    header,sep,encoded=data.image_data.partition(',')
+    mime=header.removeprefix('data:').removesuffix(';base64')
+    if not sep or header!=f'data:{mime};base64' or mime not in formats:
+        raise HTTPException(422,'Envie uma imagem JPG, PNG ou WebP válida.')
+    try:
+        image=base64.b64decode(encoded,validate=True)
+    except (ValueError,base64.binascii.Error):
+        raise HTTPException(422,'A imagem de referência está corrompida.') from None
+    extension,signature=formats[mime]
+    if not 128<=len(image)<=6*1024*1024 or not image.startswith(signature) or (mime=='image/webp' and image[8:12]!=b'WEBP'):
+        raise HTTPException(422,'A imagem de referência é inválida ou muito grande.')
+    _,grant=authorized_root(DB,user['id'])
+    config=MOTION._config(user['id'])
+    if not config.comfy_root or not config.comfy_endpoint or not all((Path(config.comfy_root)/'models'/folder/name).is_file() for folder,name in (('checkpoints',MODEL),('text_encoders',ENCODER))):
+        raise HTTPException(503,'O modelo local LTX e seu codificador não estão instalados.')
+    try:
+        COMFY_RUNTIME.ensure_started(config)
+    except ComfyStartupError as exc:
+        raise HTTPException(503,str(exc)) from None
+    for relative in ('MotionStudio','MotionStudio/references'):
+        try:target(grant,relative,directory=True)
+        except HTTPException as exc:
+            if exc.status_code!=404:raise
+            target(grant,relative,creating=True).mkdir()
+    run_id=uid()
+    image_name=f'central_ltx_{run_id.replace("-","")}{extension}'
+    image_path=scoped_path(config.comfy_root,'input/'+image_name,output=True)
+    reference_name=f'references/{image_name}'
+    reference_path=target(grant,'MotionStudio/'+reference_name,creating=True)
+    with image_path.open('xb') as stream:stream.write(image)
+    with reference_path.open('xb') as stream:stream.write(image)
+    workflow_name=f'ltx_workflow_{run_id}.json'
+    workflow_path=target(grant,'MotionStudio/'+workflow_name,creating=True)
+    with workflow_path.open('x',encoding='utf-8') as stream:
+        json.dump(ltx_workflow(prompt,image_name,data.seed,data.frames,data.fps,'central_ltx_scene'),stream,ensure_ascii=False,separators=(',',':'))
+    manifest={
+        'schema_version':1,'project_id':f'motion-{data.project_id}',
+        'artifacts':[
+            {'id':'workflow','kind':'workflow','path':workflow_name,'provenance':{'source':'local'}},
+            {'id':'reference','kind':'image','path':reference_name,'provenance':{'source':'local','sha256':hashlib.sha256(image).hexdigest()}},
+            {'id':'video','kind':'video','path':f'episodes/{data.project_id}/episode_{data.episode:02d}/scene_{data.scene:02d}_{run_id}.mp4','provenance':{'source':'planned','job_id':'generate','inputs':['workflow','reference']}},
+        ],
+        'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow','reference'],'outputs':['video'],
+                 'params':{'model':'ltxv','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
+                           'image_sha256':hashlib.sha256(image).hexdigest(),'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
+    }
+    return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'ltx-{run_id}','MotionStudio'))
 
 
 @app.post('/api/motion/wan/episodes')

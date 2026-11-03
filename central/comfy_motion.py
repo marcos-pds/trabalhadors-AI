@@ -12,7 +12,9 @@ import httpx
 from .motion_contracts import ContractError,scoped_path,_SECRET
 
 ALLOWED={'UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ModelSamplingSD3',
-         'EmptyHunyuanLatentVideo','KSampler','VAEDecode','CreateVideo','SaveVideo'}
+         'EmptyHunyuanLatentVideo','KSampler','VAEDecode','CreateVideo','SaveVideo',
+         'CheckpointLoaderSimple','LoadImage','LTXVImgToVideo','LTXVConditioning',
+         'LTXVScheduler','KSamplerSelect','SamplerCustom'}
 ERRORS={'workflow_too_large','invalid_workflow','invalid_workflow_text','invalid_workflow_link',
         'unsupported_comfy_node','invalid_wan_workflow','cyclic_workflow','wan_frame_limit',
         'comfy_configuration_required','invalid_model_path','wan_model_required','positive_prompt_node_required',
@@ -56,7 +58,10 @@ def prepare_workflow(path,params,prefix,config):
         node.pop('_meta',None)
         grouped.setdefault(node['class_type'],[]).append((identifier,node['inputs']))
         links[identifier]=visit(node['inputs'])
-    for name in ('UNETLoader','CLIPLoader','VAELoader','KSampler','EmptyHunyuanLatentVideo','CreateVideo','SaveVideo'):
+    required = (('CheckpointLoaderSimple','CLIPLoader','LoadImage','LTXVImgToVideo','LTXVConditioning','LTXVScheduler','KSamplerSelect','SamplerCustom','VAEDecode','CreateVideo','SaveVideo')
+                if params['model']=='ltxv' else
+                ('UNETLoader','CLIPLoader','VAELoader','KSampler','EmptyHunyuanLatentVideo','CreateVideo','SaveVideo'))
+    for name in required:
         if len(grouped.get(name,[]))!=1:raise ContractError('invalid_wan_workflow')
     reachable={grouped['SaveVideo'][0][0]}
     for _ in graph:
@@ -70,6 +75,47 @@ def prepare_workflow(path,params,prefix,config):
         if not ready:raise ContractError('cyclic_workflow')
         done.update(ready)
         for key in ready:pending.pop(key)
+    if params['model']=='ltxv':
+        from .motion_ltx import MODEL, ENCODER
+        if set(grouped)-set(required)-{'CLIPTextEncode'} or len(grouped.get('CLIPTextEncode',[]))!=2:
+            raise ContractError('invalid_wan_workflow')
+        if params['frames']>129 or (params['frames']-1)%8:
+            raise ContractError('wan_frame_limit')
+        if not config.comfy_root or not config.comfy_endpoint:
+            raise ContractError('comfy_configuration_required')
+        checkpoint=grouped['CheckpointLoaderSimple'][0][1]
+        clip=grouped['CLIPLoader'][0][1]
+        if checkpoint.get('ckpt_name')!=MODEL or clip.get('clip_name')!=ENCODER or clip.get('type')!='ltxv':
+            raise ContractError('invalid_model_path')
+        latent=grouped['LTXVImgToVideo'][0][1]
+        if any(latent.get(key)!=value for key,value in {'width':288,'height':512,'batch_size':1,'strength':1.0}.items()):
+            raise ContractError('wan_resolution_limit')
+        image_name=grouped['LoadImage'][0][1].get('image')
+        if not isinstance(image_name,str) or not re.fullmatch(r'central_ltx_[a-f0-9]{32}\.(?:jpg|png|webp)',image_name):
+            raise ContractError('invalid_model_path')
+        image=scoped_path(config.comfy_root,'input/'+image_name)
+        if hashlib.sha256(image.read_bytes()).hexdigest()!=params['image_sha256']:
+            raise ContractError('input_changed')
+        sampler=grouped['SamplerCustom'][0][1]
+        if sampler.get('cfg')!=1.0 or grouped['LTXVScheduler'][0][1].get('steps')!=8 or grouped['KSamplerSelect'][0][1].get('sampler_name')!='euler':
+            raise ContractError('invalid_sampler')
+        sampler['noise_seed']=params['seed']
+        latent['length']=params['frames']
+        grouped['LTXVConditioning'][0][1]['frame_rate']=params['fps']
+        grouped['CreateVideo'][0][1]['fps']=params['fps']
+        save=grouped['SaveVideo'][0][1]
+        save['filename_prefix']=prefix
+        save['format']='mp4'
+        save['format.codec']='h264'
+        positive=latent.get('positive')
+        if not isinstance(positive,list) or graph[positive[0]]['class_type']!='CLIPTextEncode':
+            raise ContractError('positive_prompt_node_required')
+        graph[positive[0]]['inputs']['text']=params['prompt']
+        models=[scoped_path(config.comfy_root,'models/checkpoints/'+MODEL),
+                scoped_path(config.comfy_root,'models/text_encoders/'+ENCODER)]
+        return graph,models,hashlib.sha256(content).hexdigest()
+    if set(grouped)-{'UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ModelSamplingSD3','EmptyHunyuanLatentVideo','KSampler','VAEDecode','CreateVideo','SaveVideo'}:
+        raise ContractError('unsupported_comfy_node')
     if params['frames']>129 or (params['frames']-1)%4:raise ContractError('wan_frame_limit')
     latent=grouped['EmptyHunyuanLatentVideo'][0][1]
     if (any(type(latent.get(key)) is not int or not 16<=latent[key]<=1024 or latent[key]%16 for key in ('width','height'))
