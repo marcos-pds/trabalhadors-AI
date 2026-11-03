@@ -215,6 +215,7 @@ export default function App() {
   const fps = project?.timeline.fps ?? 24;
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
+  const plannedScenesComplete = !episodePlan.length || episodePlan.every((scene) => videoClips.some((clip) => clip.style.scene_number === scene.scene));
   const episodeApproved = project?.timeline.storyboard?.episode_status === "approved";
   const finalArtifact = wanRun?.state === "completed" && episodeApproved ? wanRun.jobs.find((job) => job.id === "assemble" && job.artifact)?.artifact : null;
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
@@ -567,7 +568,7 @@ export default function App() {
   }
 
   function approveEpisode() {
-    if (!project || !videoClips.length || videoClips.some((clip) => clip.style.review_status !== "approved")) return;
+    if (!project || !videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved")) return;
     void persist({ ...project, timeline: { ...project.timeline, storyboard: {
       ...(project.timeline.storyboard ?? { theme: "", scenes: [] }), episode_status: "approved",
     } } });
@@ -704,8 +705,9 @@ export default function App() {
                 {planChecks.length > 0 && <div className="helper-text" role="status">{planChecks.map((check, index) => <p key={`${check.scene ?? "all"}-${index}`} className={check.level === "error" ? "text-rose-300" : check.level === "warning" ? "text-amber-200" : "text-emerald-200"}>{check.scene ? `Cena ${String(check.scene).padStart(2, "0")}: ` : ""}{check.message}</p>)}</div>}
               </>}
               <div className="property-divider" /><div className="section-label">PRODUÇÃO WAN · TERROR</div>
-              <div className="helper-text" role="status">Cenas aprovadas: {videoClips.filter((clip) => clip.style.review_status === "approved").length}/{videoClips.length || 0}</div>
-              <button className="primary-wide" onClick={approveEpisode} disabled={!videoClips.length || videoClips.some((clip) => clip.style.review_status !== "approved") || project.timeline.storyboard?.episode_status === "approved"}>{project.timeline.storyboard?.episode_status === "approved" ? "✓ EPISÓDIO APROVADO" : "APROVAR EPISÓDIO"}</button>
+              <div className="helper-text" role="status">Cenas aprovadas: {videoClips.filter((clip) => clip.style.review_status === "approved").length}/{episodePlan.length || videoClips.length || 0}</div>
+              {!plannedScenesComplete && <p className="helper-text text-amber-200">Gere todas as cenas planejadas antes de aprovar o episódio.</p>}
+              <button className="primary-wide" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved") || project.timeline.storyboard?.episode_status === "approved"}>{project.timeline.storyboard?.episode_status === "approved" ? "✓ EPISÓDIO APROVADO" : "APROVAR EPISÓDIO"}</button>
               <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
               <p className="helper-text" role="status">{wanConfigStatus}</p>
               <div className="property-grid">
