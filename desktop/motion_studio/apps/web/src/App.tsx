@@ -215,6 +215,8 @@ export default function App() {
   const fps = project?.timeline.fps ?? 24;
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
+  const episodeApproved = project?.timeline.storyboard?.episode_status === "approved";
+  const finalArtifact = wanRun?.state === "completed" && episodeApproved ? wanRun.jobs.find((job) => job.id === "assemble" && job.artifact)?.artifact : null;
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
     (selected?.kind === "video" ? selected : undefined)) : undefined;
 
@@ -570,7 +572,7 @@ export default function App() {
       <header className="topbar">
         <a className="brand" href="#" aria-label="AI Motion Studio início"><span className="brand-mark">M</span><span>AI MOTION <b>STUDIO</b><small>LOCAL CREATIVE SUITE</small></span></a>
         <div className="project-switch"><span>PROJETO</span><select aria-label="Projeto ativo" value={project?.id ?? ""} onChange={(event) => setProject(projects.find((item) => item.id === event.target.value) ?? null)}><option value="">Selecione projeto</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button className="icon-button" onClick={() => void createProject()} aria-label="Criar novo projeto">＋</button></div>
-        <div className="top-actions"><span className={saved ? "save-status" : "save-status pending"}><i />{saved ? "SALVO" : "SALVANDO"}</span><button className="export-button" disabled>EXPORTAR <span>↗</span></button></div>
+        <div className="top-actions"><span className={saved ? "save-status" : "save-status pending"}><i />{saved ? "SALVO" : "SALVANDO"}</span>{finalArtifact ? <a className="export-button" download href={`/api/motion/runs/${wanRun!.id}/artifacts/${finalArtifact.id}`}>EXPORTAR <span>↗</span></a> : <button className="export-button" disabled title={episodeApproved ? "Aguardando montagem final" : "Aprove todas as cenas antes de exportar"}>EXPORTAR <span>↗</span></button>}</div>
       </header>
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")} aria-label="Fechar erro">×</button></div>}
       <section className="workspace">
