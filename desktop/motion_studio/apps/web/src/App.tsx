@@ -18,6 +18,7 @@ type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 type PlannedScene = { scene: number; title: string; prompt: string; hook?: string; cliffhanger?: string };
+type PlanCheck = { scene?: number; level: "ok" | "warning" | "error"; message: string };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -137,6 +138,7 @@ export default function App() {
   const [themeDraft, setThemeDraft] = useState("");
   const [episodePlan, setEpisodePlan] = useState<PlannedScene[]>([]);
   const [planningBusy, setPlanningBusy] = useState(false);
+  const [planChecks, setPlanChecks] = useState<PlanCheck[]>([]);
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [importNotice, setImportNotice] = useState("");
@@ -433,6 +435,7 @@ export default function App() {
       if (!Array.isArray(parsed) || parsed.length !== 8 || parsed.some((scene) => !scene?.prompt || !scene?.title)) throw new Error("O trabalhador não retornou oito cenas válidas.");
       setEpisodePlan(parsed);
       setEpisodePromptDraft(parsed.map((scene) => scene.prompt).join("\n"));
+      setPlanChecks([]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível planejar o episódio.");
     } finally { setPlanningBusy(false); }
@@ -444,6 +447,24 @@ export default function App() {
       setEpisodePromptDraft(next.map((scene) => scene.prompt).join("\n"));
       return next;
     });
+  }
+
+  function validateEpisodePlan() {
+    const checks: PlanCheck[] = [];
+    if (episodePlan.length !== 8) checks.push({ level: "error", message: "O episódio precisa conter exatamente 8 cenas." });
+    const titles = new Set<string>();
+    episodePlan.forEach((scene, index) => {
+      const number = scene.scene || index + 1;
+      if (!scene.title.trim()) checks.push({ scene: number, level: "error", message: "Título vazio." });
+      if (titles.has(scene.title.trim().toLowerCase())) checks.push({ scene: number, level: "warning", message: "Título repetido; confirme se a cena não é duplicada." });
+      titles.add(scene.title.trim().toLowerCase());
+      if (scene.prompt.trim().length < 80) checks.push({ scene: number, level: "error", message: "Prompt curto demais para validar direção visual." });
+      if (!/vertical|9\s*:\s*16/i.test(scene.prompt)) checks.push({ scene: number, level: "warning", message: "O prompt não declara formato vertical 9:16." });
+      if (!scene.hook?.trim()) checks.push({ scene: number, level: "warning", message: "Gancho não preenchido." });
+      if (!scene.cliffhanger?.trim()) checks.push({ scene: number, level: "warning", message: "Cliffhanger não preenchido." });
+    });
+    if (!checks.length) checks.push({ level: "ok", message: "Pré-validação aprovada: estrutura, prompts e ganchos estão completos." });
+    setPlanChecks(checks);
   }
 
   async function renderWanEpisode() {
@@ -642,6 +663,10 @@ export default function App() {
                 <label className="field-label" htmlFor={`scene-cliffhanger-${scene.scene}`}>CLIFFHANGER</label>
                 <input id={`scene-cliffhanger-${scene.scene}`} value={scene.cliffhanger ?? ""} maxLength={250} onChange={(event) => updatePlannedScene(index, { cliffhanger: event.target.value })} />
               </article>)}</div>}
+              {episodePlan.length > 0 && <>
+                <button className="quiet-button" onClick={validateEpisodePlan}>✓ VALIDAR CONTINUIDADE</button>
+                {planChecks.length > 0 && <div className="helper-text" role="status">{planChecks.map((check, index) => <p key={`${check.scene ?? "all"}-${index}`} className={check.level === "error" ? "text-rose-300" : check.level === "warning" ? "text-amber-200" : "text-emerald-200"}>{check.scene ? `Cena ${String(check.scene).padStart(2, "0")}: ` : ""}{check.message}</p>)}</div>}
+              </>}
               <div className="property-divider" /><div className="section-label">PRODUÇÃO WAN · TERROR</div>
               <p className="helper-text">O Studio sobe ComfyUI/Wan, voz pt-BR, efeitos, legendas e montagem H.264 sem abrir outros aplicativos.</p>
               <p className="helper-text" role="status">{wanConfigStatus}</p>
@@ -656,7 +681,7 @@ export default function App() {
               <label className="field-label" htmlFor="wan-episode-prompts">ROTEIRO VISUAL · 8 CENAS, UMA DIREÇÃO POR LINHA</label>
               <textarea id="wan-episode-prompts" value={episodePromptDraft} maxLength={8192} rows={10} onChange={(event) => setEpisodePromptDraft(event.target.value)} />
               <p className="helper-text">7 cenas de 121 quadros + 1 de 113 = 60 s exatos. Narração pt-BR, efeitos sonoros e legendas entram automaticamente no MP4 final.</p>
-              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
+              <button className="primary-wide" onClick={() => void renderWanEpisode()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || planChecks.some((check) => check.level === "error")}>{wanBusy && episodeRun ? "RENDERIZANDO EPISÓDIO…" : "GERAR 8 CENAS WAN · 60 S"}</button>
               {wanRun && <div className="helper-text" role="status">
                 <b>{wanRun.state === "completed" ? (episodeRun ? "Episódio finalizado: 60 s, narração e legendas incluídas." : "Cena pronta.") : wanRun.state === "failed" ? "A renderização falhou." : `${episodeRun ? `Fila do episódio · ${wanRun.jobs.filter((job) => job.state === "completed").length}/9 etapas` : "Fila Wan"}: ${wanRun.state}.`}</b>
                 {wanRun.error && <span> {wanRun.error}</span>}
