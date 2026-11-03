@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanVideoClip, segmentGraphemes, updateGraphemeStyle, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanVideoClip, segmentGraphemes, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("segments composed and accented text as Unicode graphemes", () => {
   assert.deepEqual(segmentGraphemes("Ação 👩🏽‍🚀 e\u0301"), ["A", "ç", "ã", "o", " ", "👩🏽‍🚀", " ", "é"]);
@@ -49,4 +49,12 @@ test("video URLs remain same-origin and reject non-identifier paths", () => {
   assert.equal(wanVideoPreviewUrl("run", "https://example.com/video.mp4"), null);
   assert.throws(() => addWanVideoClip({ fps: 24, tracks: [] },
     { runId: "run", artifactId: "../../bad", frames: 81, fps: 16 }));
+});
+
+test("imports single-scene runs whose project ID has the backend motion prefix", () => {
+  assert.equal(wanRunMatchesProject("motion-project123", "project123"), true);
+  assert.equal(wanRunMatchesProject("project123", "project123"), true);
+  assert.equal(wanRunMatchesProject("motion-other", "project123"), false);
+  assert.equal(wanRunMatchesProject(undefined, "project123"), false);
+  assert.equal(wanRunMatchesProject("motion-project1234", "project123"), false);
 });
