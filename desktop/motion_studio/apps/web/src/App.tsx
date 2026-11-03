@@ -225,6 +225,83 @@ export default function App() {
     setSelectedClip(null);
   }, [project?.id]);
 
+  // A saved scene remains available after a refresh; imports are deduplicated by run and artifact ID.
+  const syncCompletedVideos = useCallback(async (runs: MotionRun[], targetProjectId: string) => {
+    const videos = [...runs].reverse()
+      .filter((run) => run.project_id === targetProjectId)
+      .flatMap((run) => run.jobs.filter((job) =>
+        job.adapter === "comfyui_wan" && job.state === "completed" && job.artifact &&
+        Number.isInteger(job.frames) && Number.isInteger(job.fps),
+      ).map((job) => ({
+        runId: run.id, artifactId: job.artifact!.id,
+        name: "Cena Wan " + job.id.replace("scene_", ""),
+        frames: job.frames!, fps: job.fps!,
+      })));
+    if (!videos.length) return;
+    const fresh = await request<Project>("/api/projects/" + targetProjectId);
+    let timeline = fresh.timeline;
+    for (const video of videos) timeline = addWanVideoClip(timeline, video);
+    if (timeline === fresh.timeline) return;
+    const updated = await request<Project>("/api/projects/" + targetProjectId, {
+      method: "PUT",
+      body: JSON.stringify({ title: fresh.title, summary: fresh.summary, timeline }),
+    });
+    setProjects((current) => current.map((item) => item.id === targetProjectId ? updated : item));
+    setProject((current) => current?.id === targetProjectId ? updated : current);
+    const last = timeline.tracks.find((track) => track.kind === "video")?.clips.at(-1);
+    if (last) {
+      videoRef.current?.pause();
+      setPlaying(false);
+      setSelectedClip(last.id);
+      setPlayheadFrame(last.start_frame);
+      setImportNotice("Cena Wan adicionada à timeline. Use ▶ para reproduzir.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!embedded || !project?.id) return;
+    let active = true;
+    void centralRequest<MotionRun[]>("/api/motion/runs")
+      .then((runs) => active ? syncCompletedVideos(runs, project.id) : undefined)
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Não foi possível recuperar as cenas Wan.");
+      });
+    return () => { active = false; };
+  }, [embedded, project?.id, syncCompletedVideos]);
+
+  function seekTo(frame: number) {
+    const next = Math.max(0, Math.min(projectLength, Math.floor(frame)));
+    videoRef.current?.pause();
+    setPlaying(false);
+    setPlayheadFrame(next);
+    if (!project) return;
+    const clip = clipAtFrame(project.timeline, next, "video");
+    if (clip) {
+      setSelectedClip(clip.id);
+      if (clip.id === activeVideoClip?.id && videoRef.current) {
+        videoRef.current.currentTime = (next - clip.start_frame) / fps;
+      }
+    }
+  }
+
+  async function togglePlayback() {
+    const player = videoRef.current;
+    if (!player || !activeVideoClip) return;
+    if (!player.paused) {
+      player.pause();
+      setPlaying(false);
+      return;
+    }
+    try {
+      if (player.currentTime >= player.duration - 0.1) player.currentTime = 0;
+      await player.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+      setError("O navegador não conseguiu reproduzir o MP4. Confira a autorização de pasta e o arquivo.");
+    }
+  }
+
   async function createProject() {
     try {
       const created = await request<Project>("/api/projects", {
@@ -244,12 +321,15 @@ export default function App() {
     }
   }
 
-  async function refreshWanRun(runId: string) {
+  async function refreshWanRun(runId: string, targetProjectId: string) {
     try {
-      const latest = await centralRequest<MotionRun>(`/api/motion/runs/${runId}`);
+      const latest = await centralRequest<MotionRun>("/api/motion/runs/" + runId);
       setWanRun(latest);
+      if (latest.jobs.some((job) => job.adapter === "comfyui_wan" && job.state === "completed" && job.artifact)) {
+        await syncCompletedVideos([latest], targetProjectId);
+      }
       if (latest.state === "queued" || latest.state === "running") {
-        window.setTimeout(() => void refreshWanRun(runId), 1500);
+        window.setTimeout(() => void refreshWanRun(runId, targetProjectId), 1500);
       } else {
         setWanBusy(false);
       }
@@ -278,7 +358,7 @@ export default function App() {
       });
       setWanRun(run);
       setError("");
-      void refreshWanRun(run.id);
+      void refreshWanRun(run.id, project.id);
     } catch (reason) {
       setWanBusy(false);
       setError(reason instanceof Error ? reason.message : "Não foi possível iniciar a cena Wan.");
@@ -302,7 +382,7 @@ export default function App() {
       });
       setWanRun(run);
       setError("");
-      void refreshWanRun(run.id);
+      void refreshWanRun(run.id, project.id);
     } catch (reason) {
       setWanBusy(false);
       setError(reason instanceof Error ? reason.message : "Não foi possível iniciar o episódio Wan.");
