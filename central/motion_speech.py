@@ -27,11 +27,11 @@ def resolve_voices(dialogue, assignments=None):
     return {cue['speaker']: assignments.get(cue['speaker'], DEFAULT_VOICES.get(cue['speaker'], 'lara')) for cue in dialogue}
 
 
-def synthesize_episode(directory, run_id, dialogue, seed, assignments=None, duration=60, engine='sapi'):
+def synthesize_episode(directory, run_id, dialogue, seed, assignments=None, duration=60, engine='sapi', user_id=None):
     directory = Path(directory)
     audio_path = directory / f'narration_{run_id}.wav'
     captions_path = directory / f'captions_{run_id}.json'
-    if engine not in ('sapi', 'voicestudio'):
+    if engine not in ('sapi', 'voicestudio', 'chatterbox'):
         raise SpeechError('Motor de voz desconhecido.')
     pythoncom = None
     if engine == 'sapi':
@@ -55,15 +55,25 @@ def synthesize_episode(directory, run_id, dialogue, seed, assignments=None, dura
             stream = win32com.client.Dispatch('SAPI.SpFileStream')
             selected = resolve_voices(dialogue, assignments)
         else:
-            from .motion_voicestudio import available_voices
-            valid = {item['id'] for item in available_voices()}
-            selected = {cue['speaker']: (assignments or {}).get(cue['speaker'], 'default') for cue in dialogue}
+            if engine == 'chatterbox':
+                from .motion_chatterbox import available_voices
+            else:
+                from .motion_voicestudio import available_voices
+            valid = {item['id'] for item in available_voices(user_id) if user_id} if engine == 'chatterbox' else {item['id'] for item in available_voices()}
+            selected = {cue['speaker']: (assignments or {}).get(cue['speaker'], '') for cue in dialogue}
             if any(profile not in valid for profile in selected.values()):
-                raise SpeechError('Escolha uma voz disponível no VoiceStudio para cada personagem.')
+                raise SpeechError('Escolha uma voz disponível para cada personagem.')
         with tempfile.TemporaryDirectory(prefix='motion-speech-', dir=directory) as work:
             utterances = []
+            chatterbox_audio = None
+            if engine == 'chatterbox':
+                from .motion_chatterbox import synthesize_lines
+                chatterbox_audio = synthesize_lines([(cue['text'], selected[cue['speaker']]) for cue in dialogue], user_id)
             for index, cue in enumerate(dialogue):
-                if engine == 'voicestudio':
+                if engine == 'chatterbox':
+                    audio = chatterbox_audio[index]
+                    utterances.append((cue, audio, len(audio) // 2))
+                elif engine == 'voicestudio':
                     from .motion_voicestudio import synthesize_line
                     audio = synthesize_line(cue['text'], selected[cue['speaker']])
                     utterances.append((cue, audio, len(audio) // 2))
@@ -88,7 +98,7 @@ def synthesize_episode(directory, run_id, dialogue, seed, assignments=None, dura
                                                  for i in range(round(len(spoken) / factor))))
                         utterances.append((cue, spoken.tobytes(), len(spoken)))
 
-            rate = 48000 if engine == 'voicestudio' else 22050
+            rate = 48000 if engine in ('voicestudio', 'chatterbox') else 22050
             samples = array('h', [0]) * (rate * duration)
             rng = random.Random(seed)
             for index in range(len(samples)):
@@ -151,7 +161,8 @@ def synthesize_episode(directory, run_id, dialogue, seed, assignments=None, dura
         raise
     except Exception as exc:
         from .motion_voicestudio import VoiceStudioError
-        if isinstance(exc, VoiceStudioError):
+        from .motion_chatterbox import ChatterboxError
+        if isinstance(exc, (VoiceStudioError, ChatterboxError)):
             raise SpeechError(str(exc)) from exc
         raise SpeechError('Não foi possível gerar a narração local em pt-BR.') from exc
     finally:

@@ -1853,24 +1853,39 @@ class MotionWanEpisodeIn(BaseModel):
     scene_prompts: list[str] = Field(min_length=8, max_length=8)
     dialogue: list[MotionWanDialogueIn] | None = Field(default=None, max_length=12)
     voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
-    voice_engine: Literal['sapi', 'voicestudio'] = 'sapi'
+    voice_engine: Literal['sapi', 'voicestudio', 'chatterbox'] = 'sapi'
     seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
 
 
 class MotionVoicePreviewIn(BaseModel):
     text: str = Field(min_length=1, max_length=180)
     profile: str = Field(min_length=1, max_length=128)
-    engine: Literal['sapi', 'voicestudio'] = 'sapi'
+    engine: Literal['sapi', 'voicestudio', 'chatterbox'] = 'sapi'
+
+
+class MotionVoiceImportIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    audio_data: str = Field(min_length=1000, max_length=7_000_000)
 
 
 @app.get('/api/motion/voices')
 def motion_voices(request:Request,user=Depends(current_user)):
     local_only(request)
-    from .motion_voicestudio import VoiceStudioError, available_voices, engine_ready
+    from .motion_chatterbox import available_voices, engine_ready
+    return {'engine':'chatterbox','ready':engine_ready(),'voices':available_voices(user['id'])}
+
+
+@app.post('/api/motion/voices/import')
+def motion_voice_import(data:MotionVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import base64
+    import binascii
+    from .motion_chatterbox import ChatterboxError, import_voice
+    raw = data.audio_data.partition(',')[2] if data.audio_data.startswith('data:audio/wav;base64,') else data.audio_data
     try:
-        return {'engine':'voicestudio','ready':engine_ready(),'voices':available_voices()}
-    except VoiceStudioError:
-        return {'engine':'voicestudio','ready':False,'voices':[]}
+        return import_voice(user['id'], data.name, base64.b64decode(raw, validate=True))
+    except (ChatterboxError, binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
 
 
 @app.post('/api/motion/voices/preview')
@@ -1886,7 +1901,7 @@ def motion_voice_preview(data:MotionVoicePreviewIn,request:Request,user=Depends(
         raise HTTPException(422,'A fala precisa conter texto válido.') from None
     with tempfile.TemporaryDirectory(prefix='motion-voice-preview-') as directory:
         try:
-            audio,_=synthesize_episode(directory,'preview',[{'start':0,'speaker':'Prévia','text':spoken}],0,{'Prévia':data.profile},12,data.engine)
+            audio,_=synthesize_episode(directory,'preview',[{'start':0,'speaker':'Prévia','text':spoken}],0,{'Prévia':data.profile},12,data.engine,user['id'])
         except SpeechError as exc:
             raise HTTPException(503,str(exc)) from None
         return {'audio_data':base64.b64encode(audio.read_bytes()).decode('ascii')}
@@ -2107,7 +2122,7 @@ def motion_wan_episode(data:MotionWanEpisodeIn,request:Request,user=Depends(curr
     episode_folder=target(grant,f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}',directory=True)
     try:
         audio_path,captions_path=synthesize_episode(
-            episode_folder,run_id,dialogue,data.seed,data.voice_profiles,60,data.voice_engine)
+            episode_folder,run_id,dialogue,data.seed,data.voice_profiles,60,data.voice_engine,user['id'])
     except SpeechError as exc:
         raise HTTPException(503,str(exc)) from None
     manifest,workflows=build_episode_manifest(

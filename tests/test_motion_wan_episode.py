@@ -29,7 +29,7 @@ def test_studio_wan_episode_queues_eight_scenes_with_exactly_sixty_seconds(
     monkeypatch.setattr("central.comfy_runtime.COMFY_RUNTIME.ensure_started", lambda config: "running")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
-    def synthesize(directory, run_id, dialogue, seed, assignments=None, duration=60, engine='sapi'):
+    def synthesize(directory, run_id, dialogue, seed, assignments=None, duration=60, engine='sapi', user_id=None):
         audio = directory / f"narration_{run_id}.wav"
         captions = directory / f"captions_{run_id}.json"
         with wave.open(str(audio), "wb") as stream:

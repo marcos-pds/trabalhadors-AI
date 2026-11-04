@@ -144,6 +144,8 @@ export default function App() {
   const [voicePreview, setVoicePreview] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceCatalog, setVoiceCatalog] = useState<{ ready: boolean; voices: { id: string; name: string }[] }>({ ready: false, voices: [] });
+  const [voiceImportBusy, setVoiceImportBusy] = useState(false);
+  const voiceInputRef = useRef<HTMLInputElement | null>(null);
   const [themeDraft, setThemeDraft] = useState("");
   const [episodePlan, setEpisodePlan] = useState<PlannedScene[]>([]);
   const [planningBusy, setPlanningBusy] = useState(false);
@@ -577,6 +579,31 @@ export default function App() {
     setVoicePreview(null);
   }
 
+  async function importCharacterVoice(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 5_000_000 || !file.name.toLowerCase().endsWith(".wav")) {
+      setError("Envie um WAV mono de até 5 MB, com 3 a 30 segundos de fala limpa.");
+      return;
+    }
+    setVoiceImportBusy(true);
+    try {
+      const audio_data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Não foi possível ler o WAV."));
+        reader.readAsDataURL(file);
+      });
+      await centralRequest("/api/motion/voices/import", { method: "POST", body: JSON.stringify({
+        name: file.name.replace(/\.wav$/i, ""), audio_data: audio_data.split(",", 2)[1] ?? "",
+      }) });
+      setVoiceCatalog(await centralRequest<typeof voiceCatalog>("/api/motion/voices"));
+      setError("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível importar a voz."); }
+    finally { setVoiceImportBusy(false); }
+  }
+
   async function previewCharacterVoice(speaker: string) {
     if (!project) return;
     setVoiceBusy(true);
@@ -586,7 +613,7 @@ export default function App() {
       if (!profile) throw new Error(`Escolha uma voz do VoiceStudio para ${speaker}.`);
       const text = episodeDialogue.find((cue) => cue.speaker === speaker)?.text ?? "Teste de voz.";
       const result = await centralRequest<{ audio_data: string }>("/api/motion/voices/preview", {
-        method: "POST", body: JSON.stringify({ profile, text, engine: "voicestudio" }),
+        method: "POST", body: JSON.stringify({ profile, text, engine: "chatterbox" }),
       });
       setVoicePreview(`data:audio/wav;base64,${result.audio_data}`);
       setError("");
@@ -610,7 +637,7 @@ export default function App() {
     try {
       const run = await centralRequest<MotionRun>("/api/motion/wan/episodes", {
         method: "POST",
-        body: JSON.stringify({ project_id: project.id, episode: episodeNumber, scene_prompts: prompts, dialogue: episodeDialogue, voice_profiles: project.timeline.storyboard?.voice_profiles ?? {}, voice_engine: "voicestudio" }),
+        body: JSON.stringify({ project_id: project.id, episode: episodeNumber, scene_prompts: prompts, dialogue: episodeDialogue, voice_profiles: project.timeline.storyboard?.voice_profiles ?? {}, voice_engine: "chatterbox" }),
       });
       setWanRun(run);
       setError("");
@@ -896,10 +923,11 @@ export default function App() {
               <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
               <div className="property-divider" />
               <div className="section-label">VOZES DOS PERSONAGENS</div>
-              <p className="helper-text">Motor: VoiceStudio local. Salve uma voz diferente para cada personagem; o ID permanece no projeto e nas legendas.</p>
-              {!voiceCatalog.ready && <p className="helper-text text-amber-200">Inicie o VoiceStudio e instale um modelo de voz para carregar os perfis.</p>}
-              {voiceCatalog.ready && voiceCatalog.voices.length === 0 && <p className="helper-text text-amber-200">Crie e salve perfis de voz no VoiceStudio. Os nomes aparecerão aqui.</p>}
+              <p className="helper-text">Motor Chatterbox Multilingual V3 dentro da Central. Escolha uma referência de voz para cada personagem.</p>
+              {!voiceCatalog.ready && <p className="helper-text text-amber-200">Instale o motor Chatterbox local para gerar novas falas.</p>}
+              {voiceCatalog.ready && voiceCatalog.voices.length === 0 && <p className="helper-text text-amber-200">Importe referências de voz WAV para criar os personagens.</p>}
               <button className="quiet-button voice-refresh" onClick={() => void centralRequest<typeof voiceCatalog>("/api/motion/voices").then(setVoiceCatalog).catch(() => setVoiceCatalog({ ready: false, voices: [] }))}>ATUALIZAR VOZES</button>
+              <button className="quiet-button voice-refresh" disabled={voiceImportBusy} onClick={() => voiceInputRef.current?.click()}>{voiceImportBusy ? "IMPORTANDO…" : "IMPORTAR VOZ WAV"}</button><input ref={voiceInputRef} type="file" accept=".wav,audio/wav" hidden onChange={(event) => void importCharacterVoice(event)} />
               {speakers.map((speaker) => <div key={speaker} className="voice-row">
                 <div><label className="field-label" htmlFor={`voice-${speaker}`}>{speaker}</label><select id={`voice-${speaker}`} value={project.timeline.storyboard?.voice_profiles?.[speaker] ?? ""} onChange={(event) => setCharacterVoice(speaker, event.target.value)}><option value="">Selecione uma voz</option>{voiceCatalog.voices.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></div>
                 <button className="quiet-button" disabled={!voiceCatalog.ready || voiceBusy || !project.timeline.storyboard?.voice_profiles?.[speaker]} onClick={() => void previewCharacterVoice(speaker)}>OUVIR</button>
