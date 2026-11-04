@@ -180,6 +180,10 @@ class MotionQueue:
             job['fps']=params.get('fps')
             job['replace_clip_id']=params.get('replace_clip_id')
             job['scene_number']=params.get('scene_number')
+            job['speech_artifact_id']=params.get('speech_artifact_id')
+            job['speech_text']=params.get('speech_text')
+            job['speaker']=params.get('speaker')
+            job['voice_profile']=params.get('voice_profile')
         return dict(run,project_id=manifest.get('project_id'),jobs=jobs)
 
     def list(self,user):

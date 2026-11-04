@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -51,6 +51,23 @@ test("imports a completed Wan scene at the end of the video track exactly once",
   assert.equal(second.tracks[0].clips[1].start_frame, 122);
   assert.equal(second.tracks[0].clips[1].duration_frames, 182);
   assert.equal(second.tracks[1].clips.length, 0);
+});
+
+test("scene speech follows video timing, survives refresh, and is replaced with the scene", () => {
+  const empty = { fps: 24, tracks: [
+    { id: 'video', kind: 'video', clips: [] }, { id: 'sound', kind: 'audio', clips: [] },
+  ] };
+  const first = addWanVideoClip(empty, { runId: 'run1', artifactId: 'video', name: 'Cena 1', frames: 81, fps: 16 });
+  const input = { runId: 'run1', artifactId: 'speech', videoArtifactId: 'video', speaker: 'Lara', text: 'Oi.', voiceProfile: 'lara' };
+  const spoken = addWanSpeechClip(first, input);
+  assert.equal(spoken.tracks[1].clips[0].start_frame, 0);
+  assert.equal(spoken.tracks[1].clips[0].duration_frames, 122);
+  assert.strictEqual(addWanSpeechClip(spoken, input), spoken);
+  const oldId = spoken.tracks[0].clips[0].id;
+  const revised = addWanVideoClip(spoken, { runId: 'run2', artifactId: 'video', name: 'Cena 1', frames: 81, fps: 16, replaceClipId: oldId });
+  assert.equal(revised.tracks[1].clips.length, 0);
+  const resynthesized = addWanSpeechClip(revised, { ...input, runId: 'run2', replaceClipId: oldId });
+  assert.equal(resynthesized.tracks[1].clips[0].style.source_video_clip_id, revised.tracks[0].clips[0].id);
 });
 
 test("reviews one scene without changing neighboring clips", () => {

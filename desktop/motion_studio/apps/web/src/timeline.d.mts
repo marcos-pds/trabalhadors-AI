@@ -26,6 +26,10 @@ export function addWanVideoClip<T extends TimelineShape>(
   timeline: T,
   video: { runId: string; artifactId: string; name: string; frames: number; fps: number; replaceClipId?: string; sceneNumber?: number; plannedPrompt?: string; plannedTitle?: string },
 ): T;
+export function addWanSpeechClip<T extends TimelineShape>(
+  timeline: T,
+  speech: { runId: string; artifactId: string; videoArtifactId: string; speaker: string; text: string; voiceProfile: string; replaceClipId?: string },
+): T;
 
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;
 export function compositionEndFrame(timeline: TimelineShape): number;

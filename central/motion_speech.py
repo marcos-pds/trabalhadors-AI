@@ -20,6 +20,35 @@ class SpeechError(RuntimeError):
     """Local Portuguese speech synthesis is unavailable or invalid."""
 
 
+def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, user_id):
+    """Generate one character line without trimming speech to fit the scene."""
+    from .motion_chatterbox import ChatterboxError, available_voices, synthesize_lines
+    if profile not in {voice['id'] for voice in available_voices(user_id)}:
+        raise SpeechError('Escolha uma voz disponível para este personagem.')
+    try:
+        audio = synthesize_lines([(text, profile)], user_id)[0]
+    except ChatterboxError as exc:
+        raise SpeechError(str(exc)) from exc
+    rate = 48000
+    capacity = round(frames * rate / fps)
+    if len(audio) // 2 > capacity:
+        raise SpeechError(f'A fala de {speaker} dura {len(audio) / (2 * rate):.1f} s e excede os {frames / fps:.1f} s da cena. Encurte a fala ou divida em outra cena.')
+    directory = Path(directory)
+    audio_path = directory / f'speech_{run_id}.wav'
+    captions_path = directory / f'speech_{run_id}.json'
+    with audio_path.open('xb') as stream, wave.open(stream, 'wb') as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(rate)
+        output.writeframes(audio + bytes(capacity * 2 - len(audio)))
+    captions_path.write_text(json.dumps({
+        'language': 'pt-BR', 'engine': 'chatterbox',
+        'segments': [{'start': 0, 'end': len(audio) / (2 * rate),
+                      'speaker': speaker, 'voice_profile': profile, 'text': text}],
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return audio_path, captions_path
+
+
 def resolve_voices(dialogue, assignments=None):
     assignments = assignments or {}
     if any(value not in VOICE_PROFILES for value in assignments.values()):

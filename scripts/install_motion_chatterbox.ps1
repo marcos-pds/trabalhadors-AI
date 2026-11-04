@@ -9,6 +9,17 @@ $python = Join-Path $runtime 'Scripts\python.exe'
 
 uv venv $runtime --python $Python311
 if ($LASTEXITCODE -ne 0) { throw 'Não foi possível criar o ambiente Python 3.11.' }
+$config = Join-Path $runtime 'pyvenv.cfg'
+$homeLine = Get-Content $config | Where-Object { $_ -match '^home = ' } | Select-Object -First 1
+if (-not $homeLine) { throw 'O ambiente Python não informou a instalação base.' }
+$sourceBase = $homeLine -replace '^home = ', ''
+$localBase = Join-Path $repo 'data\motion-studio\python311-base'
+if (-not (Test-Path (Join-Path $localBase 'python.exe'))) {
+    if (-not (Test-Path (Join-Path $sourceBase 'python.exe'))) { throw 'A instalação base do Python 3.11 não foi encontrada.' }
+    Copy-Item -LiteralPath $sourceBase -Destination $localBase -Recurse -Force
+}
+$lines = Get-Content $config | ForEach-Object { if ($_ -match '^home = ') { "home = $localBase" } else { $_ } }
+[System.IO.File]::WriteAllLines($config, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
 uv pip install --python $python 'chatterbox-tts==0.1.7'
 if ($LASTEXITCODE -ne 0) { throw 'Não foi possível instalar as dependências Chatterbox.' }
 uv pip install --python $python --no-deps 'git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2'

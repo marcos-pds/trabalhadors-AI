@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
-import { addTextClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -18,7 +18,7 @@ type VoiceProfile = string;
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 type PlannedScene = { scene: number; title: string; prompt: string; hook?: string; cliffhanger?: string };
 type PlanCheck = { scene?: number; level: "ok" | "warning" | "error"; message: string };
@@ -124,6 +124,8 @@ export default function App() {
   const [wanConfigSaved, setWanConfigSaved] = useState(false);
   const [wanConfigStatus, setWanConfigStatus] = useState("Iniciando automaticamente os motores locais…");
   const [scenePrompt, setScenePrompt] = useState("Vertical cinematic 3D horror scene, a small geometric glass figure crossing a dim abandoned hallway, cold blue moonlight, deep shadows, slow camera push, unsettling atmosphere, polished motion design, no text.");
+  const [sceneSpeechText, setSceneSpeechText] = useState("");
+  const [sceneSpeaker, setSceneSpeaker] = useState("Lara");
   const [episodeNumber, setEpisodeNumber] = useState(1);
   const [sceneNumber, setSceneNumber] = useState(1);
   const [videoModel, setVideoModel] = useState<"wan" | "ltxv">("wan");
@@ -161,6 +163,7 @@ export default function App() {
   const [importNotice, setImportNotice] = useState("");
   const [reviewComment, setReviewComment] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingPlaybackClipRef = useRef<string | null>(null);
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
 
@@ -282,10 +285,21 @@ export default function App() {
   const finalArtifact = wanRun?.state === "completed" && episodeApproved ? wanRun.jobs.find((job) => job.id === "assemble" && job.artifact)?.artifact : null;
   const activeVideoClip = project ? (clipAtFrame(project.timeline, playheadFrame, "video") ??
     (selected?.kind === "video" ? selected : undefined)) : undefined;
+  const activeAudioClip = project && activeVideoClip ? project.timeline.tracks
+    .filter((track) => track.kind === "audio").flatMap((track) => track.clips)
+    .find((clip) => clip.style.source_video_clip_id === activeVideoClip.id) : undefined;
 
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
   }, [selected?.id, selected?.kind, selected?.style.review_comment]);
+
+  useEffect(() => {
+    if (selected?.kind !== "video" || !project) return;
+    const speech = project.timeline.tracks.filter((track) => track.kind === "audio")
+      .flatMap((track) => track.clips).find((clip) => clip.style.source_video_clip_id === selected.id);
+    setSceneSpeechText(String(speech?.style.speech_text ?? ""));
+    setSceneSpeaker(String(speech?.style.speaker ?? "Lara"));
+  }, [selected?.id, project?.id]);
 
   useEffect(() => {
     const storyboard = project?.timeline.storyboard;
@@ -298,6 +312,7 @@ export default function App() {
 
   useEffect(() => {
     videoRef.current?.pause();
+    audioRef.current?.pause();
     setPlaying(false);
     setPlayheadFrame(0);
     setSelectedClip(null);
@@ -316,6 +331,10 @@ export default function App() {
         frames: job.frames!, fps: job.fps!,
         sceneNumber: job.scene_number ?? (Number(job.id.replace("scene_", "")) || undefined),
         replaceClipId: job.replace_clip_id ?? undefined,
+        speechArtifactId: job.speech_artifact_id ?? undefined,
+        speechText: job.speech_text ?? undefined,
+        speaker: job.speaker ?? undefined,
+        voiceProfile: job.voice_profile ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
@@ -323,6 +342,11 @@ export default function App() {
     for (const video of videos) {
       const planned = timeline.storyboard?.scenes.find((scene) => scene.scene === video.sceneNumber);
       timeline = addWanVideoClip(timeline, { ...video, name: planned?.title || video.name, plannedPrompt: planned?.prompt, plannedTitle: planned?.title });
+      if (video.speechArtifactId) timeline = addWanSpeechClip(timeline, {
+        runId: video.runId, artifactId: video.speechArtifactId, videoArtifactId: video.artifactId,
+        speaker: video.speaker ?? "Personagem", text: video.speechText ?? "",
+        voiceProfile: video.voiceProfile ?? "", replaceClipId: video.replaceClipId,
+      });
     }
     if (timeline === fresh.timeline) return;
     if (timeline.storyboard?.episode_status === "approved") {
@@ -364,6 +388,7 @@ export default function App() {
     const next = Math.max(0, Math.min(projectLength, Math.floor(frame)));
     pendingPlaybackClipRef.current = null;
     videoRef.current?.pause();
+    audioRef.current?.pause();
     setPlaying(false);
     setPlayheadFrame(next);
     if (!project) return;
@@ -372,6 +397,7 @@ export default function App() {
       setSelectedClip(clip.id);
       if (clip.id === activeVideoClip?.id && videoRef.current) {
         videoRef.current.currentTime = (next - clip.start_frame) / fps;
+        if (audioRef.current) audioRef.current.currentTime = (next - clip.start_frame) / fps;
       }
     }
   }
@@ -382,6 +408,10 @@ export default function App() {
     player.currentTime = Math.max(0, (playheadFrame - activeVideoClip.start_frame) / fps);
     try {
       await player.play();
+      if (audioRef.current) {
+        audioRef.current.currentTime = player.currentTime;
+        await audioRef.current.play();
+      }
       setPlaying(true);
     } catch {
       setPlaying(false);
@@ -394,6 +424,7 @@ export default function App() {
     if (!player || !activeVideoClip) return;
     if (!player.paused) {
       player.pause();
+      audioRef.current?.pause();
       setPlaying(false);
       return;
     }
@@ -404,6 +435,7 @@ export default function App() {
 
   function handleVideoEnded() {
     if (!project || !activeVideoClip) return;
+    audioRef.current?.pause();
     const next = videoClips.find((clip) => clip.start_frame >= activeVideoClip.start_frame + activeVideoClip.duration_frames);
     if (!next) {
       pendingPlaybackClipRef.current = null;
@@ -475,6 +507,8 @@ export default function App() {
           fps: 16,
           ...(videoModel === "ltxv" ? { image_data: characterReference?.image_data } : {}),
           replace_clip_id: replaceClipId ?? null,
+          ...(sceneSpeechText.trim() ? { speech_text: sceneSpeechText.trim(), speaker: sceneSpeaker,
+            voice_profile: project.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? null } : {}),
         }),
       });
       setWanRun(run);
@@ -783,7 +817,10 @@ export default function App() {
               frame={playheadFrame}
               videoClip={activeVideoClip} videoRef={videoRef}
               onVideoTime={(seconds) => {
-                if (activeVideoClip) setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
+                if (activeVideoClip) {
+                  setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
+                  if (audioRef.current && Math.abs(audioRef.current.currentTime - seconds) > .12) audioRef.current.currentTime = seconds;
+                }
               }}
               onVideoEnded={handleVideoEnded}
               onVideoReady={() => {
@@ -792,7 +829,10 @@ export default function App() {
                   if (pendingPlaybackClipRef.current === activeVideoClip.id) {
                     pendingPlaybackClipRef.current = null;
                     player.currentTime = 0;
-                    void player.play().then(() => setPlaying(true)).catch(() => {
+                    void player.play().then(() => {
+                      setPlaying(true);
+                      if (audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); }
+                    }).catch(() => {
                       setPlaying(false);
                       setError("O navegador não conseguiu reproduzir a próxima cena Wan.");
                     });
@@ -802,6 +842,14 @@ export default function App() {
                 }
               }}
             />
+            {activeAudioClip && <audio key={activeAudioClip.id} ref={audioRef}
+              src={wanVideoPreviewUrl(activeAudioClip.style.motion_run_id, activeAudioClip.style.motion_artifact_id) ?? undefined}
+              preload="metadata" aria-label={`Fala de ${activeAudioClip.style.speaker}`}
+              onLoadedMetadata={(event) => {
+                const seconds = videoRef.current?.currentTime ?? Math.max(0, (playheadFrame - activeAudioClip.start_frame) / fps);
+                event.currentTarget.currentTime = seconds;
+                if (videoRef.current && !videoRef.current.paused) void event.currentTarget.play();
+              }} />}
             <div className="transport">
               <button aria-label="Voltar ao início" onClick={() => seekTo(0)}>|◀</button>
               <button className="transport-play" aria-label={playing ? "Pausar prévia" : "Reproduzir prévia"}
@@ -917,10 +965,16 @@ export default function App() {
               </div>
               <label className="field-label" htmlFor="wan-scene-prompt">DIREÇÃO DA CENA</label>
               <textarea id="wan-scene-prompt" value={scenePrompt} maxLength={1024} onChange={(event) => setScenePrompt(event.target.value)} />
+              <label className="field-label" htmlFor="scene-speech">FALA DA CENA · OPCIONAL</label>
+              <textarea id="scene-speech" value={sceneSpeechText} maxLength={300} rows={2} placeholder="Escreva uma fala curta para caber em 5 segundos" onChange={(event) => setSceneSpeechText(event.target.value)} />
+              {sceneSpeechText.trim() && <><label className="field-label" htmlFor="scene-speaker">PERSONAGEM / VOZ</label>
+                <select id="scene-speaker" value={sceneSpeaker} onChange={(event) => setSceneSpeaker(event.target.value)}>
+                  {speakers.map((speaker) => <option key={speaker} value={speaker}>{speaker}{project.timeline.storyboard?.voice_profiles?.[speaker] ? " · voz pronta" : " · escolha uma voz abaixo"}</option>)}
+                </select><p className="helper-text">A fala será gerada com a voz fixa do personagem e aparecerá na trilha de áudio. Falas longas precisarão ser divididas em cenas.</p></>}
               <label className="field-label" htmlFor="video-model">MODELO DE VÍDEO</label>
               <select id="video-model" value={videoModel} onChange={(event) => setVideoModel(event.target.value as "wan" | "ltxv")}><option value="wan">Wan · texto para vídeo</option><option value="ltxv">LTX · imagem para vídeo</option></select>
               {videoModel === "ltxv" && <><label className="field-label" htmlFor="character-reference">IMAGEM MESTRA DA PERSONAGEM</label><select id="character-reference" value={characterReference?.id ?? ""} onChange={(event) => setCharacterReferenceId(event.target.value)}><option value="">Selecione uma imagem</option>{characterReferences.map((reference) => <option key={reference.id} value={reference.id}>{reference.name}</option>)}</select><p className="helper-text">Cada cena parte desta imagem. Para continuar um movimento, envie o último quadro da cena anterior como nova referência.</p></>}
-              <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
+              <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (sceneSpeechText.trim().length > 0 && (!voiceCatalog.ready || !project.timeline.storyboard?.voice_profiles?.[sceneSpeaker])) || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
               <div className="property-divider" />
               <div className="section-label">VOZES DOS PERSONAGENS</div>
               <p className="helper-text">Motor Chatterbox Multilingual V3 dentro da Central. Escolha uma referência de voz para cada personagem.</p>

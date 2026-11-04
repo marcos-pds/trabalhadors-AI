@@ -1835,6 +1835,9 @@ class MotionWanSceneIn(BaseModel):
     frames: int = Field(default=81, ge=5, le=129)
     fps: int = Field(default=16, ge=12, le=60)
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    speech_text: str | None = Field(default=None, max_length=300)
+    speaker: str | None = Field(default=None, max_length=64)
+    voice_profile: str | None = Field(default=None, pattern=r'^[a-f0-9]{16}$')
 
 
 class MotionLtxSceneIn(MotionWanSceneIn):
@@ -1961,6 +1964,49 @@ def motion_enqueue(data:MotionPlanIn,request:Request,user=Depends(current_user))
     return motion_call(lambda:MOTION.enqueue(user['id'],data.manifest,data.request_id,data.directory))
 
 
+def attach_scene_speech(manifest, data, grant, run_id, user_id):
+    """Add optional character speech as owner-scoped, downloadable scene artifacts."""
+    from .motion_contracts import ContractError, _text
+    from .motion_speech import SpeechError, synthesize_scene
+    from .workspace_tools import target
+
+    spoken = (data.speech_text or '').strip()
+    if not spoken:
+        if data.speaker or data.voice_profile:
+            raise HTTPException(422,'Escreva a fala para usar a voz selecionada.')
+        return
+    if not data.speaker or not data.voice_profile:
+        raise HTTPException(422,'Escolha o personagem e sua voz para gerar a fala.')
+    try:
+        spoken = _text(spoken, 300)
+        speaker = _text(data.speaker.strip(), 64)
+    except (ContractError, AttributeError):
+        raise HTTPException(422,'A fala ou o personagem contém texto inválido.') from None
+    relative = f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}'
+    current = ''
+    for part in relative.split('/'):
+        current = f'{current}/{part}'.strip('/')
+        try:
+            target(grant,current,directory=True)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            target(grant,current,creating=True).mkdir()
+    directory = target(grant,relative,directory=True)
+    try:
+        audio_path, captions_path = synthesize_scene(directory,run_id,spoken,speaker,
+            data.voice_profile,data.frames,data.fps,user_id)
+    except SpeechError as exc:
+        raise HTTPException(422,str(exc)) from None
+    prefix = f'episodes/{data.project_id}/episode_{data.episode:02d}/'
+    manifest['artifacts'].extend((
+        {'id':'speech','kind':'audio','path':prefix+audio_path.name,'provenance':{'source':'local'}},
+        {'id':'speech_captions','kind':'captions','path':prefix+captions_path.name,'provenance':{'source':'local'}},
+    ))
+    manifest['jobs'][0]['params'].update(speech_artifact_id='speech',speech_text=spoken,
+        speaker=speaker,voice_profile=data.voice_profile)
+
+
 @app.post('/api/motion/wan/scenes')
 def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
@@ -2008,6 +2054,7 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
                  'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
                            'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
     }
+    attach_scene_speech(manifest,data,grant,run_id,user['id'])
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
 
 
@@ -2068,6 +2115,7 @@ def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_
                  'params':{'model':'ltxv','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
                            'image_sha256':hashlib.sha256(image).hexdigest(),'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
     }
+    attach_scene_speech(manifest,data,grant,run_id,user['id'])
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'ltx-{run_id}','MotionStudio'))
 
 
@@ -2172,9 +2220,10 @@ def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_us
     """Stream an authorized, immutable MP4 inline without changing its download route."""
     local_only(request)
     path=motion_call(lambda:MOTION.artifact_path(user['id'],rid,aid))
-    if path.suffix.lower() != '.mp4':
-        raise HTTPException(415,'Prévia disponível somente para vídeos MP4.')
-    return FileResponse(path,filename=path.name,media_type='video/mp4',
+    media_type = {'.mp4':'video/mp4','.wav':'audio/wav'}.get(path.suffix.lower())
+    if media_type is None:
+        raise HTTPException(415,'Prévia disponível somente para vídeos MP4 e áudios WAV.')
+    return FileResponse(path,filename=path.name,media_type=media_type,
                         content_disposition_type='inline',
                         headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 

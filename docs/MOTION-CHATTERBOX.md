@@ -16,3 +16,11 @@ O repositório e o modelo são MIT. Para português brasileiro, o V3 geral usa `
 4. Gere o episódio. Todas as falas são processadas em um único trabalho local; a Central encaixa cada uma no tempo do roteiro e salva um WAV de 48 kHz mais as legendas.
 
 O VoiceStudio permanece disponível apenas como motor legado para episódios antigos. A reprodução dos WAVs e MP4s salvos independe de ambos os motores.
+
+## Fala por cena
+
+No Motion Studio, preencha **Fala da cena** e escolha o personagem antes de gerar uma cena Wan ou LTX. A Central usa a voz vinculada ao personagem, gera um WAV e uma legenda JSON na pasta do projeto, e adiciona a fala à trilha de áudio quando o vídeo fica pronto. Cenas sem fala continuam silenciosas. A fala precisa caber na duração da cena; nesse caso, a Central informa quando é necessário encurtá-la ou dividi-la.
+
+O preview reproduz o WAV junto com o vídeo e acompanha pausa, busca e passagem para a próxima cena. O MP4 individual gerado pelo modelo continua sendo o artefato visual; o WAV fica disponível separadamente para download e edição.
+
+No Windows, o instalador guarda também a Python base do Chatterbox em `data/motion-studio/python311-base`, para que a Central consiga iniciar o motor de voz mesmo quando está executando em outra versão do Python.

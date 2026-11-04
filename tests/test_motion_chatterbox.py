@@ -2,13 +2,14 @@ from io import BytesIO
 import base64
 import json
 import wave
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
 
 from central import motion_chatterbox as chatterbox
-from central.main import app, current_user
-from central.motion_speech import synthesize_episode
+from central.main import app, attach_scene_speech, current_user
+from central.motion_speech import SpeechError, synthesize_episode, synthesize_scene
 
 
 def reference():
@@ -47,6 +48,40 @@ def test_episode_batches_lines_and_preserves_character_voice(tmp_path, monkeypat
     assert json.loads(captions.read_text(encoding='utf-8'))['engine'] == 'chatterbox'
     with wave.open(str(audio), 'rb') as stream:
         assert stream.getnframes() == 5 * 48000
+
+
+def test_scene_speech_uses_selected_voice_and_exact_frame_duration(tmp_path, monkeypatch):
+    monkeypatch.setattr(chatterbox, 'available_voices', lambda owner: [{'id': 'lara', 'name': 'Lara'}] if owner == 'owner' else [])
+    calls = []
+    monkeypatch.setattr(chatterbox, 'synthesize_lines', lambda lines, owner: calls.append((lines, owner)) or [b'\x01\x00' * 4800])
+    audio, captions = synthesize_scene(tmp_path, 'one', 'Oi Lara.', 'Lara', 'lara', 81, 16, 'owner')
+    assert calls == [([('Oi Lara.', 'lara')], 'owner')]
+    with wave.open(str(audio), 'rb') as stream:
+        assert stream.getframerate() == 48000
+        assert stream.getnframes() == 243000
+    assert json.loads(captions.read_text(encoding='utf-8'))['segments'][0]['voice_profile'] == 'lara'
+    with pytest.raises(SpeechError, match='Escolha uma voz'):
+        synthesize_scene(tmp_path, 'other', 'Oi', 'Lara', 'lara', 81, 16, 'other')
+    monkeypatch.setattr(chatterbox, 'synthesize_lines', lambda lines, owner: [b'\x01\x00' * 300000])
+    with pytest.raises(SpeechError, match='excede'):
+        synthesize_scene(tmp_path, 'long', 'Fala longa', 'Lara', 'lara', 81, 16, 'owner')
+
+
+def test_scene_manifest_keeps_audio_and_captions_as_scoped_artifacts(tmp_path, monkeypatch):
+    def fake_speech(directory, run_id, text, speaker, profile, frames, fps, owner):
+        assert (text, speaker, profile, owner) == ('Olá.', 'Lara', 'a' * 16, 'owner')
+        audio, captions = directory / f'speech_{run_id}.wav', directory / f'speech_{run_id}.json'
+        audio.write_bytes(reference())
+        captions.write_text('{}', encoding='utf-8')
+        return audio, captions
+    monkeypatch.setattr('central.motion_speech.synthesize_scene', fake_speech)
+    manifest = {'artifacts': [], 'jobs': [{'params': {}}]}
+    data = SimpleNamespace(project_id='pilot', episode=1, frames=81, fps=16,
+        speech_text='Olá.', speaker='Lara', voice_profile='a' * 16)
+    attach_scene_speech(manifest, data, str(tmp_path), 'run1', 'owner')
+    assert [item['kind'] for item in manifest['artifacts']] == ['audio', 'captions']
+    assert manifest['jobs'][0]['params']['speech_artifact_id'] == 'speech'
+    assert (tmp_path / 'MotionStudio' / manifest['artifacts'][0]['path']).is_file()
 
 
 def test_missing_runtime_fails_explicitly(tmp_path, monkeypatch):

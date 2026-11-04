@@ -108,8 +108,25 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
     tracks: timeline.tracks.map((item) => item.id === track.id ?
       { ...item, clips: replaced
         ? item.clips.map((candidate) => candidate.id === replaced.id ? clip : candidate)
-        : [...item.clips, clip] } : item),
+        : [...item.clips, clip] } :
+      replaced && item.kind === 'audio' ?
+        { ...item, clips: item.clips.filter((candidate) => candidate.style?.source_video_clip_id !== replaced.id) } : item),
   };
+}
+
+export function addWanSpeechClip(timeline, { runId, artifactId, videoArtifactId, speaker, text, voiceProfile, replaceClipId }) {
+  if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error('Invalid generated audio reference');
+  const video = timeline.tracks.find((track) => track.kind === 'video')?.clips.find((clip) =>
+    clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === videoArtifactId);
+  const audioTrack = timeline.tracks.find((track) => track.kind === 'audio');
+  if (!video || !audioTrack) return timeline;
+  if (audioTrack.clips.some((clip) => clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === artifactId)) return timeline;
+  const clips = audioTrack.clips.filter((clip) => clip.style?.source_video_clip_id !== replaceClipId);
+  clips.push({ id: makeId('speech'), kind: 'audio', name: `${speaker} · fala`,
+    start_frame: video.start_frame, duration_frames: video.duration_frames,
+    style: { motion_run_id: runId, motion_artifact_id: artifactId,
+      source_video_clip_id: video.id, speaker, speech_text: text, voice_profile: voiceProfile } });
+  return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
 }
 
 /** Update review metadata for one scene without touching other clips or artifacts. */
