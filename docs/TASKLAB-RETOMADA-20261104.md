@@ -1,0 +1,7 @@
+# Retomada do TaskLab em 04/11/2026
+
+Laboratório isolado `lab-api-delegacao-20261031`, execução `27f9bbcd-9ca7-4299-88c0-2b0d18de1d96`. A origem ganhou duas APIs após a preparação do laboratório. O adaptador agora limita a sessão às APIs do snapshot original; identificador, modelo e metadados da seleção antiga devem continuar idênticos. Remoção ou desabilitação de uma API original impedem sua utilização. A credencial selecionada é revalidada em cada chamada do segmento; rotações entre segmentos exigem auditoria separada.
+
+Um segmento de 30 chamadas e 300 segundos retomou o backend. O pedido `pip_requirements` no worktree do backend foi revisado e aprovado para o `requirements.txt` de hash SHA256 `F05D109EDC84F71401C5B0C4C7275C0C4226F7154E7C9FC9F6A399D1DFBA8E80`; a instalação terminou com código 0. O segmento fez 23 chamadas, passou por falha de resposta e failover, e encerrou por prazo com a execução `cancelled` e o backend novamente na fila. O checkpoint e os arquivos do worktree permanecem; não houve promoção.
+
+O modelo repetiu leituras do frontend e uma tentativa de escrita em `frontend/package.json` falhou. Arquitetura está concluída; backend, frontend, testes delegados e revisão permanecem incompletos. Nenhum teste HTTP/Playwright independente nem gate final foi aprovado. A próxima retomada deve diagnosticar o ciclo de leitura/escrita e as pré-condições da edição antes de gastar outro segmento longo de APIs.

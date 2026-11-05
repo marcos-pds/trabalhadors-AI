@@ -171,6 +171,26 @@ class SourceProviders:
                      input_price=item.input_price, output_price=item.output_price)
                 for item in self._selected.values()]
 
+    def restrict_to_snapshot(self, expected):
+        """Keep only the lab's original APIs when new source APIs appear."""
+        if not isinstance(expected, list) or not expected:
+            raise ValueError('Selecao original do laboratorio invalida.')
+        selected = []
+        for descriptor in expected:
+            if (not isinstance(descriptor, dict) or
+                    not isinstance(descriptor.get('id'), str)):
+                raise ValueError('Selecao original do laboratorio invalida.')
+            item = self._selected.get(descriptor.get('id'))
+            if item is None:
+                raise ValueError('API original removida ou desabilitada; novo laboratorio necessario.')
+            selected.append(item)
+        if len({item.lab_id for item in selected}) != len(selected):
+            raise ValueError('API duplicada na selecao original.')
+        restricted = SourceProviders(self._key_path, selected)
+        if restricted.descriptors != expected:
+            raise ValueError('API original alterada; novo laboratorio necessario.')
+        return restricted
+
     def client(self, max_calls=80, timeout=90):
         return _Bridge(self._key_path, self._selected, max_calls, timeout)
 

@@ -184,9 +184,7 @@ async def process(args):
     state = state_at(args.destination)
     if args.source_user is None:
         args.source_user = state.get('source_user')
-    source = providers(args)
-    if state['providers'] != source.descriptors:
-        raise ValueError('Provider selection changed; explicit new lab required.')
+    source = providers(args).restrict_to_snapshot(state['providers'])
     db, data = connect(args.destination)
     engine = Engine(db, Security(db, data), client=source.client(max_calls=args.max_calls))
     original = engine.emit
