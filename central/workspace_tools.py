@@ -701,10 +701,33 @@ def validation_commands(folder, changed_files=None):
         if command not in commands:
             commands.append(command)
 
-    if ((root / 'tests').is_dir() or (root / 'pytest.ini').exists()
-            or (root / 'pyproject.toml').exists()
-            or any(root.glob('test_*.py')) or any(root.glob('*_test.py'))):
-        commands.append({'action': 'command', 'command': 'python_test'})
+    def has_python_tests(directory):
+        return ((directory / 'tests').is_dir() or (directory / 'pytest.ini').exists()
+                or (directory / 'pyproject.toml').exists()
+                or any(directory.glob('test_*.py')) or any(directory.glob('*_test.py')))
+
+    python_directories = []
+    for relative in changed_files or []:
+        if not isinstance(relative, str) or not relative.endswith('.py'):
+            continue
+        try:
+            path = target(folder, relative, creating=False)
+        except HTTPException:
+            continue
+        for directory in (path.parent, *path.parent.parents):
+            if not directory.is_relative_to(root):
+                break
+            if has_python_tests(directory):
+                python_directories.append(directory)
+                break
+    if not python_directories and has_python_tests(root):
+        python_directories.append(root)
+    for directory in python_directories:
+        command = {'action': 'command', 'command': 'python_test'}
+        if directory != root:
+            command['cwd'] = directory.relative_to(root).as_posix()
+        if command not in commands:
+            commands.append(command)
     if not commands:
         # Never claim a JavaScript app was validated by an empty compileall.
         python_files = any(root.glob('*.py')) or any(root.glob('src/*.py'))

@@ -314,6 +314,16 @@ def test_frontend_with_build_and_tests_runs_both_after_changes(tmp_path):
     assert [item['command'] for item in validation_commands(str(tmp_path), ['App.tsx'])] == ['npm_build','npm_test']
 
 
+def test_nested_python_backend_runs_its_tests(tmp_path):
+    from central.workspace_tools import validation_commands
+    backend = tmp_path / 'backend'
+    backend.mkdir()
+    (backend / 'main.py').write_text('value = 1\n', encoding='utf-8')
+    (backend / 'test_main.py').write_text('def test_value(): assert True\n', encoding='utf-8')
+    assert validation_commands(str(tmp_path), ['backend/main.py']) == [
+        {'action': 'command', 'command': 'python_test', 'cwd': 'backend'}]
+
+
 
 def test_legacy_failed_run_recovers_real_previous_edits_without_replaying_them(workspace):
     db, folder = workspace
