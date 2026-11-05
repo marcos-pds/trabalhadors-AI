@@ -92,11 +92,15 @@ async def prepare(args):
             'architecture': 'Planeje sem editar. Crie uma subtarefa real via delegate_task para recipient_agent_id code, '
                 'request_id tasklab-integration, title Testes de integracao, instructions Criar testes reais de integracao e corrigir falhas apos frontend/backend. '
                 'Depois finalize seu planejamento. Nao simule delegacao em texto.',
-            'backend': 'Implemente a API e um frontend minimo executavel para validar a integracao. '
-                'Crie backend/main.py e frontend/src/App.tsx. Organize npm run dev na raiz para iniciar a aplicacao local '
-                'e encaminhar /api para o backend. Use as ferramentas e teste o site real.',
+            'backend': 'Implemente somente a API FastAPI e seus testes em backend/. '
+                'Crie backend/main.py e backend/requirements.txt, instale na .venv desse cwd, '
+                'rode python_test com cwd backend e use preview start_api para confirmar /api/health. '
+                'Nao altere frontend/, package.json nem vite.config nesta etapa; o trabalhador '
+                'frontend e a revisao cuidarao da interface e do QA visual depois.',
             'frontend': 'Leia o que o backend entregou e complete a interface responsiva React/TypeScript. '
-                'Preserve os contratos API e os testids do brief. Teste os controles reais e corrija falhas.',
+                'Preserve os contratos API e os testids do brief. Configure o proxy /api do Vite '
+                'com process.env.CENTRAL_PREVIEW_API_URL e inicie start_api antes de preview start. '
+                'Teste os controles reais e corrija falhas.',
             'code': 'Implemente testes reais para os fluxos de autenticacao, equipes e tarefas; corrija os erros encontrados.',
             'review': 'Revise o projeto integrado, rode build e testes novamente e faca QA no navegador desktop e mobile. '
                 'Nao considere evidencias anteriores a ultima promocao suficientes. Nao declare sucesso sem testes reais.',
