@@ -118,6 +118,13 @@ MIGRATIONS = (
         "audio_sha256 TEXT NOT NULL,created_at TEXT NOT NULL)",
         "CREATE INDEX motion_scene_speech_owner_video ON motion_scene_speech(user_id,video_run_id,video_artifact_id)",
     )),
+    (27, 'owned_motion_episode_exports', (
+        "CREATE TABLE motion_episode_exports("
+        "id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+        "project_id TEXT NOT NULL,grant_root TEXT NOT NULL,video_path TEXT NOT NULL,"
+        "video_sha256 TEXT NOT NULL,timeline_sha256 TEXT NOT NULL,created_at TEXT NOT NULL)",
+        "CREATE INDEX motion_episode_exports_owner_project ON motion_episode_exports(user_id,project_id)",
+    )),
 )
 
 

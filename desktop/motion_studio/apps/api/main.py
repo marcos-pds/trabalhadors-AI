@@ -75,6 +75,8 @@ class PlannedScene(BaseModel):
     prompt: str = Field(max_length=1024)
     hook: str = Field(default="", max_length=250)
     cliffhanger: str = Field(default="", max_length=250)
+    speaker: str = Field(default="", max_length=64)
+    dialogue: str = Field(default="", max_length=300)
 
 
 class VisualReference(BaseModel):

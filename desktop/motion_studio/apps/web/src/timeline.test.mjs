@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -11,6 +11,23 @@ test("composition duration follows clips, frame rate, and empty projects", () =>
   assert.equal(compositionEndFrame(timeline), 195);
   assert.equal(formatTimecode(195, 30), "00:00:06:15");
   assert.equal(formatTimecode(0, 24), "00:00:00:00");
+});
+
+test("aligns generated captions with their scene and removes them on scene replacement", () => {
+  const empty = { fps: 24, tracks: [
+    { id: "v", kind: "video", clips: [] }, { id: "t", kind: "text", clips: [] },
+  ] };
+  const first = addWanVideoClip(empty, { runId: "one", artifactId: "video", frames: 121, fps: 16, name: "Cena" });
+  const video = first.tracks[0].clips[0];
+  const captioned = addSceneCaptionClip(first, { runId: "one", videoArtifactId: "video", text: "Olá mundo" });
+  assert.equal(captioned.tracks[1].clips[0].start_frame, video.start_frame);
+  assert.equal(captioned.tracks[1].clips[0].duration_frames, video.duration_frames);
+  assert.strictEqual(addSceneCaptionClip(captioned, { runId: "one", videoArtifactId: "video", text: "Olá mundo" }), captioned);
+  const revised = updateSceneCaptionClip(captioned, video.id, "Nova fala");
+  assert.equal(revised.tracks[1].clips[0].text, "Nova fala");
+  assert.equal(revised.tracks[1].clips[0].start_frame, video.start_frame);
+  const replaced = addWanVideoClip(captioned, { runId: "two", artifactId: "video", frames: 121, fps: 16, replaceClipId: video.id, name: "Cena nova" });
+  assert.equal(replaced.tracks[1].clips.length, 0);
 });
 
 test("segments composed and accented text as Unicode graphemes", () => {

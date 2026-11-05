@@ -12,6 +12,7 @@ from central.main import app, attach_scene_speech, current_user
 from central.database import Database, utcnow
 from central.motion_queue import MotionQueue
 from central.motion_speech import SpeechError, synthesize_episode, synthesize_scene
+from central.motion_contracts import ContractError, _parameters
 
 
 def reference():
@@ -84,6 +85,15 @@ def test_scene_manifest_keeps_audio_and_captions_as_scoped_artifacts(tmp_path, m
     assert [item['kind'] for item in manifest['artifacts']] == ['audio', 'captions']
     assert manifest['jobs'][0]['params']['speech_artifact_id'] == 'speech'
     assert (tmp_path / 'MotionStudio' / manifest['artifacts'][0]['path']).is_file()
+
+
+def test_wan_scene_contract_accepts_complete_speech_and_rejects_partial_speech():
+    params = {'model': 'wan', 'seed': 1, 'frames': 121, 'fps': 16,
+              'speech_artifact_id': 'speech', 'speech_text': 'Olá.',
+              'speaker': 'Narradora', 'voice_profile': 'a' * 16}
+    _parameters('comfyui_wan', params)
+    with pytest.raises(ContractError, match='incomplete scene speech'):
+        _parameters('comfyui_wan', {key: value for key, value in params.items() if key != 'voice_profile'})
 
 
 def test_local_scene_audio_download_is_owned_and_hash_checked(tmp_path, monkeypatch):

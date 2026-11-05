@@ -5,6 +5,7 @@ import ipaddress
 import logging
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -2300,6 +2301,131 @@ def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_us
     return FileResponse(path,filename=path.name,media_type=media_type,
                         content_disposition_type='inline',
                         headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+def _motion_project_timeline(project_id):
+    import sqlite3
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', project_id):
+        raise HTTPException(404, 'Projeto não encontrado.')
+    with sqlite3.connect(motion_studio_api.state.database) as connection:
+        row = connection.execute('SELECT timeline_json FROM projects WHERE id=?', (project_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, 'Projeto não encontrado.')
+    return row[0], json.loads(row[0])
+
+
+def _motion_export_digest(timeline):
+    """Identify rendered media independently of review notes and approval state."""
+    videos = sorted((clip for track in timeline['tracks'] if track['kind'] == 'video'
+                     for clip in track['clips']), key=lambda clip: clip['start_frame'])
+    audio = {clip.get('style', {}).get('source_video_clip_id'): clip
+             for track in timeline['tracks'] if track['kind'] == 'audio' for clip in track['clips']}
+    media = []
+    for clip in videos:
+        style = clip.get('style', {})
+        speech = (audio.get(clip['id']) or {}).get('style', {})
+        media.append((clip['id'], clip['start_frame'], clip['duration_frames'],
+                      style.get('motion_run_id'), style.get('motion_artifact_id'),
+                      speech.get('motion_speech_id'), speech.get('motion_run_id'),
+                      speech.get('motion_artifact_id'), speech.get('speech_text')))
+    return hashlib.sha256(json.dumps((timeline['fps'], media), ensure_ascii=False,
+                                     separators=(',', ':')).encode()).hexdigest()
+
+
+def _motion_export_record(user_id, project_id):
+    _, timeline = _motion_project_timeline(project_id)
+    digest = _motion_export_digest(timeline)
+    row = DB.one('SELECT * FROM motion_episode_exports WHERE user_id=? AND project_id=? '
+                 'AND timeline_sha256=? ORDER BY created_at DESC LIMIT 1', (user_id,project_id,digest))
+    if not row:
+        return None
+    from .motion_queue import authorized_root, digest_file
+    from .motion_contracts import scoped_path
+    root,grant = authorized_root(DB,user_id)
+    if grant != row['grant_root']:
+        return None
+    path = scoped_path(root,row['video_path'])
+    if digest_file(path) != row['video_sha256']:
+        raise HTTPException(409,'MP4 final alterado após a montagem.')
+    return {'id':row['id'],'url':f"/api/motion/exports/{row['id']}",'bytes':path.stat().st_size}
+
+
+@app.get('/api/motion/projects/{project_id}/export')
+def motion_existing_export(project_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    return _motion_export_record(user['id'],project_id) or {'id':None,'url':None}
+
+
+@app.post('/api/motion/projects/{project_id}/export')
+def motion_export_episode(project_id:str,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root, digest_file
+    from .workspace_tools import target
+    from .motion_export import assemble_episode, MotionExportError
+    _,timeline = _motion_project_timeline(project_id)
+    videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                     for clip in track['clips']), key=lambda clip:clip['start_frame'])
+    if len(videos)!=8 or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+                             for index,clip in enumerate(videos)):
+        raise HTTPException(422,'O episódio precisa de oito cenas consecutivas na timeline.')
+    audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
+                      for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
+    root,grant = authorized_root(DB,user['id'])
+    scenes=[]
+    captions=[]
+    for clip in videos:
+        style=clip['style']
+        run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+        if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{project_id}':
+            raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+        video=MOTION.artifact_path(user['id'],run_id,artifact_id)
+        if video.suffix.lower()!='.mp4':
+            raise HTTPException(422,'A cena precisa ser MP4.')
+        audio_clip=audio_by_video.get(clip['id'])
+        audio=None
+        if audio_clip:
+            audio_style=audio_clip['style']
+            if audio_style.get('motion_speech_id'):
+                audio=_scene_speech_path(user['id'],audio_style['motion_speech_id'])
+            elif audio_style.get('motion_run_id')==run_id and audio_style.get('motion_artifact_id'):
+                audio=MOTION.artifact_path(user['id'],run_id,audio_style['motion_artifact_id'])
+            else:
+                raise HTTPException(422,'A fala da cena não corresponde ao vídeo.')
+            if audio.suffix.lower()!='.wav':
+                raise HTTPException(422,'A fala precisa ser WAV.')
+        captions.append(str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+        scenes.append((video,audio,clip['duration_frames']/timeline['fps']))
+    export_id=uid()
+    relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'
+    output=target(grant,relative,creating=True)
+    try:
+        result=assemble_episode(scenes,output,captions=captions)
+    except MotionExportError as exc:
+        raise HTTPException(422,str(exc)) from None
+    if not result['path'].is_relative_to(root):
+        raise HTTPException(403,'Destino de exportação inválido.')
+    DB.execute('INSERT INTO motion_episode_exports(id,user_id,project_id,grant_root,video_path,video_sha256,timeline_sha256,created_at) '
+               'VALUES(?,?,?,?,?,?,?,?)', (export_id,user['id'],project_id,grant,
+                output.relative_to(root).as_posix(),digest_file(output),_motion_export_digest(timeline),utcnow()))
+    return {'id':export_id,'url':f'/api/motion/exports/{export_id}',
+            'bytes':output.stat().st_size,'duration':result['duration']}
+
+
+@app.get('/api/motion/exports/{export_id}')
+def motion_export_download(export_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',export_id):
+        raise HTTPException(404,'Exportação não encontrada.')
+    row=DB.one('SELECT project_id FROM motion_episode_exports WHERE id=? AND user_id=?',
+               (export_id,user['id']))
+    if not row or not (_motion_export_record(user['id'],row['project_id']) or {}).get('id')==export_id:
+        raise HTTPException(404,'Exportação não encontrada ou desatualizada.')
+    from .motion_queue import authorized_root
+    from .motion_contracts import scoped_path
+    root,_=authorized_root(DB,user['id'])
+    file=DB.one('SELECT video_path FROM motion_episode_exports WHERE id=?',(export_id,))
+    return FileResponse(scoped_path(root,file['video_path']),filename=f'mini-episodio-{row["project_id"]}.mp4',
+                        media_type='video/mp4')
 
 
 @app.post('/api/runtimes/codex/probe')

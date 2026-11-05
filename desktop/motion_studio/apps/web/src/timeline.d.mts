@@ -30,6 +30,11 @@ export function addWanSpeechClip<T extends TimelineShape>(
   timeline: T,
   speech: { runId: string; artifactId: string; videoArtifactId: string; speaker: string; text: string; voiceProfile: string; replaceClipId?: string },
 ): T;
+export function addSceneCaptionClip<T extends TimelineShape>(
+  timeline: T,
+  caption: { runId: string; videoArtifactId: string; text: string },
+): T;
+export function updateSceneCaptionClip<T extends TimelineShape>(timeline: T, videoClipId: string, text: string): T;
 export function standaloneSpeechPreviewUrl(audioId: string): string | null;
 export function addSceneSpeechClip<T extends TimelineShape>(
   timeline: T,

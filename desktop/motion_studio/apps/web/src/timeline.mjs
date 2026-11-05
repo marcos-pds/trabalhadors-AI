@@ -109,7 +109,7 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       { ...item, clips: replaced
         ? item.clips.map((candidate) => candidate.id === replaced.id ? clip : candidate)
         : [...item.clips, clip] } :
-      replaced && item.kind === 'audio' ?
+      replaced && (item.kind === 'audio' || item.kind === 'text') ?
         { ...item, clips: item.clips.filter((candidate) => candidate.style?.source_video_clip_id !== replaced.id) } : item),
   };
 }
@@ -127,6 +127,34 @@ export function addWanSpeechClip(timeline, { runId, artifactId, videoArtifactId,
     style: { motion_run_id: runId, motion_artifact_id: artifactId,
       source_video_clip_id: video.id, speaker, speech_text: text, voice_profile: voiceProfile } });
   return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
+}
+
+export function addSceneCaptionClip(timeline, { runId, videoArtifactId, text }) {
+  if (!text?.trim()) return timeline;
+  const video = timeline.tracks.find((track) => track.kind === 'video')?.clips.find((clip) =>
+    clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === videoArtifactId);
+  const track = timeline.tracks.find((item) => item.kind === 'text');
+  if (!video || !track || track.clips.some((clip) => clip.style?.source_video_clip_id === video.id)) return timeline;
+  const caption = { id: makeId('caption'), kind: 'text', name: text.slice(0, 48), text,
+    start_frame: video.start_frame, duration_frames: video.duration_frames,
+    style: { source_video_clip_id: video.id, caption: true, color: '#ffffff', font_size: 46 } };
+  return { ...timeline, tracks: timeline.tracks.map((item) => item.id === track.id
+    ? { ...item, clips: [...item.clips, caption] } : item) };
+}
+
+export function updateSceneCaptionClip(timeline, videoClipId, text) {
+  const video = timeline.tracks.find((track) => track.kind === 'video')?.clips.find((clip) => clip.id === videoClipId);
+  const track = timeline.tracks.find((item) => item.kind === 'text');
+  if (!video || !track) throw new Error('Scene or text track not found');
+  const previous = track.clips.find((clip) => clip.style?.source_video_clip_id === videoClipId);
+  const clips = track.clips.filter((clip) => clip.id !== previous?.id);
+  if (text?.trim()) clips.push({ id: previous?.id ?? makeId('caption'), kind: 'text',
+    name: text.slice(0, 48), text, start_frame: video.start_frame,
+    duration_frames: video.duration_frames,
+    style: { ...previous?.style, source_video_clip_id: video.id, caption: true,
+      color: '#ffffff', font_size: 46 } });
+  return { ...timeline, tracks: timeline.tracks.map((item) => item.id === track.id
+    ? { ...item, clips } : item) };
 }
 
 export function standaloneSpeechPreviewUrl(audioId) {

@@ -299,10 +299,20 @@ def _bounded_manifest(manifest):
 
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
-        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number', 'image_sha256'))
+        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number', 'image_sha256',
+              'speech_artifact_id', 'speech_text', 'speaker', 'voice_profile'))
         if 'prompt' in params:_text(params['prompt'],1024)
         if params.get('replace_clip_id') is not None:_identifier(params['replace_clip_id'])
         if 'scene_number' in params:_integer(params['scene_number'], 1, 64)
+        speech = ('speech_artifact_id', 'speech_text', 'speaker', 'voice_profile')
+        if any(key in params for key in speech):
+            if not all(key in params for key in speech):
+                raise ContractError('incomplete scene speech')
+            _identifier(params['speech_artifact_id'])
+            _text(params['speech_text'], 300)
+            _text(params['speaker'], 64)
+            if not isinstance(params['voice_profile'], str) or not re.fullmatch(r'[a-f0-9]{16}', params['voice_profile']):
+                raise ContractError('invalid voice profile')
         if params['model'] not in ('wan', 'ltxv'):
             raise ContractError('unsupported model family')
         _integer(params['seed'], 0, 2**32 - 1)
