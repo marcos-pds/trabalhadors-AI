@@ -1,12 +1,12 @@
 # Vozes locais do Motion Studio
 
-O Motion Studio usa o Chatterbox Multilingual V3 diretamente em um processo Python isolado da Central. Não precisa do aplicativo VoiceStudio para gerar falas. Cada conta guarda referências WAV e IDs de voz em `data/motion-studio/voices/chatterbox/<user-id>/`. O projeto guarda somente os IDs; WAVs narrados e legendas continuam nos artefatos do episódio.
+O Motion Studio usa o modelo Chatterbox ajustado para português brasileiro diretamente em um processo Python isolado da Central. Não precisa do aplicativo VoiceStudio para gerar falas. Cada conta guarda referências WAV e IDs de voz em `data/motion-studio/voices/chatterbox/<user-id>/`. O projeto guarda somente os IDs; WAVs narrados e legendas continuam nos artefatos do episódio.
 
 ## Instalação no Windows com NVIDIA
 
-Execute `scripts/install_motion_chatterbox.ps1` na raiz do repositório. O script instala Python 3.11 isolado, a revisão oficial do Chatterbox com suporte ao V3 e PyTorch CUDA na pasta `data/motion-studio/chatterbox-runtime/`. A primeira geração baixa os pesos oficiais de `ResembleAI/chatterbox` e pode demorar. A interface indica se o ambiente está instalado. O modelo usa a GPU local e pode disputar memória com Wan/ComfyUI; gere as vozes antes das cenas quando necessário.
+Execute `scripts/install_motion_chatterbox.ps1` na raiz do repositório. O script instala Python 3.11 isolado, PyTorch CUDA, o código oficial e os pesos de `ResembleAI/Chatterbox-Multilingual-pt-br` em `data/motion-studio/`. O download dos dois checkpoints ocupa cerca de 3,2 GB e pode demorar. O script verifica os SHA256 publicados pelo provedor. A interface indica se o ambiente está instalado. O modelo usa a GPU local e pode disputar memória com Wan/ComfyUI; gere as vozes antes das cenas quando necessário.
 
-O repositório e o modelo são MIT. Para português brasileiro, o V3 geral usa `language_id="pt"`; o checkpoint específico `pt-BR` é uma possível evolução depois de validar o V3 geral.
+O repositório e o modelo são MIT. O checkpoint específico para pt-BR continua usando `language_id="pt"`, com voz de referência por personagem.
 
 ## Fluxo
 
@@ -20,6 +20,8 @@ O VoiceStudio permanece disponível apenas como motor legado para episódios ant
 ## Fala por cena
 
 No Motion Studio, preencha **Fala da cena** e escolha o personagem antes de gerar uma cena Wan ou LTX. A Central usa a voz vinculada ao personagem, gera um WAV e uma legenda JSON na pasta do projeto, e adiciona a fala à trilha de áudio quando o vídeo fica pronto. Cenas sem fala continuam silenciosas. A fala precisa caber na duração da cena; nesse caso, a Central informa quando é necessário encurtá-la ou dividi-la.
+
+Para uma cena que já tem vídeo, selecione o clipe e use **Gerar fala para cena selecionada**. Isso gera uma nova tomada na trilha de áudio sem refazer o MP4. O WAV é acessível apenas ao dono e seu hash é conferido antes da prévia e do download.
 
 O preview reproduz o WAV junto com o vídeo e acompanha pausa, busca e passagem para a próxima cena. O MP4 individual gerado pelo modelo continua sendo o artefato visual; o WAV fica disponível separadamente para download e edição.
 

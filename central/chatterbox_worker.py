@@ -6,12 +6,13 @@ import sys
 
 def main():
     job = json.load(sys.stdin)
+    sys.path.insert(0, job['code_dir'])
     import torch
     import torchaudio
-    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    from chatterbox.tts import ChatterboxTTS
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model='v3')
+    model = ChatterboxTTS.from_local(job['model_dir'], device=device)
     folder = Path(job['output_dir'])
     for index, line in enumerate(job['lines']):
         wav = model.generate(line['text'], language_id='pt', audio_prompt_path=line['reference'])

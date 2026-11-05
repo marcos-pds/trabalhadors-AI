@@ -1866,6 +1866,14 @@ class MotionVoicePreviewIn(BaseModel):
     engine: Literal['sapi', 'voicestudio', 'chatterbox'] = 'sapi'
 
 
+class MotionSceneSpeechIn(BaseModel):
+    run_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    video_artifact_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    text: str = Field(min_length=1,max_length=300)
+    speaker: str = Field(min_length=1,max_length=64)
+    voice_profile: str = Field(pattern=r'^[a-f0-9]{16}$')
+
+
 class MotionVoiceImportIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     audio_data: str = Field(min_length=1000, max_length=7_000_000)
@@ -1908,6 +1916,72 @@ def motion_voice_preview(data:MotionVoicePreviewIn,request:Request,user=Depends(
         except SpeechError as exc:
             raise HTTPException(503,str(exc)) from None
         return {'audio_data':base64.b64encode(audio.read_bytes()).decode('ascii')}
+
+
+@app.post('/api/motion/scene-speech')
+def motion_scene_speech(data:MotionSceneSpeechIn,request:Request,user=Depends(current_user)):
+    """Generate a new voice take for an existing video without re-rendering it."""
+    require_csrf(request);local_only(request)
+    from .motion_contracts import ContractError, _text
+    from .motion_queue import authorized_root, digest_file
+    from .motion_speech import SpeechError, synthesize_scene
+    try:
+        spoken=_text(data.text.strip(),300)
+        speaker=_text(data.speaker.strip(),64)
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'A fala ou personagem contém texto inválido.') from None
+    run=MOTION.get(user['id'],data.run_id)
+    job=next((item for item in run['jobs'] if item['state']=='completed' and
+              item['artifact'] and item['artifact']['id']==data.video_artifact_id and
+              item['artifact'].get('kind')=='video'),None)
+    if not job or not job['frames'] or not job['fps']:
+        raise HTTPException(404,'Cena renderizada não encontrada.')
+    video_path=MOTION.artifact_path(user['id'],data.run_id,data.video_artifact_id)
+    _,grant=authorized_root(DB,user['id'])
+    speech_id=uid()
+    try:
+        audio_path,captions_path=synthesize_scene(video_path.parent,speech_id,spoken,speaker,
+            data.voice_profile,job['frames'],job['fps'],user['id'])
+    except SpeechError as exc:
+        raise HTTPException(422,str(exc)) from None
+    DB.execute('INSERT INTO motion_scene_speech(id,user_id,video_run_id,video_artifact_id,grant_root,audio_path,captions_path,audio_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        (speech_id,user['id'],data.run_id,data.video_artifact_id,grant,
+         audio_path.relative_to(grant).as_posix(),captions_path.relative_to(grant).as_posix(),
+         digest_file(audio_path),utcnow()))
+    return {'id':speech_id,'audio_url':f'/api/motion/scene-speech/{speech_id}/preview',
+            'speaker':speaker,'text':spoken,'voice_profile':data.voice_profile}
+
+
+def _scene_speech_path(user_id,speech_id):
+    from .motion_contracts import scoped_path
+    from .motion_queue import authorized_root, digest_file
+    row=DB.one('SELECT video_run_id,grant_root,audio_path,audio_sha256 FROM motion_scene_speech WHERE id=? AND user_id=?',
+               (speech_id,user_id))
+    if not row:
+        raise HTTPException(404,'Fala não encontrada.')
+    MOTION.get(user_id,row['video_run_id'])
+    root,grant=authorized_root(DB,user_id)
+    if grant!=row['grant_root']:
+        raise HTTPException(403,'Permissão de pasta alterada.')
+    path=scoped_path(root,row['audio_path'])
+    if digest_file(path)!=row['audio_sha256']:
+        raise HTTPException(409,'Áudio alterado após a geração.')
+    return path
+
+
+@app.get('/api/motion/scene-speech/{speech_id}/preview')
+def motion_scene_speech_preview(speech_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    path=_scene_speech_path(user['id'],speech_id)
+    return FileResponse(path,filename=path.name,media_type='audio/wav',content_disposition_type='inline',
+        headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+@app.get('/api/motion/scene-speech/{speech_id}')
+def motion_scene_speech_download(speech_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    path=_scene_speech_path(user['id'],speech_id)
+    return FileResponse(path,filename=path.name,media_type='audio/wav')
 
 
 def motion_call(operation):

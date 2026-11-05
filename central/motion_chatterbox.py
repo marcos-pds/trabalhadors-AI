@@ -32,8 +32,25 @@ def runtime_python():
                 'chatterbox-runtime' / ('Scripts' if os.name == 'nt' else 'bin') / name)
 
 
+def ptbr_assets():
+    base = Path(os.environ.get('CENTRAL_DATA_DIR', ROOT / 'data')) / 'motion-studio'
+    return base / 'ptbr-model', base / 'ptbr-runtime'
+
+
+def ptbr_ready():
+    model, code = ptbr_assets()
+    return (code / 'chatterbox' / 'tts.py').is_file() and all(
+        (model / name).is_file() and (model / name).stat().st_size == size
+        for name, size in {
+            't3_pt_br.safetensors': 2143990296,
+            's3gen_v3.pt': 1056903694,
+            've.pt': 5698626,
+            'grapheme_mtl_merged_expanded_v1.json': 69989,
+        }.items())
+
+
 def engine_ready():
-    return runtime_python().is_file()
+    return runtime_python().is_file() and ptbr_ready()
 
 
 def _profiles(user_id):
@@ -82,11 +99,15 @@ def synthesize_lines(lines, user_id):
     python = runtime_python()
     if not python.is_file():
         raise ChatterboxError('Instale o motor Chatterbox local da Central antes de gerar falas.')
+    if not ptbr_ready():
+        raise ChatterboxError('Instale o modelo de voz brasileiro da Central antes de gerar falas.')
     profiles = {item['id'] for item in available_voices(user_id)}
     if any(voice_id not in profiles for _, voice_id in lines):
         raise ChatterboxError('Escolha uma voz Chatterbox da Central para cada personagem.')
     with tempfile.TemporaryDirectory(prefix='motion-chatterbox-') as folder:
-        request = {'output_dir': folder, 'lines': [
+        model_dir, code_dir = ptbr_assets()
+        request = {'output_dir': folder, 'model_dir': str(model_dir),
+                   'code_dir': str(code_dir), 'lines': [
             {'text': text, 'reference': str(voice_dir(user_id) / (voice_id + '.wav'))}
             for text, voice_id in lines]}
         try:

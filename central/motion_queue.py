@@ -325,11 +325,18 @@ class MotionQueue:
 
     def artifact_path(self,user,rid,artifact_id):
         run=self.get(user,rid)
-        row=self.db.one('SELECT root,grant_root FROM motion_runs WHERE id=?',(rid,))
+        row=self.db.one('SELECT root,grant_root,manifest,inputs FROM motion_runs WHERE id=?',(rid,))
         root,grant=authorized_root(self.db,user)
         if grant!=row['grant_root'] or not _root(row['root']).is_relative_to(root):
             raise HTTPException(403,'Permissão de pasta alterada.')
         artifact=next((j['artifact'] for j in run['jobs'] if j['state']=='completed' and j['artifact'] and j['artifact']['id']==artifact_id),None)
+        if not artifact:
+            manifest=json.loads(row['manifest'])
+            hashes=json.loads(row['inputs'])
+            declared=next((item for item in manifest['artifacts']
+                           if item['id']==artifact_id and item['provenance']['source']=='local'),None)
+            if declared and artifact_id in hashes:
+                artifact={'path':declared['path'],'sha256':hashes[artifact_id]}
         if not artifact:raise HTTPException(404,'Artefato não disponível.')
         path=scoped_path(row['root'],artifact['path'])
         if digest_file(path)!=artifact['sha256']:raise HTTPException(409,'Artefato alterado após a renderização.')

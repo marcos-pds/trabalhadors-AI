@@ -30,3 +30,24 @@ uv pip install --python $python 'setuptools<81'
 if ($LASTEXITCODE -ne 0) { throw 'Não foi possível instalar a dependência do marcador de áudio.' }
 & $python -c 'import torch, perth; from chatterbox.mtl_tts import ChatterboxMultilingualTTS; assert torch.cuda.is_available() and perth.PerthImplicitWatermarker is not None; print("Chatterbox V3 e CUDA prontos")'
 if ($LASTEXITCODE -ne 0) { throw 'Chatterbox ou CUDA indisponível nesta máquina.' }
+
+& $python (Join-Path $repo 'scripts\install_motion_chatterbox_ptbr.py')
+if ($LASTEXITCODE -ne 0) { throw 'Não foi possível instalar o código de voz pt-BR.' }
+$modelDir = Join-Path $repo 'data\motion-studio\ptbr-model'
+$models = @(
+    @{ Name='t3_pt_br.safetensors'; Size=2143990296; Sha='074aaf65255eb9cb960288f7cc72e09d3b5008f6e0b14868c0d4e5b0bd7cbb6c' },
+    @{ Name='s3gen_v3.pt'; Size=1056903694; Sha='f7abce4b196dae2d08d9296cbebc6521b046079577643b42a19a03499d08721e' }
+)
+foreach ($item in $models) {
+    $file = Join-Path $modelDir $item.Name
+    if (-not (Test-Path $file) -or (Get-Item $file).Length -ne $item.Size) {
+        $url = "https://huggingface.co/ResembleAI/Chatterbox-Multilingual-pt-br/resolve/b3952f18bc2eaa72b9bd7c17d2c4653bcad4770d/$($item.Name)"
+        & curl.exe -L --fail --silent --show-error --max-time 1800 --output $file $url
+        if ($LASTEXITCODE -ne 0) { throw "Não foi possível baixar $($item.Name)." }
+    }
+    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.Sha) {
+        throw "A verificação de integridade falhou para $($item.Name)."
+    }
+}
+& $python -c 'import sys; from pathlib import Path; sys.path.insert(0, str(Path("data/motion-studio/ptbr-runtime").resolve())); from chatterbox.tts import ChatterboxTTS; print("Modelo de voz pt-BR pronto")'
+if ($LASTEXITCODE -ne 0) { throw 'O modelo pt-BR não iniciou.' }

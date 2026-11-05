@@ -129,6 +129,25 @@ export function addWanSpeechClip(timeline, { runId, artifactId, videoArtifactId,
   return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
 }
 
+export function standaloneSpeechPreviewUrl(audioId) {
+  return typeof audioId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(audioId)
+    ? `/api/motion/scene-speech/${audioId}/preview` : null;
+}
+
+export function addSceneSpeechClip(timeline, { audioId, videoClipId, speaker, text, voiceProfile }) {
+  if (!standaloneSpeechPreviewUrl(audioId)) throw new Error('Invalid scene audio reference');
+  const video = timeline.tracks.find((track) => track.kind === 'video')?.clips.find((clip) => clip.id === videoClipId);
+  const audioTrack = timeline.tracks.find((track) => track.kind === 'audio');
+  if (!video || !audioTrack) throw new Error('Scene or audio track not found');
+  if (audioTrack.clips.some((clip) => clip.style?.motion_speech_id === audioId)) return timeline;
+  const clips = audioTrack.clips.filter((clip) => clip.style?.source_video_clip_id !== videoClipId);
+  clips.push({ id: makeId('speech'), kind: 'audio', name: `${speaker} · fala`,
+    start_frame: video.start_frame, duration_frames: video.duration_frames,
+    style: { motion_speech_id: audioId, source_video_clip_id: video.id,
+      speaker, speech_text: text, voice_profile: voiceProfile } });
+  return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
+}
+
 /** Update review metadata for one scene without touching other clips or artifacts. */
 export function updateClipReview(timeline, clipId, patch) {
   const allowed = new Set(["pending", "approved", "needs_revision"]);

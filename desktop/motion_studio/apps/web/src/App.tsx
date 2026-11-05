@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
-import { addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 type Clip = {
   id: string;
@@ -126,6 +126,7 @@ export default function App() {
   const [scenePrompt, setScenePrompt] = useState("Vertical cinematic 3D horror scene, a small geometric glass figure crossing a dim abandoned hallway, cold blue moonlight, deep shadows, slow camera push, unsettling atmosphere, polished motion design, no text.");
   const [sceneSpeechText, setSceneSpeechText] = useState("");
   const [sceneSpeaker, setSceneSpeaker] = useState("Lara");
+  const [sceneSpeechBusy, setSceneSpeechBusy] = useState(false);
   const [episodeNumber, setEpisodeNumber] = useState(1);
   const [sceneNumber, setSceneNumber] = useState(1);
   const [videoModel, setVideoModel] = useState<"wan" | "ltxv">("wan");
@@ -288,6 +289,9 @@ export default function App() {
   const activeAudioClip = project && activeVideoClip ? project.timeline.tracks
     .filter((track) => track.kind === "audio").flatMap((track) => track.clips)
     .find((clip) => clip.style.source_video_clip_id === activeVideoClip.id) : undefined;
+  const activeAudioUrl = activeAudioClip ? (activeAudioClip.style.motion_speech_id
+    ? standaloneSpeechPreviewUrl(activeAudioClip.style.motion_speech_id)
+    : wanVideoPreviewUrl(activeAudioClip.style.motion_run_id, activeAudioClip.style.motion_artifact_id)) : null;
 
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
@@ -518,6 +522,35 @@ export default function App() {
       setWanBusy(false);
       setError(reason instanceof Error ? reason.message : "Não foi possível iniciar a cena Wan.");
     }
+  }
+
+  async function generateSelectedSceneSpeech() {
+    if (!project || selected?.kind !== "video" || !sceneSpeechText.trim() || sceneSpeechBusy) return;
+    const profile = project.timeline.storyboard?.voice_profiles?.[sceneSpeaker];
+    if (!profile) { setError(`Escolha uma voz para ${sceneSpeaker}.`); return; }
+    setSceneSpeechBusy(true);
+    try {
+      const result = await centralRequest<{ id: string; speaker: string; text: string; voice_profile: string }>("/api/motion/scene-speech", {
+        method: "POST", body: JSON.stringify({
+          run_id: selected.style.motion_run_id, video_artifact_id: selected.style.motion_artifact_id,
+          text: sceneSpeechText.trim(), speaker: sceneSpeaker, voice_profile: profile,
+        }),
+      });
+      const timeline = addSceneSpeechClip(project.timeline, {
+        audioId: result.id, videoClipId: selected.id, speaker: result.speaker,
+        text: result.text, voiceProfile: result.voice_profile,
+      });
+      setSaved(false);
+      const updated = await request<Project>(`/api/projects/${project.id}`, {
+        method: "PUT", body: JSON.stringify({ title: project.title, summary: project.summary, timeline }),
+      });
+      setProject(updated);
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setSaved(true);
+      setImportNotice(`Fala de ${result.speaker} adicionada à trilha de áudio da cena.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível gerar a fala da cena.");
+    } finally { setSceneSpeechBusy(false); }
   }
 
   async function regenerateSelectedScene() {
@@ -843,7 +876,7 @@ export default function App() {
               }}
             />
             {activeAudioClip && <audio key={activeAudioClip.id} ref={audioRef}
-              src={wanVideoPreviewUrl(activeAudioClip.style.motion_run_id, activeAudioClip.style.motion_artifact_id) ?? undefined}
+              src={activeAudioUrl ?? undefined}
               preload="metadata" aria-label={`Fala de ${activeAudioClip.style.speaker}`}
               onLoadedMetadata={(event) => {
                 const seconds = videoRef.current?.currentTime ?? Math.max(0, (playheadFrame - activeAudioClip.start_frame) / fps);
@@ -867,6 +900,7 @@ export default function App() {
                 <a href={wanVideoPreviewUrl(activeVideoClip.style.motion_run_id, activeVideoClip.style.motion_artifact_id)!.replace(/\/preview$/, "")}>
                   Baixar MP4
                 </a>
+                {activeAudioUrl && <a href={activeAudioUrl.replace(/\/preview$/, "")}>Baixar WAV</a>}
               </div>
             )}
             {importNotice && <p className="preview-import-notice" role="status">{importNotice}</p>}
@@ -975,9 +1009,13 @@ export default function App() {
               <select id="video-model" value={videoModel} onChange={(event) => setVideoModel(event.target.value as "wan" | "ltxv")}><option value="wan">Wan · texto para vídeo</option><option value="ltxv">LTX · imagem para vídeo</option></select>
               {videoModel === "ltxv" && <><label className="field-label" htmlFor="character-reference">IMAGEM MESTRA DA PERSONAGEM</label><select id="character-reference" value={characterReference?.id ?? ""} onChange={(event) => setCharacterReferenceId(event.target.value)}><option value="">Selecione uma imagem</option>{characterReferences.map((reference) => <option key={reference.id} value={reference.id}>{reference.name}</option>)}</select><p className="helper-text">Cada cena parte desta imagem. Para continuar um movimento, envie o último quadro da cena anterior como nova referência.</p></>}
               <button className="primary-wide" onClick={() => void renderWanScene()} disabled={!embedded || !wanConfigSaved || wanBusy || !project || !scenePrompt.trim() || (sceneSpeechText.trim().length > 0 && (!voiceCatalog.ready || !project.timeline.storyboard?.voice_profiles?.[sceneSpeaker])) || (videoModel === "ltxv" && !characterReference?.image_data)}>{wanBusy ? "RENDERIZANDO CENA…" : videoModel === "ltxv" ? "GERAR CENA LTX · 5 S" : "GERAR CENA WAN · 5 S"}</button>
+              {selected?.kind === "video" && <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()}
+                disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim() || !project.timeline.storyboard?.voice_profiles?.[sceneSpeaker]}>
+                {sceneSpeechBusy ? "GERANDO FALA…" : "GERAR FALA PARA CENA SELECIONADA · ADICIONAR À TIMELINE"}
+              </button>}
               <div className="property-divider" />
               <div className="section-label">VOZES DOS PERSONAGENS</div>
-              <p className="helper-text">Motor Chatterbox Multilingual V3 dentro da Central. Escolha uma referência de voz para cada personagem.</p>
+              <p className="helper-text">Modelo Chatterbox ajustado para português brasileiro dentro da Central. Escolha uma referência de voz para cada personagem.</p>
               {!voiceCatalog.ready && <p className="helper-text text-amber-200">Instale o motor Chatterbox local para gerar novas falas.</p>}
               {voiceCatalog.ready && voiceCatalog.voices.length === 0 && <p className="helper-text text-amber-200">Importe referências de voz WAV para criar os personagens.</p>}
               <button className="quiet-button voice-refresh" onClick={() => void centralRequest<typeof voiceCatalog>("/api/motion/voices").then(setVoiceCatalog).catch(() => setVoiceCatalog({ ready: false, voices: [] }))}>ATUALIZAR VOZES</button>

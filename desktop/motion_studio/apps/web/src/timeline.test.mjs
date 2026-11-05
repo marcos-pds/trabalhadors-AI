@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -68,6 +68,25 @@ test("scene speech follows video timing, survives refresh, and is replaced with 
   assert.equal(revised.tracks[1].clips.length, 0);
   const resynthesized = addWanSpeechClip(revised, { ...input, runId: 'run2', replaceClipId: oldId });
   assert.equal(resynthesized.tracks[1].clips[0].style.source_video_clip_id, revised.tracks[0].clips[0].id);
+});
+
+test("adds a new voice take to an existing scene without replacing the video", () => {
+  const empty = { fps: 24, tracks: [
+    { id: 'video', kind: 'video', clips: [] }, { id: 'sound', kind: 'audio', clips: [] },
+  ] };
+  const video = addWanVideoClip(empty, { runId: 'run1', artifactId: 'video', name: 'Lara', frames: 81, fps: 16 });
+  const videoId = video.tracks[0].clips[0].id;
+  const input = { audioId: 'take1', videoClipId: videoId, speaker: 'Lara', text: 'Quem está aí?', voiceProfile: 'lara' };
+  const first = addSceneSpeechClip(video, input);
+  assert.equal(first.tracks[1].clips[0].duration_frames, 122);
+  assert.equal(first.tracks[1].clips[0].start_frame, 0);
+  assert.equal(first.tracks[0].clips[0].id, videoId);
+  assert.strictEqual(addSceneSpeechClip(first, input), first);
+  const revised = addSceneSpeechClip(first, { ...input, audioId: 'take2' });
+  assert.equal(revised.tracks[1].clips.length, 1);
+  assert.equal(revised.tracks[1].clips[0].style.motion_speech_id, 'take2');
+  assert.equal(standaloneSpeechPreviewUrl('take2'), '/api/motion/scene-speech/take2/preview');
+  assert.equal(standaloneSpeechPreviewUrl('../other'), null);
 });
 
 test("reviews one scene without changing neighboring clips", () => {
