@@ -28,12 +28,19 @@ def test_actual_desktop_http_assets_data_and_graceful_shutdown(tmp_path, frozen)
                     ignore=shutil.ignore_patterns("__pycache__"))
     (bundle / "desktop").mkdir()
     shutil.copy2(repository / "desktop" / "backend_launcher.py", bundle / "desktop" / "backend_launcher.py")
+    shutil.copytree(repository / "desktop" / "motion_studio" / "apps" / "api",
+                    bundle / "desktop" / "motion_studio" / "apps" / "api",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     build = bundle / "static" / "build"
     build.mkdir(parents=True)
     (build / "index.html").write_text(
         '<html><body>desktop integration<script src="/assets/build/app.js"></script></body></html>',
         encoding="utf-8")
     (build / "app.js").write_text("console.log('bundled asset')", encoding="utf-8")
+    studio = bundle / "static" / "motion-studio"
+    studio.mkdir(parents=True)
+    (studio / "index.html").write_text(
+        '<html><body>motion studio integration</body></html>', encoding="utf-8")
     data = tmp_path / "desktop-data"
     token = secrets.token_urlsafe(36)
     env = dict(os.environ, CENTRAL_DATA_DIR=str(data), CENTRAL_DESKTOP_SHUTDOWN_TOKEN=token,
@@ -82,6 +89,7 @@ def test_actual_desktop_http_assets_data_and_graceful_shutdown(tmp_path, frozen)
                 assert health.json()["job_executor"] == "embedded"
                 assert "desktop integration" in client.get("/").text
                 assert client.get("assets/build/app.js").text == "console.log('bundled asset')"
+                assert "motion studio integration" in client.get("motion-studio/").text
                 assert client.post(SHUTDOWN_PATH).status_code == 403
                 assert process.poll() is None
                 with sqlite3.connect(data / "central.sqlite3") as db:

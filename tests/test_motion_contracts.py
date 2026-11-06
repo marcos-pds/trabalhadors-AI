@@ -259,6 +259,61 @@ def test_inventory_no_execution_or_version_guessing(monkeypatch):
     assert result['whisperx']['execution_supported'] and result['comfyui_wan']['execution_supported']
 
 
+def test_ffprobe_validates_video_audio_duration_and_frame_rate(tmp_path, monkeypatch):
+    media = tmp_path / 'render.mp4'
+    media.write_bytes(b'fixture')
+    probe = tmp_path / 'ffprobe.exe'
+    probe.write_bytes(b'fixture')
+
+    class Result:
+        stdout = json.dumps({
+            'format': {'duration': '5.000'},
+            'streams': [
+                {'index': 0, 'codec_type': 'video', 'codec_name': 'h264',
+                 'width': 720, 'height': 1280, 'avg_frame_rate': '30/1'},
+                {'index': 1, 'codec_type': 'audio', 'codec_name': 'aac'},
+            ],
+        })
+
+    calls = []
+    monkeypatch.setattr(motion.subprocess, 'run', lambda command, **kwargs: calls.append((command, kwargs)) or Result())
+    result = motion.validate_media_with_ffprobe(
+        media,
+        motion.MotionConfig(executables={'ffprobe': str(probe)}),
+        expected_fps=30,
+        expected_duration=5,
+        require_audio=True,
+    )
+
+    assert result == {'duration': 5.0, 'fps': '30/1', 'width': 720, 'height': 1280, 'audio': True}
+    assert calls[0][0][0] == str(probe)
+    assert '-show_entries' in calls[0][0]
+
+
+def test_ffprobe_rejects_missing_audio_when_episode_requires_it(tmp_path, monkeypatch):
+    media = tmp_path / 'render.mp4'
+    media.write_bytes(b'fixture')
+    probe = tmp_path / 'ffprobe.exe'
+    probe.write_bytes(b'fixture')
+
+    class Result:
+        stdout = json.dumps({
+            'format': {'duration': '5.000'},
+            'streams': [{'codec_type': 'video', 'codec_name': 'h264',
+                         'width': 720, 'height': 1280, 'avg_frame_rate': '30/1'}],
+        })
+
+    monkeypatch.setattr(motion.subprocess, 'run', lambda *args, **kwargs: Result())
+    with pytest.raises(motion.ContractError, match='missing_mp4_audio_stream'):
+        motion.validate_media_with_ffprobe(
+            media,
+            motion.MotionConfig(executables={'ffprobe': str(probe)}),
+            expected_fps=30,
+            expected_duration=5,
+            require_audio=True,
+        )
+
+
 def test_no_execution_and_detached_manifest(project, monkeypatch):
     import subprocess
     monkeypatch.setattr(subprocess, 'Popen', lambda *a, **k: pytest.fail('process executed'))

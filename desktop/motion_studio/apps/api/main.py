@@ -9,7 +9,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -68,6 +68,45 @@ class Track(BaseModel):
     clips: list[Clip] = Field(default_factory=list, max_length=256)
 
 
+class PlannedScene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scene: int = Field(ge=1, le=64)
+    title: str = Field(max_length=120)
+    prompt: str = Field(max_length=1024)
+    hook: str = Field(default="", max_length=250)
+    cliffhanger: str = Field(default="", max_length=250)
+    speaker: str = Field(default="", max_length=64)
+    dialogue: str = Field(default="", max_length=300)
+
+
+class VisualReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    kind: Literal["character", "setting"]
+    name: str = Field(min_length=1, max_length=160)
+    prompt: str = Field(max_length=4096)
+    source: Literal["generated_brief", "generated_image", "upload"]
+    image_data: str | None = Field(default=None, max_length=8_500_000)
+    scene_number: int | None = Field(default=None, ge=1, le=64)
+
+
+class Publication(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cover_text: str = Field(default="", max_length=120)
+    caption: str = Field(default="", max_length=2200)
+    hashtags: str = Field(default="", max_length=500)
+
+
+class Storyboard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    theme: str = Field(max_length=2000)
+    scenes: list[PlannedScene] = Field(default_factory=list, max_length=64)
+    references: list[VisualReference] = Field(default_factory=list, max_length=32)
+    episode_status: Literal["draft", "approved"] = "draft"
+    publication: Publication | None = None
+    voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
+
+
 class Timeline(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -76,6 +115,7 @@ class Timeline(BaseModel):
     width: int = Field(default=1280, ge=320, le=3840)
     height: int = Field(default=720, ge=320, le=3840)
     tracks: list[Track] = Field(default_factory=list, max_length=32)
+    storyboard: Storyboard | None = None
 
 
 class ProjectCreate(BaseModel):

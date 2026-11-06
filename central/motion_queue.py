@@ -19,7 +19,8 @@ from fastapi import HTTPException
 from .computer_access import policy
 from .database import uid, utcnow
 from .motion_contracts import (ContractError, _root, configured_motion,
-                               plan_jobs, scoped_path, validate_manifest, MotionConfig, _bounded_manifest)
+                               plan_jobs, scoped_path, validate_manifest, MotionConfig, _bounded_manifest,
+                               validate_media_with_ffprobe)
 
 MAX_BYTES = 2 * 1024**3
 TERMINAL = {'completed','failed','cancelled','interrupted'}
@@ -167,12 +168,23 @@ class MotionQueue:
         return self.get(user,rid)
 
     def get(self,user,rid):
-        run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
+        run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested,manifest FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
         if not run:raise HTTPException(404,'Renderização não encontrada.')
+        manifest=json.loads(run.pop('manifest'))
+        planned={item['id']:item for item in manifest.get('jobs',[])}
         jobs=self.db.all('SELECT id,adapter,state,artifact,error,started_at,finished_at,remote_id FROM motion_jobs WHERE run_id=? ORDER BY rowid',(rid,))
         for job in jobs:
             job['artifact']=json.loads(job['artifact']) if job['artifact'] else None
-        return dict(run,jobs=jobs)
+            params=planned.get(job['id'],{}).get('params',{})
+            job['frames']=params.get('frames')
+            job['fps']=params.get('fps')
+            job['replace_clip_id']=params.get('replace_clip_id')
+            job['scene_number']=params.get('scene_number')
+            job['speech_artifact_id']=params.get('speech_artifact_id')
+            job['speech_text']=params.get('speech_text')
+            job['speaker']=params.get('speaker')
+            job['voice_profile']=params.get('voice_profile')
+        return dict(run,project_id=manifest.get('project_id'),jobs=jobs)
 
     def list(self,user):
         return [self.get(user,r['id']) for r in self.db.all('SELECT id FROM motion_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 30',(user,))]
@@ -254,6 +266,13 @@ class MotionQueue:
                         timeout=self.timeout,expected_digest=hashes[source])
                 self._check(row,stop)
                 path=scoped_path(root,output['path'])
+                if output['kind'] == 'video' and path.suffix.lower() == '.mp4':
+                    params = job['params']
+                    validate_media_with_ffprobe(
+                        path, self._config(row['user_id']),
+                        expected_fps=params.get('fps'),
+                        expected_duration=(params.get('frames') / params.get('fps')) if params.get('frames') and params.get('fps') else None,
+                        require_audio=job['adapter'] == 'episode_assembly')
                 artifact=receipt(path,output)
                 if provenance:artifact['provenance']=provenance
                 hashes[output['id']]=artifact['sha256']
@@ -306,11 +325,18 @@ class MotionQueue:
 
     def artifact_path(self,user,rid,artifact_id):
         run=self.get(user,rid)
-        row=self.db.one('SELECT root,grant_root FROM motion_runs WHERE id=?',(rid,))
+        row=self.db.one('SELECT root,grant_root,manifest,inputs FROM motion_runs WHERE id=?',(rid,))
         root,grant=authorized_root(self.db,user)
         if grant!=row['grant_root'] or not _root(row['root']).is_relative_to(root):
             raise HTTPException(403,'Permissão de pasta alterada.')
         artifact=next((j['artifact'] for j in run['jobs'] if j['state']=='completed' and j['artifact'] and j['artifact']['id']==artifact_id),None)
+        if not artifact:
+            manifest=json.loads(row['manifest'])
+            hashes=json.loads(row['inputs'])
+            declared=next((item for item in manifest['artifacts']
+                           if item['id']==artifact_id and item['provenance']['source']=='local'),None)
+            if declared and artifact_id in hashes:
+                artifact={'path':declared['path'],'sha256':hashes[artifact_id]}
         if not artifact:raise HTTPException(404,'Artefato não disponível.')
         path=scoped_path(row['root'],artifact['path'])
         if digest_file(path)!=artifact['sha256']:raise HTTPException(409,'Artefato alterado após a renderização.')

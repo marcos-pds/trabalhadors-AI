@@ -7,21 +7,22 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 from urllib.parse import urlsplit
 
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_ARTIFACTS = 128
 MAX_JOBS = 64
 ADAPTERS = {
-    'comfyui_wan': ('generate', {'workflow'}, {'video'}),
+    'comfyui_wan': ('generate', {'workflow', 'image'}, {'video'}),
     'episode_assembly': ('assemble', {'video', 'audio', 'captions'}, {'video'}),
     'remotion': ('compose', {'composition', 'video', 'audio', 'captions'}, {'video'}),
     'whisperx': ('transcribe', {'audio', 'video'}, {'captions'}),
     'ffmpeg': ('encode', {'audio', 'video'}, {'video', 'audio'}),
 }
-KINDS = {'workflow', 'composition', 'video', 'audio', 'captions'}
+KINDS = {'workflow', 'composition', 'video', 'audio', 'captions', 'image'}
 EXTENSIONS = {'workflow': {'.json'}, 'composition': {'.tsx', '.jsx', '.ts', '.js'},
-              'video': {'.mp4'}, 'audio': {'.wav'}, 'captions': {'.json'}}
+              'video': {'.mp4'}, 'audio': {'.wav'}, 'captions': {'.json'}, 'image': {'.jpg', '.jpeg', '.png', '.webp'}}
 _ID = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,63}\Z')
 _RESERVED = re.compile(r'(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])(?:\.|$)', re.I)
 _SECRET = re.compile(r'(?i)(?:bearer\s+|sk-[a-z0-9]{8,}|(?:api[_-]?key|password|secret|token)\s*[:=])')
@@ -118,7 +119,7 @@ class MotionConfig:
 
     def __post_init__(self):
         if self.executables is not None:
-            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','remotion','whisperx','episode_assembly'}:
+            if not isinstance(self.executables, dict) or set(self.executables) - {'ffmpeg','ffprobe','remotion','whisperx','episode_assembly'}:
                 raise ContractError('invalid executable configuration')
             for value in self.executables.values():
                 if not isinstance(value, str):
@@ -200,9 +201,45 @@ def runtime_path(adapter, config):
     return shutil.which(adapter)
 
 
+def validate_media_with_ffprobe(path, config, *, expected_fps=None, expected_duration=None, require_audio=False):
+    """Validate a produced MP4 with the trusted local ffprobe executable."""
+    probe = runtime_path('ffprobe', config) or shutil.which('ffprobe')
+    if not probe or not Path(probe).is_file():
+        raise ContractError('ffprobe_unavailable')
+    command = [probe, '-v', 'error', '-show_entries',
+               'format=duration:stream=index,codec_type,codec_name,width,height,avg_frame_rate,nb_frames',
+               '-of', 'json', str(path)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15, check=True)
+        data = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
+        raise ContractError('ffprobe_invalid_media') from None
+    streams = data.get('streams') if isinstance(data, dict) else None
+    if not isinstance(streams, list): raise ContractError('ffprobe_invalid_media')
+    video = next((item for item in streams if item.get('codec_type') == 'video'), None)
+    audio = next((item for item in streams if item.get('codec_type') == 'audio'), None)
+    if not video or video.get('codec_name') != 'h264' or int(video.get('width') or 0) < 2 or int(video.get('height') or 0) < 2:
+        raise ContractError('invalid_mp4_video_stream')
+    if require_audio and not audio: raise ContractError('missing_mp4_audio_stream')
+    duration = float((data.get('format') or {}).get('duration') or 0)
+    if duration <= 0: raise ContractError('invalid_mp4_duration')
+    if expected_duration is not None and abs(duration - expected_duration) > 0.15:
+        raise ContractError('invalid_mp4_duration')
+    if expected_fps is not None:
+        rate = str(video.get('avg_frame_rate') or '')
+        try:
+            numerator, denominator = rate.split('/', 1)
+            actual_fps = float(numerator) / float(denominator)
+        except (ValueError, ZeroDivisionError):
+            raise ContractError('invalid_mp4_fps') from None
+        if abs(actual_fps - expected_fps) > 0.5:
+            raise ContractError('invalid_mp4_fps')
+    return {'duration': duration, 'fps': video.get('avg_frame_rate'), 'width': video['width'], 'height': video['height'], 'audio': bool(audio)}
+
+
 def configured_motion():
     """Administrator-owned paths, never a path submitted by a model or browser."""
-    paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','remotion','whisperx')
+    paths = {name:os.environ['CENTRAL_MOTION_'+name.upper()] for name in ('ffmpeg','ffprobe','remotion','whisperx')
              if os.environ.get('CENTRAL_MOTION_'+name.upper())}
     comfy_root = os.environ.get('CENTRAL_MOTION_COMFY_ROOT')
     comfy_endpoint = os.environ.get('CENTRAL_MOTION_COMFY_ENDPOINT')
@@ -262,13 +299,33 @@ def _bounded_manifest(manifest):
 
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
-        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt',))
+        _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number', 'image_sha256',
+              'speech_artifact_id', 'speech_text', 'speaker', 'voice_profile', 'width', 'height'))
         if 'prompt' in params:_text(params['prompt'],1024)
-        if params['model'] != 'wan':
+        if params.get('replace_clip_id') is not None:_identifier(params['replace_clip_id'])
+        if 'scene_number' in params:_integer(params['scene_number'], 1, 64)
+        speech = ('speech_artifact_id', 'speech_text', 'speaker', 'voice_profile')
+        if any(key in params for key in speech):
+            if not all(key in params for key in speech):
+                raise ContractError('incomplete scene speech')
+            _identifier(params['speech_artifact_id'])
+            _text(params['speech_text'], 300)
+            _text(params['speaker'], 64)
+            if not isinstance(params['voice_profile'], str) or not re.fullmatch(r'[a-f0-9]{16}', params['voice_profile']):
+                raise ContractError('invalid voice profile')
+        if params['model'] not in ('wan', 'ltxv'):
             raise ContractError('unsupported model family')
         _integer(params['seed'], 0, 2**32 - 1)
         _integer(params['frames'], 1, 4096)
         _integer(params['fps'], 1, 120)
+        if params['model'] == 'ltxv' and (not isinstance(params.get('image_sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', params['image_sha256']) or (params['frames'] - 1) % 8):
+            raise ContractError('invalid image conditioned scene')
+        if params['model'] == 'ltxv' and (params.get('width',288),params.get('height',512)) not in ((288,512),(480,832)):
+            raise ContractError('invalid image conditioned resolution')
+        if params['model'] == 'ltxv' and params.get('width',288)==480 and params['frames']>49:
+            raise ContractError('high resolution scene too long')
+        if params['model'] == 'wan' and ('width' in params or 'height' in params):
+            raise ContractError('wan resolution is fixed')
     elif adapter == 'episode_assembly':
         _keys(params, ('frames', 'fps'))
         _integer(params['fps'], 1, 120)
@@ -356,6 +413,10 @@ def validate_manifest(manifest, project_root):
                     or sum(a['kind'] == 'audio' for a in inputs) != 1
                     or sum(a['kind'] == 'captions' for a in inputs) != 1):
                 raise ContractError('episode assembly requires eight scenes, narration and captions')
+        elif adapter == 'comfyui_wan':
+            if (sum(a['kind']=='workflow' for a in inputs)!=1 or
+                sum(a['kind']=='image' for a in inputs)!=(1 if job['params'].get('model')=='ltxv' else 0)):
+                raise ContractError('invalid video model inputs')
         elif len(inputs) != 1:
             raise ContractError('one input required')
         for artifact in inputs:

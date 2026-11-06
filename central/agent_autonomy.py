@@ -59,6 +59,10 @@ pip_package aceita um pacote por ação; para vários use requirements.txt.
 Não é possível chamar shell arbitrário, apagar arquivos, acessar outra pasta,
 fazer deploy, git push, mexer no registro do Windows ou manipular segredos.
 Leia o arquivo ANTES de modificá-lo; use replace + sha256 para edições pequenas.
+Ao alterar package.json ou outro JSON existente, não envie o arquivo inteiro
+no campo old/new. Use replace com um trecho curto e único (por exemplo, uma
+linha de dependência), mais o expected_sha256 retornado pela última leitura.
+write com expected_sha256:null serve apenas para criar arquivo novo.
 Se list retornar uma pasta vazia, isso NÃO é falta de permissão: inicialize o
 projeto. Use mkdir para as pastas e write com expected_sha256:null para arquivos
 novos (comece por package.json e index.html). Ler antes de editar só se aplica a
@@ -403,12 +407,17 @@ async def autonomous_worker(client, db, user_id, run_id, step_id, provider, key,
             command = parse_tool(raw)
         except ValueError as exc:
             consecutive_invalid_responses += 1
+            edit_hint = (
+                ' Para editar um JSON existente, leia seu SHA atual e use replace '
+                'com old/new curtos e expected_sha256; não reenvie o arquivo inteiro '
+                'nem use write com expected_sha256:null.'
+                if '"replace"' in raw or '"write"' in raw else '')
             transcript.extend([
                 {'role': 'assistant', 'content': raw[:1000]},
                 {'role': 'user', 'content': 'Resposta inválida: ' + str(exc) +
                  ' Retorne exatamente um objeto JSON da lista de ações. Se o código '
                  'ficou grande ou foi cortado, divida em componentes menores e envie '
-                 'um arquivo curto por vez; não repita a mesma resposta truncada.'},
+                 'um arquivo curto por vez; não repita a mesma resposta truncada.' + edit_hint},
             ])
             last_action = 'resposta_invalida'
             last_result = str(exc)

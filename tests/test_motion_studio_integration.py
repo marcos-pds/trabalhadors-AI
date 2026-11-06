@@ -45,6 +45,28 @@ def test_motion_studio_project_api_works_at_embedded_prefix():
     assert response.json()["title"] == "Embedded smoke"
 
 
+def test_storyboard_references_survive_project_save_and_reload():
+    with TemporaryDirectory() as directory:
+        root = FastAPI()
+        root.mount("/api/motion-studio", create_app(database=Path(directory) / "studio.sqlite3"))
+        with TestClient(root) as client:
+            project = client.post("/api/motion-studio/api/projects", json={"title": "Série Lara"}).json()
+            timeline = project["timeline"]
+            timeline["storyboard"] = {
+                "theme": "Lara recebe uma ligação misteriosa",
+                "scenes": [{"scene": 1, "title": "O telefone", "prompt": "Vertical cinematic close-up"}],
+                "references": [{"id": "lara", "kind": "character", "name": "Lara",
+                                "prompt": "Character sheet", "source": "generated_brief"}],
+                "episode_status": "draft",
+            }
+            response = client.put(f"/api/motion-studio/api/projects/{project['id']}",
+                                  json={"title": project["title"], "summary": "", "timeline": timeline})
+            assert response.status_code == 200, response.text
+            loaded = client.get(f"/api/motion-studio/api/projects/{project['id']}").json()
+            assert loaded["timeline"]["storyboard"]["references"][0]["name"] == "Lara"
+            assert loaded["timeline"]["storyboard"]["scenes"][0]["scene"] == 1
+
+
 def test_motion_studio_built_assets_are_served_from_embedded_path():
     index = Path(__file__).resolve().parents[1] / "static" / "motion-studio" / "index.html"
     if not index.is_file():
