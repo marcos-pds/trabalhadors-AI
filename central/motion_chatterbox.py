@@ -3,6 +3,7 @@ from array import array
 from io import BytesIO
 from pathlib import Path
 import json
+import math
 import os
 import re
 import subprocess
@@ -94,8 +95,13 @@ def import_voice(user_id, name, wav_bytes):
     return {'id': profile_id, 'name': name}
 
 
-def synthesize_lines(lines, user_id):
+def synthesize_lines(lines, user_id, *, exaggeration=0.5, cfg_weight=0.5):
     """Generate all episode cues in one isolated Python 3.11 process."""
+    if (type(exaggeration) not in (int, float) or not math.isfinite(exaggeration)
+            or not 0.25 <= exaggeration <= 2.0
+            or type(cfg_weight) not in (int, float) or not math.isfinite(cfg_weight)
+            or not 0 <= cfg_weight <= 1.0):
+        raise ChatterboxError('A expressão ou o ritmo da voz está fora dos limites permitidos.')
     python = runtime_python()
     if not python.is_file():
         raise ChatterboxError('Instale o motor Chatterbox local da Central antes de gerar falas.')
@@ -107,6 +113,7 @@ def synthesize_lines(lines, user_id):
     with tempfile.TemporaryDirectory(prefix='motion-chatterbox-') as folder:
         model_dir, code_dir = ptbr_assets()
         request = {'output_dir': folder, 'model_dir': str(model_dir),
+                   'exaggeration': exaggeration, 'cfg_weight': cfg_weight,
                    'code_dir': str(code_dir), 'lines': [
             {'text': text, 'reference': str(voice_dir(user_id) / (voice_id + '.wav'))}
             for text, voice_id in lines]}

@@ -178,6 +178,43 @@ def test_missing_runtime_fails_explicitly(tmp_path, monkeypatch):
         chatterbox.synthesize_lines([], 'owner')
 
 
+def test_voice_expression_limits_are_checked_before_running_model():
+    with pytest.raises(chatterbox.ChatterboxError, match='expressão'):
+        chatterbox.synthesize_lines([], 'owner', exaggeration=2.1)
+    with pytest.raises(chatterbox.ChatterboxError, match='expressão'):
+        chatterbox.synthesize_lines([], 'owner', cfg_weight=-0.1)
+    with pytest.raises(chatterbox.ChatterboxError, match='expressão'):
+        chatterbox.synthesize_lines([], 'owner', exaggeration=float('nan'))
+
+
+def test_expression_settings_reach_isolated_voice_worker(tmp_path, monkeypatch):
+    python = tmp_path / 'python.exe'
+    python.write_bytes(b'python')
+    monkeypatch.setattr(chatterbox, 'runtime_python', lambda: python)
+    monkeypatch.setattr(chatterbox, 'ptbr_ready', lambda: True)
+    monkeypatch.setattr(chatterbox, 'ptbr_assets', lambda: (tmp_path, tmp_path))
+    monkeypatch.setattr(chatterbox, 'voice_dir', lambda owner: tmp_path)
+    monkeypatch.setattr(chatterbox, 'available_voices', lambda owner: [{'id': 'a' * 16, 'name': 'Caio'}])
+    seen = []
+
+    def fake_run(command, **kwargs):
+        request = json.loads(kwargs['input'])
+        seen.append(request)
+        with wave.open(str(tmp_path / 'source.wav'), 'wb') as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(48000)
+            output.writeframes(b'\x01\x00' * 100)
+        (tmp_path / 'source.wav').replace(request['output_dir'] + '/00.wav')
+        return SimpleNamespace(returncode=0, stderr='')
+
+    monkeypatch.setattr(chatterbox.subprocess, 'run', fake_run)
+    result = chatterbox.synthesize_lines([('Nossa!', 'a' * 16)], 'owner',
+                                         exaggeration=0.8, cfg_weight=0.3)
+    assert len(result) == 1 and len(result[0]) == 200
+    assert (seen[0]['exaggeration'], seen[0]['cfg_weight']) == (0.8, 0.3)
+
+
 def test_import_route_requires_login_and_scopes_catalog(tmp_path, monkeypatch):
     monkeypatch.setenv('CENTRAL_DATA_DIR', str(tmp_path))
     with TestClient(app) as client:

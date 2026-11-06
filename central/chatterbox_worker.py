@@ -15,7 +15,9 @@ def main():
     model = ChatterboxTTS.from_local(job['model_dir'], device=device)
     folder = Path(job['output_dir'])
     for index, line in enumerate(job['lines']):
-        wav = model.generate(line['text'], language_id='pt', audio_prompt_path=line['reference'])
+        wav = model.generate(line['text'], language_id='pt', audio_prompt_path=line['reference'],
+                             exaggeration=job.get('exaggeration', 0.5),
+                             cfg_weight=job.get('cfg_weight', 0.5))
         torchaudio.save(str(folder / f'{index:02d}.wav'), wav.cpu(), model.sr,
                         encoding='PCM_S', bits_per_sample=16)
 
