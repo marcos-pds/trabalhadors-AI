@@ -23,11 +23,12 @@ class SpeechError(RuntimeError):
 def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, user_id):
     """Generate one character line without trimming speech to fit the scene."""
     from .motion_chatterbox import ChatterboxError, available_voices, synthesize_lines
-    if profile not in {voice['id'] for voice in available_voices(user_id)}:
+    from .motion_qwen import PROFILES, QwenVoiceError, synthesize_line
+    if profile not in PROFILES and profile not in {voice['id'] for voice in available_voices(user_id)}:
         raise SpeechError('Escolha uma voz disponível para este personagem.')
     try:
-        audio = synthesize_lines([(text, profile)], user_id)[0]
-    except ChatterboxError as exc:
+        audio = synthesize_line(text, profile) if profile in PROFILES else synthesize_lines([(text, profile)], user_id)[0]
+    except (ChatterboxError, QwenVoiceError) as exc:
         raise SpeechError(str(exc)) from exc
     rate = 48000
     capacity = round(frames * rate / fps)
@@ -42,7 +43,7 @@ def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, use
         output.setframerate(rate)
         output.writeframes(audio + bytes(capacity * 2 - len(audio)))
     captions_path.write_text(json.dumps({
-        'language': 'pt-BR', 'engine': 'chatterbox',
+        'language': 'pt-BR', 'engine': 'qwen' if profile in PROFILES else 'chatterbox',
         'segments': [{'start': 0, 'end': len(audio) / (2 * rate),
                       'speaker': speaker, 'voice_profile': profile, 'text': text}],
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')

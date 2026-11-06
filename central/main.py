@@ -1825,6 +1825,7 @@ class MotionReferenceIn(BaseModel):
     provider: Literal['local_comfyui', 'huggingface']
     prompt: str = Field(min_length=1, max_length=4096)
     model: str | None = Field(default=None, max_length=160)
+    reference_image_data: str | None = Field(default=None, max_length=8_400_000)
 
 
 class MotionWanSceneIn(BaseModel):
@@ -1887,6 +1888,13 @@ def motion_voices(request:Request,user=Depends(current_user)):
     local_only(request)
     from .motion_chatterbox import available_voices, engine_ready
     return {'engine':'chatterbox','ready':engine_ready(),'voices':available_voices(user['id'])}
+
+
+@app.get('/api/motion/qwen/voices')
+def motion_qwen_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_qwen import available_voices, engine_ready
+    return {'engine':'qwen','ready':engine_ready(),'voices':available_voices()}
 
 
 @app.post('/api/motion/voices/import')
@@ -2019,14 +2027,18 @@ def motion_tools_save(data:MotionToolsIn,request:Request,user=Depends(current_us
 def motion_reference_providers(request: Request, user=Depends(current_user)):
     local_only(request)
     from .motion_references import provider_status
-    return provider_status()
+    return provider_status(MOTION._config(user['id']))
 
 
 @app.post('/api/motion/references/generate')
 def motion_reference_generate(data: MotionReferenceIn, request: Request, user=Depends(current_user)):
     require_csrf(request); local_only(request)
     from .motion_references import generate_reference
-    return motion_call(lambda: generate_reference(data.provider, data.prompt, data.model))
+    if data.provider == 'local_comfyui':
+        try:COMFY_RUNTIME.ensure_started(MOTION._config(user['id']))
+        except ComfyStartupError as exc:raise HTTPException(503,str(exc)) from None
+    return motion_call(lambda: generate_reference(data.provider, data.prompt, data.model,
+                                                  MOTION._config(user['id']), data.reference_image_data))
 
 
 @app.post('/api/motion/plan')

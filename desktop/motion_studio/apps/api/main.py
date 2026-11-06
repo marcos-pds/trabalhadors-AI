@@ -87,6 +87,7 @@ class VisualReference(BaseModel):
     prompt: str = Field(max_length=4096)
     source: Literal["generated_brief", "generated_image", "upload"]
     image_data: str | None = Field(default=None, max_length=8_500_000)
+    scene_number: int | None = Field(default=None, ge=1, le=64)
 
 
 class Publication(BaseModel):

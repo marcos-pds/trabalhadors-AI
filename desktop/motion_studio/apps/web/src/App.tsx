@@ -12,7 +12,7 @@ type Clip = {
   style: Record<string, any>;
 };
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
-type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload" };
+type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload"; scene_number?: number };
 type VoiceProfile = string;
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
@@ -187,8 +187,14 @@ export default function App() {
 
   useEffect(() => {
     if (!embedded) return;
-    void centralRequest<{ ready: boolean; voices: { id: string; name: string }[] }>("/api/motion/voices")
-      .then(setVoiceCatalog).catch(() => setVoiceCatalog({ ready: false, voices: [] }));
+    void Promise.allSettled([
+      centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices"),
+      centralRequest<typeof voiceCatalog>("/api/motion/voices"),
+    ]).then((results) => {
+      const voices = results.filter((result): result is PromiseFulfilledResult<typeof voiceCatalog> => result.status === "fulfilled")
+        .map((result) => result.value).filter((catalog) => catalog.ready);
+      setVoiceCatalog({ ready: voices.length > 0, voices: voices.flatMap((catalog) => catalog.voices) });
+    });
     let active = true;
     void centralRequest<MotionTools>("/api/motion/tools")
       .then((config) => {
@@ -550,7 +556,7 @@ export default function App() {
       const planning = await centralRequest<{ id: string }>("/api/runs", { method: "POST", body: JSON.stringify({ conversation_id: conversation.id, mode: "auto", autonomous: false, prompt: [
         "Escreva somente JSON com roteiro e descrições visuais de uma minissérie vertical animada original para Instagram.",
         `Brief narrativo: "${idea.replace(/["\r\n]/g, " ")}"`,
-        "O roteiro deve ter exatamente 8 cenas consecutivas de cerca de 7 segundos. Cada ação deve decorrer claramente da cena anterior. Visual 3D estilizado 9:16, personagens com aparência e roupa consistentes, ações filmáveis em Wan e sem texto legível na imagem. Uma fala curta por cena ou fala vazia. Falas devem caber em 7 segundos e usar português brasileiro natural, sem palavras de outro idioma. Prefira narração fora de cena quando houver personagem falando, pois sincronização labial ainda não está disponível.",
+        "O roteiro deve ter exatamente 8 cenas consecutivas de cerca de 3 segundos. Cada ação deve decorrer claramente da cena anterior. Visual 3D estilizado 9:16, personagens com aparência e roupa consistentes, ações filmáveis em LTX e sem texto legível na imagem. No máximo uma fala muito curta por cena, de até 6 palavras, ou fala vazia. Falas devem caber em 3 segundos e usar português brasileiro natural, sem palavras de outro idioma. Prefira narração fora de cena quando houver personagem falando, pois sincronização labial ainda não está disponível.",
         "Responda SOMENTE JSON válido: [{\"scene\":1,\"title\":\"...\",\"hook\":\"...\",\"prompt\":\"direção visual detalhada em inglês, vertical 9:16, sem texto na imagem\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\",\"cliffhanger\":\"...\"}].",
       ].join("\n") }) });
       let status = "queued";
@@ -571,24 +577,50 @@ export default function App() {
       setProjects((current) => [fresh, ...current]);
       setProject(fresh);
       const profiles = await centralRequest<typeof voiceCatalog>("/api/motion/voices");
-      const voice = profiles.voices.find((item) => /pt-br|brasileir/i.test(item.name)) ?? profiles.voices[0];
-      if (scenes.some((scene) => scene.dialogue?.trim()) && (!profiles.ready || !voice)) throw new Error("Instale o motor de voz pt-BR e crie um perfil antes de produzir falas.");
+      const qwen = await centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices").catch(() => ({ ready: false, voices: [] }));
+      const allVoices = [...(qwen.ready ? qwen.voices : []), ...(profiles.ready ? profiles.voices : [])];
+      const voice = allVoices.find((item) => /pt-br|brasileir/i.test(item.name)) ?? allVoices[0];
+      if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Instale um motor de voz local antes de produzir falas.");
       const cast = [...new Set(scenes.filter((scene) => scene.dialogue?.trim()).map((scene) => scene.speaker?.trim() || "Narradora"))];
-      const alternatives = profiles.voices.filter((item) => item.id !== voice?.id);
+      const alternatives = allVoices.filter((item) => item.id !== voice?.id);
       const voiceProfiles = Object.fromEntries(cast.map((speaker, index) => [speaker,
-        /narrad/i.test(speaker) || index === 0 ? voice?.id ?? "" : alternatives[(index - 1) % alternatives.length]?.id ?? voice?.id ?? ""]));
-      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, scenes, voice_profiles: voiceProfiles, episode_status: "draft" } } }) });
+        allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")))?.id ??
+        (/narrad/i.test(speaker) ? allVoices.find((item) => /narrad/i.test(item.name))?.id : undefined) ??
+        (index === 0 ? voice?.id : alternatives[(index - 1) % alternatives.length]?.id) ?? voice?.id ?? ""]));
+      const masters = (project?.timeline.storyboard?.references ?? []).filter((reference) => reference.image_data && !reference.scene_number);
+      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, scenes, references: masters, voice_profiles: voiceProfiles, episode_status: "draft" } } }) });
       setProject(planned);
       setProjects((current) => current.map((item) => item.id === planned.id ? planned : item));
       setEpisodePlan(scenes);
       }
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
+      let scenesProduced = 0;
       for (const scene of scenes) {
-        const current = await request<Project>(`/api/projects/${planned.id}`);
+        let current = await request<Project>(`/api/projects/${planned.id}`);
         if (current.timeline.tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.style.scene_number === scene.scene))) continue;
+        let sceneReference = current.timeline.storyboard?.references?.find((reference) => reference.scene_number === scene.scene && reference.image_data);
+        if (!sceneReference) {
+          setAutoProgress(`Criando imagem de referência da cena ${scene.scene}/8…`);
+          const master = current.timeline.storyboard?.references?.find((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number);
+          const previous = current.timeline.storyboard?.references?.find((reference) => reference.scene_number === scene.scene - 1 && reference.image_data);
+          const anchor = master ?? previous;
+          const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+            method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: scene.prompt.slice(0, 3500),
+              ...(anchor?.image_data ? { reference_image_data: anchor.image_data } : {}) }),
+          });
+          sceneReference = { id: makeId("ref"), kind: "setting", name: `Cena ${scene.scene} · ${scene.title}`,
+            prompt: scene.prompt, image_data: image.image_data, source: "generated_image", scene_number: scene.scene };
+          const storyboard = current.timeline.storyboard!;
+          current = await request<Project>(`/api/projects/${planned.id}`, { method: "PUT", body: JSON.stringify({
+            title: current.title, summary: current.summary, timeline: { ...current.timeline,
+              storyboard: { ...storyboard, references: [...(storyboard.references ?? []), sceneReference] } },
+          }) });
+          setProject(current);
+        }
         setAutoProgress(`Produzindo cena ${scene.scene}/8 com vídeo${scene.dialogue?.trim() ? " e voz" : ""}…`);
-        const generated = await centralRequest<MotionRun>("/api/motion/wan/scenes", { method: "POST", body: JSON.stringify({
-          project_id: planned.id, episode: 1, scene: scene.scene, prompt: scene.prompt.slice(0, 1024), frames: 121, fps: 16,
+        const generated = await centralRequest<MotionRun>("/api/motion/ltx/scenes", { method: "POST", body: JSON.stringify({
+          project_id: planned.id, episode: 1, scene: scene.scene, prompt: scene.prompt.slice(0, 1024), frames: 49, fps: 16,
+          image_data: sceneReference.image_data, width: 480, height: 832,
           ...(scene.dialogue?.trim() ? { speech_text: scene.dialogue.trim().slice(0, 300), speaker: scene.speaker?.trim() || "Narradora", voice_profile: voiceProfiles[scene.speaker?.trim() || "Narradora"] } : {}),
         }) });
         setWanRun(generated);
@@ -600,6 +632,11 @@ export default function App() {
         }
         if (latest.state !== "completed") throw new Error(`Cena ${scene.scene}: ${latest.error || latest.state}. As cenas prontas permanecem na timeline.`);
         await syncCompletedVideos([latest], planned.id);
+        scenesProduced += 1;
+        if (scenesProduced === 2 && scene.scene < scenes.length) {
+          setAutoProgress("Duas cenas prontas para revisão. Confira personagem, ação e voz na timeline; use o mesmo pedido para continuar.");
+          return;
+        }
       }
       setAutoProgress("Montando o MP4 final com as falas das oito cenas…");
       await exportCurrentEpisode(planned.id);
