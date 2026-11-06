@@ -67,6 +67,29 @@ function clock(seconds: number): string {
   return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
 }
 
+function lastVideoFrameDataUrl(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.onloadedmetadata = () => { video.currentTime = Math.max(0, video.duration - 1 / 16); };
+    video.onseeked = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Não foi possível ler o quadro do vídeo.");
+        context.drawImage(video, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      } catch (reason) { reject(reason); }
+      finally { video.removeAttribute("src"); video.load(); }
+    };
+    video.onerror = () => reject(new Error("Não foi possível extrair o último quadro da primeira tomada."));
+    video.src = url;
+  });
+}
+
 function Preview({
   timeline, frame, videoClip, videoRef, onVideoTime, onVideoEnded, onVideoReady,
 }: {
@@ -90,7 +113,7 @@ function Preview({
         onTimeUpdate={(event) => onVideoTime(event.currentTarget.currentTime)}
         onLoadedMetadata={onVideoReady} onEnded={onVideoEnded}
       />}
-      {!src && !textClip && <div className="preview-empty"><span className="play-glyph">▶</span><strong>PREVIEW DA COMPOSIÇÃO</strong><small>Gere uma cena Wan ou adicione um título à timeline.</small></div>}
+      {!src && !textClip && <div className="preview-empty"><span className="play-glyph">▶</span><strong>PREVIEW DA COMPOSIÇÃO</strong><small>Gere uma cena ou adicione um título à timeline.</small></div>}
       {textClip && <div className={textClip.style.caption ? "preview-title preview-caption" : "preview-title"} style={{ color: String(textClip.style.color ?? "#f8fafc") }}>
         {words.map((word, index) => <span key={word + "-" + index} style={{ color: textClip.style.word_colors?.[index] ?? textClip.style.color }}>{word} </span>)}
       </div>}
@@ -351,7 +374,7 @@ export default function App() {
       setPlaying(false);
       setSelectedClip(last.id);
       setPlayheadFrame(last.start_frame);
-      setImportNotice("Cena Wan adicionada à timeline. Use ▶ para reproduzir.");
+      setImportNotice("Cena adicionada à timeline. Use ▶ para reproduzir.");
     }
   }, []);
 
@@ -452,6 +475,61 @@ export default function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao criar projeto.");
     }
+  }
+
+  async function createReferencePilot() {
+    const reference = characterReference;
+    if (!reference?.image_data || autoBusy) return;
+    setAutoBusy(true);
+    setError("");
+    try {
+      const voice = voiceCatalog.voices.find((item) => /pt-br|brasileir/i.test(item.name)) ?? voiceCatalog.voices[0];
+      if (!voiceCatalog.ready || !voice) throw new Error("Instale uma voz em português para testar as falas.");
+      const identity = "Luna, exactly the same girl as the input image: short golden blond bob, large blue eyes, magenta-purple hoodie, white pants. Polished 3D animation in a luminous mint-green forest. One stable medium shot, locked camera. Keep her centered and preserve her face, hair, outfit and background. No text or extra people. ";
+      const scenes: PlannedScene[] = [
+        { scene: 1, title: "Luna encontra a luz", prompt: identity + "She notices a tiny glow, blinks and gently lifts one hand. Subtle natural motion; she does not walk or turn away.", speaker: "Luna", dialogue: "Olha, uma luz!" },
+        { scene: 2, title: "Luna segue a luz", prompt: identity + "Continue seamlessly from the input frame. She smiles and slightly raises her hand toward the light. Her body and camera stay in place.", speaker: "Luna", dialogue: "Ela abriu o caminho!" },
+      ];
+      setAutoProgress("Preparando duas tomadas com a mesma imagem mestra…");
+      const created = await request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ title: `Teste de continuidade · ${reference.name}`, summary: "Piloto de duas tomadas com imagem mestra e voz de Luna." }) });
+      const seeded = await request<Project>(`/api/projects/${created.id}`, { method: "PUT", body: JSON.stringify({ title: created.title, summary: created.summary, timeline: {
+        ...initialTimeline(), width: 720, height: 1280, storyboard: { theme: created.summary, scenes,
+          references: [reference], voice_profiles: { Luna: voice.id }, episode_status: "draft" },
+      } }) });
+      setProject(seeded);
+      setProjects((current) => [seeded, ...current]);
+      setEpisodePlan(scenes);
+      let imageData = reference.image_data;
+      for (const scene of scenes) {
+        setAutoProgress(`Gerando tomada ${scene.scene}/2 com imagem mestra e voz…`);
+        const queued = await centralRequest<MotionRun>("/api/motion/ltx/scenes", { method: "POST", body: JSON.stringify({
+          project_id: seeded.id, episode: 1, scene: scene.scene, prompt: scene.prompt,
+          image_data: imageData, width: 480, height: 832, frames: 49, fps: 16,
+          speech_text: scene.dialogue, speaker: "Luna", voice_profile: voice.id,
+        }) });
+        setWanRun(queued);
+        let latest = queued;
+        for (let attempt = 0; attempt < 600 && ["queued", "running"].includes(latest.state); attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          latest = await centralRequest<MotionRun>(`/api/motion/runs/${queued.id}`);
+          setWanRun(latest);
+        }
+        if (latest.state !== "completed") throw new Error(`Tomada ${scene.scene}: ${latest.error || latest.state}.`);
+        await syncCompletedVideos([latest], seeded.id);
+        if (scene.scene === 1) {
+          const artifact = latest.jobs.find((job) => job.adapter === "comfyui_wan")?.artifact;
+          const preview = artifact && wanVideoPreviewUrl(latest.id, artifact.id);
+          if (!preview) throw new Error("A primeira tomada não trouxe um MP4 para continuar a cena.");
+          imageData = await lastVideoFrameDataUrl(preview);
+        }
+      }
+      setAutoProgress("Montando o piloto com voz e legendas…");
+      await exportCurrentEpisode(seeded.id);
+      setAutoProgress("Piloto de duas tomadas pronto para comparar na timeline.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha no piloto com imagem mestra.");
+      setAutoProgress("As tomadas concluídas foram preservadas para revisão.");
+    } finally { setAutoBusy(false); }
   }
 
   async function createEpisodeFromChat() {
@@ -692,12 +770,13 @@ export default function App() {
           <p className="helper-text">As vozes são alinhadas ao início de cada cena. A sincronização dos lábios ainda requer um motor específico e será indicada como pendente na revisão.</p>
           {wanRun && <p className="helper-text">Última cena: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}
           <details className="chat-references"><summary>Referências visuais opcionais ({visualReferences.length})</summary>
-            <p className="helper-text">Guarde imagens de personagens e cenários para revisar a consistência. O Wan atual usa a direção textual.</p>
+            <p className="helper-text">Envie uma imagem mestra para testar duas tomadas consecutivas antes de produzir um episódio inteiro.</p>
             <select aria-label="Tipo de referência" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select>
             <select aria-label="Provedor de imagem" value={referenceProvider} onChange={(event) => setReferenceProvider(event.target.value as "local_comfyui" | "huggingface")}><option value="local_comfyui">Local</option><option value="huggingface">Gratuito</option></select>
             <button className="quiet-button" onClick={() => void generateVisualReference()} disabled={!project || referenceBusy || autoBusy}>{referenceBusy ? "GERANDO…" : "GERAR IMAGEM"}</button>
             <label className="reference-upload">ENVIAR IMAGEM<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadVisualReference} disabled={!project || autoBusy} /></label>
             <div className="reference-thumbs">{visualReferences.map((reference) => reference.image_data && <img key={reference.id} src={reference.image_data} alt={reference.name} title={reference.name} />)}</div>
+            <button className="quiet-button" onClick={() => void createReferencePilot()} disabled={!embedded || !characterReference?.image_data || autoBusy}>TESTAR 2 TOMADAS COM IMAGEM MESTRA</button>
           </details>
         </aside>
         <section className="center-column">
@@ -796,7 +875,7 @@ export default function App() {
             </select>
             <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()} disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim()}>{sceneSpeechBusy ? "GERANDO FALA…" : "↻ REFAZER FALA"}</button>
           </> : <><p className="helper-text">Selecione um clipe de vídeo na timeline para aprovar ou solicitar uma alteração.</p><button className="quiet-button" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved")}>APROVAR EPISÓDIO</button></>}
-          {videoClips.length === 8 && <button className="quiet-button" onClick={() => void exportCurrentEpisode().catch((reason) => setError(reason instanceof Error ? reason.message : "Falha na montagem."))} disabled={autoBusy}>ATUALIZAR MP4 FINAL</button>}
+          {[2, 8].includes(episodePlan.length) && videoClips.length === episodePlan.length && <button className="quiet-button" onClick={() => void exportCurrentEpisode().catch((reason) => setError(reason instanceof Error ? reason.message : "Falha na montagem."))} disabled={autoBusy}>ATUALIZAR MP4 FINAL</button>}
         </section>      </section>
       <footer className="statusbar"><span><i className={capabilities?.comfyui.status === "available" ? "dot online" : "dot"} /> COMFYUI {capabilities?.comfyui.status === "available" ? "CONECTADO" : "DESCONECTADO"}</span><span>ARMAZENAMENTO LOCAL · SQLITE</span><span>AI MOTION STUDIO 0.1.0</span></footer>
     </main>

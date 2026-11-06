@@ -1843,6 +1843,8 @@ class MotionWanSceneIn(BaseModel):
 
 class MotionLtxSceneIn(MotionWanSceneIn):
     image_data: str = Field(min_length=32, max_length=8_400_000)
+    width: int = Field(default=288, ge=288, le=480)
+    height: int = Field(default=512, ge=512, le=832)
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -2138,6 +2140,8 @@ def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_
     require_csrf(request);local_only(request)
     if (data.frames-1)%8:
         raise HTTPException(422,'A duração LTX precisa usar 1 + múltiplos de 8 quadros.')
+    if (data.width,data.height) not in ((288,512),(480,832)) or (data.width==480 and data.frames>49):
+        raise HTTPException(422,'Use 288×512 ou 480×832 com até 49 quadros no modo de maior qualidade.')
     from .motion_contracts import ContractError, _text, scoped_path
     from .motion_ltx import MODEL, ENCODER, ltx_workflow
     from .motion_queue import authorized_root
@@ -2178,7 +2182,8 @@ def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_
     workflow_name=f'ltx_workflow_{run_id}.json'
     workflow_path=target(grant,'MotionStudio/'+workflow_name,creating=True)
     with workflow_path.open('x',encoding='utf-8') as stream:
-        json.dump(ltx_workflow(prompt,image_name,data.seed,data.frames,data.fps,'central_ltx_scene'),stream,ensure_ascii=False,separators=(',',':'))
+        json.dump(ltx_workflow(prompt,image_name,data.seed,data.frames,data.fps,'central_ltx_scene',
+                               data.width,data.height),stream,ensure_ascii=False,separators=(',',':'))
     manifest={
         'schema_version':1,'project_id':f'motion-{data.project_id}',
         'artifacts':[
@@ -2188,7 +2193,8 @@ def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_
         ],
         'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow','reference'],'outputs':['video'],
                  'params':{'model':'ltxv','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
-                           'image_sha256':hashlib.sha256(image).hexdigest(),'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
+                           'image_sha256':hashlib.sha256(image).hexdigest(),'replace_clip_id':data.replace_clip_id,'scene_number':data.scene,
+                           'width':data.width,'height':data.height}}],
     }
     attach_scene_speech(manifest,data,grant,run_id,user['id'])
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'ltx-{run_id}','MotionStudio'))
@@ -2365,9 +2371,10 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     _,timeline = _motion_project_timeline(project_id)
     videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                      for clip in track['clips']), key=lambda clip:clip['start_frame'])
-    if len(videos)!=8 or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+    expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8
+    if expected not in (2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
                              for index,clip in enumerate(videos)):
-        raise HTTPException(422,'O episódio precisa de oito cenas consecutivas na timeline.')
+        raise HTTPException(422,'A montagem precisa de duas ou oito cenas consecutivas na timeline.')
     audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
                       for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
     root,grant = authorized_root(DB,user['id'])

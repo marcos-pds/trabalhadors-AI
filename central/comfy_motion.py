@@ -88,7 +88,8 @@ def prepare_workflow(path,params,prefix,config):
         if checkpoint.get('ckpt_name')!=MODEL or clip.get('clip_name')!=ENCODER or clip.get('type')!='ltxv':
             raise ContractError('invalid_model_path')
         latent=grouped['LTXVImgToVideo'][0][1]
-        if any(latent.get(key)!=value for key,value in {'width':288,'height':512,'batch_size':1,'strength':1.0}.items()):
+        if any(latent.get(key)!=value for key,value in {'width':params.get('width',288),
+                'height':params.get('height',512),'batch_size':1,'strength':1.0}.items()):
             raise ContractError('wan_resolution_limit')
         image_name=grouped['LoadImage'][0][1].get('image')
         if not isinstance(image_name,str) or not re.fullmatch(r'central_ltx_[a-f0-9]{32}\.(?:jpg|png|webp)',image_name):

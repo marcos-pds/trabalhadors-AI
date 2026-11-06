@@ -32,6 +32,13 @@ def test_ltx_scene_keeps_reference_as_local_input_and_flattens_video_format(tmp_
     assert graph['13']['inputs']['format.codec'] == 'h264'
     assert graph['6']['inputs']['image'] == ['5', 0]
     assert len(models) == 2
+    high_workflow = tmp_path / 'high_scene.json'
+    high_workflow.write_text(json.dumps(ltx_workflow('Lara turns', image_name, 7, 49, 16,
+                                                    'scene', 480, 832)))
+    high_params = {**params, 'frames': 49, 'width': 480, 'height': 832}
+    high_graph, _, _ = prepare_workflow(high_workflow, high_params, 'owned_scene',
+                                       MotionConfig(comfy_root=str(comfy), comfy_endpoint='http://127.0.0.1:8188'))
+    assert (high_graph['6']['inputs']['width'], high_graph['6']['inputs']['height']) == (480, 832)
 
     reference = tmp_path / 'reference.jpg'
     reference.write_bytes(image.read_bytes())
@@ -85,6 +92,15 @@ def test_ltx_endpoint_queues_owned_reference_and_rejects_invalid_image(tmp_path,
         manifest = json.loads(DB.one('SELECT manifest FROM motion_runs WHERE id=?', (run['id'],))['manifest'])
         assert [item['kind'] for item in manifest['artifacts']] == ['workflow', 'image', 'video']
         assert manifest['jobs'][0]['params']['image_sha256'] == hashlib.sha256(image).hexdigest()
+        high = client.post('/api/motion/ltx/scenes', headers=headers,
+                           json={**payload, 'frames': 49, 'width': 480, 'height': 832})
+        assert high.status_code == 200, high.text
+        high_manifest = json.loads(DB.one('SELECT manifest FROM motion_runs WHERE id=?',
+                                         (high.json()['id'],))['manifest'])
+        assert high_manifest['jobs'][0]['params']['width'] == 480
+        assert client.post('/api/motion/ltx/scenes', headers=headers,
+                           json={**payload, 'width': 480, 'height': 832}).status_code == 422
         assert client.post('/api/motion/ltx/scenes', headers=headers,
                            json={**payload, 'image_data': 'data:image/jpeg;base64,bad'}).status_code == 422
         MOTION.cancel(user, run['id'])
+        MOTION.cancel(user, high.json()['id'])

@@ -2,13 +2,15 @@ import json
 import sqlite3
 
 from fastapi import HTTPException
+import pytest
 
 from central import main as motion_main
 from central.database import Database, utcnow
 from desktop.motion_studio.apps.api.main import Timeline, initialize, now
 
 
-def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypatch):
+@pytest.mark.parametrize('scene_count', [2, 8])
+def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypatch, scene_count):
     db = Database(tmp_path / 'central.sqlite3')
     db.execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',
                ('owner', 'owner@example.test', 'hash', utcnow()))
@@ -19,9 +21,12 @@ def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypat
     clips = [{'id': f'clip_{index}', 'kind': 'video', 'name': f'Cena {index}',
               'start_frame': index * 120, 'duration_frames': 120,
               'style': {'motion_run_id': f'run_{index}', 'motion_artifact_id': 'video'}}
-             for index in range(8)]
+             for index in range(scene_count)]
     timeline = Timeline.model_validate({'fps': 24, 'width': 720, 'height': 1280,
-        'tracks': [{'id': 'video_main', 'name': 'Vídeo', 'kind': 'video', 'clips': clips}]})
+        'tracks': [{'id': 'video_main', 'name': 'Vídeo', 'kind': 'video', 'clips': clips}],
+        'storyboard': {'theme': 'Pilot', 'scenes': [
+            {'scene': index + 1, 'title': f'Cena {index+1}', 'prompt': 'Test'}
+            for index in range(scene_count)]}})
     with sqlite3.connect(studio_db) as connection:
         connection.execute('INSERT INTO projects VALUES (?,?,?,?,?,?)',
                            ('pilot', 'Episódio', '', timeline.model_dump_json(), now(), now()))
@@ -43,18 +48,18 @@ def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypat
 
     monkeypatch.setattr(motion_main, 'DB', db)
     monkeypatch.setattr(motion_main, 'MOTION', FakeMotion())
-    monkeypatch.setattr(motion_main.motion_studio_api.state, 'database', studio_db)
+    monkeypatch.setattr(motion_main.motion_studio_api.state, 'database', studio_db, raising=False)
     monkeypatch.setattr('central.motion_queue.authorized_root',
                         lambda database, user: (tmp_path, str(tmp_path)))
     monkeypatch.setattr(motion_main, 'require_csrf', lambda request: None)
     monkeypatch.setattr(motion_main, 'local_only', lambda request: None)
 
     def fake_assemble(scenes, output, captions=None):
-        assert len(scenes) == 8
-        assert captions == [''] * 8
+        assert len(scenes) == scene_count
+        assert captions == [''] * scene_count
         assert all(video == source and audio is None and duration == 5 for video, audio, duration in scenes)
         output.write_bytes(b'final video')
-        return {'path': output, 'duration': 40, 'scenes': 8}
+        return {'path': output, 'duration': scene_count * 5, 'scenes': scene_count}
 
     monkeypatch.setattr('central.motion_export.assemble_episode', fake_assemble)
     result = motion_main.motion_export_episode('pilot', object(), {'id': 'owner'})

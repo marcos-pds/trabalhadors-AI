@@ -300,7 +300,7 @@ def _bounded_manifest(manifest):
 def _parameters(adapter, params):
     if adapter == 'comfyui_wan':
         _keys(params, ('model', 'seed', 'frames', 'fps'), ('prompt', 'replace_clip_id', 'scene_number', 'image_sha256',
-              'speech_artifact_id', 'speech_text', 'speaker', 'voice_profile'))
+              'speech_artifact_id', 'speech_text', 'speaker', 'voice_profile', 'width', 'height'))
         if 'prompt' in params:_text(params['prompt'],1024)
         if params.get('replace_clip_id') is not None:_identifier(params['replace_clip_id'])
         if 'scene_number' in params:_integer(params['scene_number'], 1, 64)
@@ -320,6 +320,12 @@ def _parameters(adapter, params):
         _integer(params['fps'], 1, 120)
         if params['model'] == 'ltxv' and (not isinstance(params.get('image_sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', params['image_sha256']) or (params['frames'] - 1) % 8):
             raise ContractError('invalid image conditioned scene')
+        if params['model'] == 'ltxv' and (params.get('width',288),params.get('height',512)) not in ((288,512),(480,832)):
+            raise ContractError('invalid image conditioned resolution')
+        if params['model'] == 'ltxv' and params.get('width',288)==480 and params['frames']>49:
+            raise ContractError('high resolution scene too long')
+        if params['model'] == 'wan' and ('width' in params or 'height' in params):
+            raise ContractError('wan resolution is fixed')
     elif adapter == 'episode_assembly':
         _keys(params, ('frames', 'fps'))
         _integer(params['fps'], 1, 120)
