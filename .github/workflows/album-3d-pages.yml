@@ -1,0 +1,57 @@
+name: Album 3D - Publicar no GitHub Pages (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias do album
+        working-directory: examples/album-de-memorias-3d
+        run: npm install --no-audit --no-fund
+      - name: Testes unitarios
+        working-directory: examples/album-de-memorias-3d
+        run: npm test
+      - name: Verificar configuracao publica do Supabase
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          test -n "$VITE_SUPABASE_URL" || (echo 'Configure SUPABASE_URL em Actions Variables' && exit 1)
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" || (echo 'Configure SUPABASE_PUBLISHABLE_KEY em Actions Variables' && exit 1)
+      - name: Compilar site
+        working-directory: examples/album-de-memorias-3d
+        env:
+          GITHUB_PAGES: 'true'
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: examples/album-de-memorias-3d/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

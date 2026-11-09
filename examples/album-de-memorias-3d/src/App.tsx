@@ -679,7 +679,7 @@ type TextPlacement =
   | 'bottom-center'
   | 'bottom-right';
 
-type PageData = {
+export type PageData = {
   type: 'cover' | 'index' | 'editable';
   title?: string;
   subtitle?: string;
@@ -689,6 +689,7 @@ type PageData = {
   align?: 'flex-start' | 'center' | 'flex-end';
   marginTop?: string;
   imageUrl?: string;
+  photoPath?: string;
   text?: string;
   frameStyle?: FrameStyle;
   textPlacement?: TextPlacement;
@@ -698,8 +699,15 @@ type PageData = {
   pageNumber?: number;
 };
 
-type AlbumSheet = { id: string; front: PageData; back: PageData };
-type EditablePageProps = { data: PageData; onUpdate: (page: PageData) => void; onAddPage: () => void };
+export type AlbumSheet = { id: string; front: PageData; back: PageData };
+type UploadPhoto = (file: File) => Promise<{ path: string; url: string }>;
+type EditablePageProps = {
+  data: PageData;
+  onUpdate: (page: PageData) => void;
+  onAddPage: () => void;
+  onUploadPhoto?: UploadPhoto;
+  onPhotoError?: (message: string) => void;
+};
 type BookProps = {
   sheets: AlbumSheet[];
   isBookOpen: boolean;
@@ -708,6 +716,8 @@ type BookProps = {
   onUpdateSheet: (index: number, face: 'front' | 'back', page: PageData) => void;
   onAddPage: () => void;
   onEnsureNextSheet: () => void;
+  onUploadPhoto?: (sheetIndex: number, face: 'front' | 'back', file: File) => Promise<{ path: string; url: string }>;
+  onPhotoError?: (message: string) => void;
 };
 
 const frameStyles: FrameStyle[] = ['polaroid', 'vintage', 'gold', 'scrapbook', 'soft'];
@@ -724,7 +734,7 @@ const sampleTexts = [
 const pick = <T,>(array: T[]) => array[Math.floor(Math.random() * array.length)];
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-const createRandomEditablePage = (pageNumber?: number): PageData => ({
+export const createRandomEditablePage = (pageNumber?: number): PageData => ({
   type: 'editable',
   rotation: Math.random() * 6 - 3,
   align: (['flex-start', 'center', 'flex-end'] as const)[Math.floor(Math.random() * 3)],
@@ -738,7 +748,7 @@ const createRandomEditablePage = (pageNumber?: number): PageData => ({
   text: sampleTexts[Math.floor(Math.random() * sampleTexts.length)]
 });
 
-const defaultAlbumData: AlbumSheet[] = [
+export const defaultAlbumData: AlbumSheet[] = [
   {
     id: 'sheet-1',
     front: {
@@ -844,8 +854,12 @@ const IndexPage = ({ data }: { data: PageData }) => (
   </div>
 );
 
-const EditablePage = ({ data, onUpdate, onAddPage }: EditablePageProps) => {
+const EditablePage = ({ data, onUpdate, onAddPage, onUploadPhoto, onPhotoError }: EditablePageProps) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  // Uploads são assíncronos: preserva textos digitados enquanto a foto é enviada.
+  const currentDataRef = useRef(data);
+  currentDataRef.current = data;
   const frameClass = getFrameClassName(data.frameStyle);
   const noteStyle = useMemo(
     () => getTextBoxStyle(data.textWidth, data.textRotation, data.pageAccent),
@@ -857,11 +871,23 @@ const EditablePage = ({ data, onUpdate, onAddPage }: EditablePageProps) => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      onUpdate({ ...data, imageUrl: url });
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || uploading) return;
+    setUploading(true);
+    try {
+      if (onUploadPhoto) {
+        const photo = await onUploadPhoto(file);
+        onUpdate({ ...currentDataRef.current, imageUrl: photo.url, photoPath: photo.path });
+      } else {
+        const url = URL.createObjectURL(file);
+        onUpdate({ ...data, imageUrl: url });
+      }
+    } catch (error) {
+      onPhotoError?.(error instanceof Error ? error.message : 'Falha ao salvar fotografia.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -899,7 +925,7 @@ const EditablePage = ({ data, onUpdate, onAddPage }: EditablePageProps) => {
               </div>
             )}
             <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileChange} accept="image/*" />
-            <div className="frame-caption">Clique para trocar a foto</div>
+            <div className="frame-caption">{uploading ? 'Salvando foto…' : 'Clique para trocar a foto'}</div>
           </div>
         </div>
         <div className="note-zone" style={{ justifyContent: getHorizontalPosition(data.textPlacement) }}>
@@ -930,7 +956,7 @@ const EditablePage = ({ data, onUpdate, onAddPage }: EditablePageProps) => {
   );
 };
 
-const RenderPageContent = ({ data, onUpdate, onAddPage }: EditablePageProps) => {
+const RenderPageContent = ({ data, onUpdate, onAddPage, onUploadPhoto, onPhotoError }: EditablePageProps) => {
   if (!data) return null;
 
   switch (data.type) {
@@ -939,13 +965,13 @@ const RenderPageContent = ({ data, onUpdate, onAddPage }: EditablePageProps) => 
     case 'index':
       return <IndexPage data={data} />;
     case 'editable':
-      return <EditablePage data={data} onUpdate={onUpdate} onAddPage={onAddPage} />;
+      return <EditablePage data={data} onUpdate={onUpdate} onAddPage={onAddPage} onUploadPhoto={onUploadPhoto} onPhotoError={onPhotoError} />;
     default:
       return <div className="w-full h-full bg-[#fcf9f2]" />;
   }
 };
 
-const Book = ({ sheets, isBookOpen, onOpenBook, onCloseBook, onUpdateSheet, onAddPage, onEnsureNextSheet }: BookProps) => {
+const Book = ({ sheets, isBookOpen, onOpenBook, onCloseBook, onUpdateSheet, onAddPage, onEnsureNextSheet, onUploadPhoto, onPhotoError }: BookProps) => {
   const [currentSheetIndex, setCurrentSheetIndex] = useState(0);
   const [turningSheetIndex, setTurningSheetIndex] = useState<number | null>(null);
   const [isMobilePortrait, setIsMobilePortrait] = useState(false);
@@ -1122,6 +1148,8 @@ const Book = ({ sheets, isBookOpen, onOpenBook, onCloseBook, onUpdateSheet, onAd
                   data={sheet.front}
                   onUpdate={(newData) => onUpdateSheet(idx, 'front', newData)}
                   onAddPage={onAddPage}
+                  onUploadPhoto={onUploadPhoto ? (file) => onUploadPhoto(idx, 'front', file) : undefined}
+                  onPhotoError={onPhotoError}
                 />
                 {isBookOpen && canClickRight && (
                   <button
@@ -1142,6 +1170,8 @@ const Book = ({ sheets, isBookOpen, onOpenBook, onCloseBook, onUpdateSheet, onAd
                   data={sheet.back}
                   onUpdate={(newData) => onUpdateSheet(idx, 'back', newData)}
                   onAddPage={onAddPage}
+                  onUploadPhoto={onUploadPhoto ? (file) => onUploadPhoto(idx, 'back', file) : undefined}
+                  onPhotoError={onPhotoError}
                 />
                 {canClickLeft && (
                   <button
@@ -1171,8 +1201,18 @@ const Book = ({ sheets, isBookOpen, onOpenBook, onCloseBook, onUpdateSheet, onAd
   );
 };
 
-export default function App() {
-  const [albumData, setAlbumData] = useState(defaultAlbumData);
+export type AlbumViewProps = {
+  controlledSheets?: AlbumSheet[];
+  onUpdatePage?: (sheet: AlbumSheet, face: 'front' | 'back', updated: PageData, position: number) => void;
+  onCreateSheet?: () => void;
+  onUploadPhoto?: (sheetIndex: number, face: 'front' | 'back', file: File) => Promise<{ path: string; url: string }>;
+  onPhotoError?: (message: string) => void;
+};
+
+export default function App({ controlledSheets, onUpdatePage, onCreateSheet, onUploadPhoto, onPhotoError }: AlbumViewProps = {}) {
+
+  const [localAlbumData, setLocalAlbumData] = useState(defaultAlbumData);
+  const albumData = controlledSheets ?? localAlbumData;
   const [isBookOpen, setIsBookOpen] = useState(false);
   const [showPrompt, setShowPrompt] = useState(true);
   const particles = useMemo(() => Array.from({ length: 18 }, (_, i) => ({
@@ -1192,7 +1232,11 @@ export default function App() {
   };
 
   const handleUpdateSheet = (sheetIndex: number, face: 'front' | 'back', newData: PageData) => {
-    setAlbumData((prev) => prev.map((sheet, idx) => (idx === sheetIndex ? { ...sheet, [face]: newData } : sheet)));
+    if (onUpdatePage && albumData[sheetIndex]) {
+      onUpdatePage(albumData[sheetIndex], face, newData, sheetIndex);
+    } else {
+      setLocalAlbumData((prev) => prev.map((sheet, idx) => (idx === sheetIndex ? { ...sheet, [face]: newData } : sheet)));
+    }
   };
 
   const createSheet = (): AlbumSheet => {
@@ -1206,7 +1250,11 @@ export default function App() {
   };
 
   const handleAddPage = () => {
-    setAlbumData((prev) => [...prev, createSheet()]);
+    if (onCreateSheet) {
+      onCreateSheet();
+    } else {
+      setLocalAlbumData((prev) => [...prev, createSheet()]);
+    }
   };
 
   return (
@@ -1236,6 +1284,8 @@ export default function App() {
           onUpdateSheet={handleUpdateSheet}
           onAddPage={handleAddPage}
           onEnsureNextSheet={handleAddPage}
+          onUploadPhoto={onUploadPhoto}
+          onPhotoError={onPhotoError}
         />
 
         {showPrompt && !isBookOpen && (
