@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
@@ -13,18 +13,18 @@ type RequestRow = {
   created_at: string;
 };
 
-const inputStyle: React.CSSProperties = {
+const inputStyle: CSSProperties = {
   width: '100%', padding: '13px 15px', border: '1px solid #dcc8b5',
   borderRadius: 12, background: '#fff9f2', color: '#442b30',
   fontSize: 15, outlineColor: '#b48a53', boxSizing: 'border-box'
 };
-const buttonStyle: React.CSSProperties = {
+const buttonStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
   padding: '13px 17px', border: '1px solid #c19b64', borderRadius: 12,
   background: 'linear-gradient(130deg, #7b3540, #54202a)', color: '#fff2d9',
   fontWeight: 600, cursor: 'pointer', fontSize: 14
 };
-const subtleButton: React.CSSProperties = {
+const subtleButton: CSSProperties = {
   ...buttonStyle, background: 'rgba(255,255,255,.08)', borderColor: '#ffffff40',
   color: '#fff3e1'
 };
