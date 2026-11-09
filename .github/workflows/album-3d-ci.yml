@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - 'feat/album-compartilhado-supabase'
+      - 'feat/album-pages-supabase-connected'
+      - 'main'
     paths:
       - 'examples/album-de-memorias-3d/**'
       - '.github/workflows/album-3d-ci.yml'
