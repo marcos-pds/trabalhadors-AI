@@ -175,7 +175,7 @@ export default function CloudApp() {
     setLoadingAlbum(true);
     const initialize = async () => {
       try {
-        const { data, error } = await supabase.rpc('is_couple_member');
+        const { data, error } = await supabase!.rpc('is_couple_member');
         if (error) throw error;
         if (!active) return;
         setAllowed(Boolean(data));

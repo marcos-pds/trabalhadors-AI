@@ -37,7 +37,7 @@ jobs:
           GITHUB_PAGES: 'true'
           VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
-        run: npm run build
+        run: npm run build -- --mode pages
       - uses: actions/upload-pages-artifact@v4
         with:
           path: examples/album-de-memorias-3d/dist
