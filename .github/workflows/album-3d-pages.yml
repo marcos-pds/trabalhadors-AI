@@ -1,11 +1,8 @@
 name: Album 3D - Publicar no GitHub Pages (manual)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'examples/album-de-memorias-3d/**'
-      - '.github/workflows/album-3d-pages.yml'
+  # Site será migrado para um repositório independente.
+  # Não publicar automaticamente a partir da Central IA.
   workflow_dispatch:
 
 permissions:
