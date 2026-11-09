@@ -35,7 +35,7 @@ Node.js 20.19+ ou 22.12+. Projeto gratuito do Supabase. Dois endereços de e-mai
 
 O repositório existente pode ter outro site — **não altere a configuração do Pages nem rode o fluxo de deploy sem verificar se isso substituirá um site já publicado**. Um workflow manual de publicação do álbum fica em `.github/workflows/album-pages.yml` na raiz do repositório, caso seja adicionado.
 
-Defina as variáveis do repositório `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` em GitHub > Settings > Secrets and variables > Actions > Variables; são dados públicos do app, mas nunca publique uma chave secreta de serviço.
+O modo Pages recebe apenas a URL e a chave **publicável** do Supabase por meio de `.env.pages` (esses dados são intencionalmente públicos no navegador). O acesso às fotos exige autenticação e RLS. **Nunca comite chaves secretas, `service_role` ou senhas**. O desenvolvimento local continua usando `.env.local`.
 
 No GitHub > Settings > Pages, selecione Source = GitHub Actions. O site será publicado em `https://marcos-pds.github.io/trabalhadors-AI/` após sucesso do workflow e configuração Pages. **Esse endereço ainda não é garantido até confirmação do deploy.**
 
