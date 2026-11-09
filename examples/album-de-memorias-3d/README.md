@@ -66,3 +66,37 @@ No GitHub > Settings > Pages, selecione Source = GitHub Actions. O site será pu
 ### Publicação sem substituir outros sites do GitHub
 
 O workflow manual em `.github/workflows/album-3d-pages.yml` publica um artefato no **único site GitHub Pages deste repositório**. Se já houver um site Pages nesse mesmo repositório, o novo deploy poderá substituí-lo. Antes de ativar, verifique a configuração existente ou prefira um repositório separado.
+
+
+## Versão R & M — cadastro com aprovação
+
+A capa inicial mostra **Rayssa & Marcos Paulo** e o monograma **R & M**.
+
+- O proprietário entra com o e-mail previamente autorizado e vê um **sino** no canto superior direito quando o livro está aberto ou fechado.
+- A pessoa convidada pode escolher **Criar conta**, informar nome, e-mail e senha e confirmar o e-mail.
+- Após entrar, escolhe **Solicitar acesso ao álbum**. Isso cria um pedido **pendente**, sem acesso às fotos.
+- O proprietário clica no sino e decide **Aprovar** ou **Recusar**. A aprovação libera apenas uma pessoa parceira, sem alterar a privacidade do álbum.
+- A tela de espera consulta periodicamente o estado da solicitação. Ao ser aprovada, a pessoa entra automaticamente no álbum.
+- O e-mail da convidada **não precisa ser informado antecipadamente** e não é adicionado ao GitHub.
+
+### Atenção: configurar confirmação de e-mail
+
+Em Supabase > Authentication > Providers > Email:
+- Deixe **Confirm Email** habilitado para impedir identidades não verificadas.
+- Certifique-se de que novas contas podem se cadastrar. Os pedidos ficam limitados por RLS e a autorização só acontece após aprovação.
+
+Em Supabase > Authentication > URL Configuration:
+- **Site URL:** \`https://marcos-pds.github.io/trabalhadors-AI/\`
+- **Redirect URLs:** adicione \`https://marcos-pds.github.io/trabalhadors-AI/\` e, se quiser testar localmente, \`http://127.0.0.1:5173/\`.
+
+### Publicação gratuita no GitHub Pages
+
+A partir desta atualização, o workflow \`.github/workflows/album-3d-pages.yml\` tenta publicar automaticamente quando os arquivos do álbum são alterados na branch principal.
+
+No GitHub, em **Settings → Pages**, defina a origem **GitHub Actions**. Essa configuração exige permissão de proprietário e não pode ser realizada por este conector. Se outro site já usava o GitHub Pages deste repositório, ele será substituído pelo álbum.
+
+Somente considerar o endereço \`https://marcos-pds.github.io/trabalhadors-AI/\` **ativo após o deploy concluir com sucesso**. O código pode ser público; as fotos são privadas por RLS e por bucket privado.
+
+### Migration
+
+A estrutura nova para aprovação está em \`supabase/002_acesso_com_aprovacao.sql\` e foi aplicada ao projeto Supabase \`album-de-memorias\`.
