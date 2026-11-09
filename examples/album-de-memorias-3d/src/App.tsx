@@ -661,7 +661,10 @@ const globalStyles = `
     .index-page { padding: 22px !important; }
     .index-page h1 { font-size: 1.75rem !important; margin-top: 14px !important; margin-bottom: 26px !important; }
     .index-page ul { font-size: 1rem !important; gap: 16px !important; padding: 0 !important; }
-    .cover-page h1 { font-size: 3rem !important; }
+    .cover-page h1 { font-size: clamp(1.3rem, 4.2vw, 2rem) !important; line-height: 1.15; }
+    .cover-page { padding: 8px !important; }
+    .cover-page .cover-seal { width: 43px; height: 43px; bottom: 15%; }
+    .cover-page .cover-date { font-size: 8px; letter-spacing: 0.08em; }
   }
   @media (prefers-reduced-motion: reduce) {
     .sheet, .book-container, .edge-hit-area::after { transition-duration: 0.12s !important; animation: none !important; }
@@ -753,9 +756,9 @@ export const defaultAlbumData: AlbumSheet[] = [
     id: 'sheet-1',
     front: {
       type: 'cover',
-      title: 'Nossa História',
-      subtitle: 'Memórias',
-      date: 'Criado com amor'
+      title: 'Rayssa & Marcos Paulo',
+      subtitle: 'R & M',
+      date: 'Nossa história, para sempre'
     },
     back: {
       type: 'index',
@@ -823,12 +826,12 @@ const CoverPage = ({ data }: { data: PageData }) => (
     <div className="cover-shine" aria-hidden="true" />
     <div className="absolute inset-0 border-4 border-[var(--gold)] m-4 opacity-50 rounded-sm pointer-events-none" style={{ borderStyle: 'double' }} />
     <h3 className="font-sans-clean text-xs tracking-[0.34em] uppercase text-[var(--gold)] mb-4">O Álbum de</h3>
-    <h1 className="font-serif-elegant text-5xl md:text-6xl text-[var(--gold)] mb-6">{data.title || 'Título'}</h1>
+    <h1 className="font-serif-elegant text-[var(--gold)] mb-5" style={{ fontSize: 'clamp(1.65rem, 3.5vw, 3.45rem)', lineHeight: 1.16, maxWidth: '97%', textWrap: 'balance' }}>{data.title || 'Rayssa & Marcos Paulo'}</h1>
     <div className="w-16 h-[1px] bg-[var(--gold)] mb-6" />
-    <h2 className="font-script text-4xl text-white mb-8">{data.subtitle || 'Subtítulo'}</h2>
-    <p className="font-sans-clean text-sm tracking-widest text-gray-300 absolute bottom-12">{data.date}</p>
-    <div className="absolute bottom-24 w-16 h-16 bg-red-700 rounded-full flex items-center justify-center shadow-lg shadow-black/50 border-2 border-red-900">
-      <span className="font-serif-elegant text-gold-200 text-sm">EA</span>
+    <h2 className="font-script text-4xl text-white mb-8">{data.subtitle || 'R & M'}</h2>
+    <p className="cover-date font-sans-clean text-xs tracking-widest text-gray-300 absolute" style={{ bottom: '6%', left: '8%', right: '8%' }}>{data.date}</p>
+    <div className="cover-seal absolute w-16 h-16 bg-red-700 rounded-full flex items-center justify-center shadow-lg shadow-black/50 border-2 border-red-900" style={{ bottom: '16%' }}>
+      <span className="font-serif-elegant text-[#f6d89b] text-sm">R &amp; M</span>
     </div>
   </div>
 );
