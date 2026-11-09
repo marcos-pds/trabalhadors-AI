@@ -5,6 +5,7 @@ import Album, { createRandomEditablePage, defaultAlbumData, type AlbumSheet, typ
 import { fromRows, makeInitialRows, toRow, type AlbumPageRow } from './albumRows';
 import { signedPhotoUrls, uploadPrivatePhoto } from './photos';
 import { cloudConfigured, supabase } from './supabase';
+import { AccessGate, PendingAccess, ApprovalBell } from './AccessPortal';
 
 const uiStyle: CSSProperties = {
   position: 'fixed', zIndex: 3000, top: 14, left: 14, right: 14, display: 'flex', alignItems: 'center',
@@ -18,58 +19,12 @@ function CenterPanel({ children }: { children: ReactNode }) {
   </div>;
 }
 
-function Login({ onNotice }: { onNotice: (message: string) => void }) {
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!supabase) return;
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}` }
-      });
-      if (error) throw error;
-      setSent(true);
-      onNotice('Confira seu e-mail. Use o link recebido ou o código, caso o e-mail contenha um.');
-    } catch (error) { onNotice(error instanceof Error ? error.message : 'Não foi possível enviar o acesso.'); }
-    finally { setBusy(false); }
-  };
-  const verify = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!supabase) return;
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: 'email' });
-      if (error) throw error;
-    } catch (error) { onNotice(error instanceof Error ? error.message : 'Código inválido.'); }
-    finally { setBusy(false); }
-  };
-  return <CenterPanel>
-    <div style={{ fontSize: 42, textAlign: 'center' }}>💌</div>
-    <h1 style={{ fontSize: 29, textAlign: 'center', margin: '6px 0 12px', fontFamily: 'Georgia, serif' }}>Nosso livro de memórias</h1>
-    <p style={{ textAlign: 'center', color: '#f2dedd' }}>Um lugar reservado para duas pessoas.</p>
-    <form onSubmit={send} style={{ display: 'grid', gap: 12 }}>
-      <label htmlFor="album-email">Seu e-mail</label>
-      <input id="album-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="voce@exemplo.com" style={{ padding: 13, borderRadius: 10, background: '#fff', color: '#24181c', border: 0, width: '100%' }} />
-      <button type="submit" disabled={busy} style={buttonStyle}>{busy ? 'Enviando…' : sent ? 'Enviar novo link' : 'Entrar por e-mail'}</button>
-    </form>
-    {sent && <form onSubmit={verify} style={{ marginTop: 18, display: 'grid', gap: 10 }}>
-      <label htmlFor="album-code">Se recebeu um código de 6 dígitos, digite aqui</label>
-      <input id="album-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e => setCode(e.target.value)} placeholder="000000" style={{ padding: 12, borderRadius: 10, border: 0 }} />
-      <button type="submit" disabled={busy || code.length !== 6} style={buttonStyle}>Validar código</button>
-    </form>}
-    <p style={{ fontSize: 12, color: '#e5cfd0' }}>Somente os dois e-mails autorizados no banco poderão visualizar as fotos.</p>
-  </CenterPanel>;
-}
-
 export default function CloudApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [allowed, setAllowed] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [approvalTick, setApprovalTick] = useState(0);
   const [loadingAlbum, setLoadingAlbum] = useState(false);
   const [status, setStatus] = useState('Conectando…');
   const [notice, setNotice] = useState('');
@@ -170,14 +125,15 @@ export default function CloudApp() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !session) { setAllowed(false); return; }
+    if (!supabase || !session) { setAllowed(false); setRole(null); return; }
     let active = true;
     setLoadingAlbum(true);
     const initialize = async () => {
       try {
-        const { data, error } = await supabase!.rpc('is_couple_member');
+        const { data, error } = await supabase!.rpc('album_my_role');
         if (error) throw error;
         if (!active) return;
+        setRole(data || null);
         setAllowed(Boolean(data));
         if (!data) { setStatus('Acesso não autorizado'); return; }
         await fetchAlbum(true);
@@ -193,7 +149,7 @@ export default function CloudApp() {
     };
     void initialize();
     return () => { active = false; };
-  }, [session?.user.id, fetchAlbum]);
+  }, [session?.user.id, fetchAlbum, approvalTick]);
 
   useEffect(() => {
     if (!supabase || !allowed || !session) return;
@@ -261,21 +217,24 @@ export default function CloudApp() {
       </CenterPanel>;
   }
   if (checkingAuth) return <CenterPanel><p>Preparando seu álbum…</p></CenterPanel>;
-  if (!session) return <><Login onNotice={setNotice} />{notice && <div role="alert" style={{ position: 'fixed', bottom: 15, left: 15, right: 15, padding: 12, background: '#733b41', color: 'white', borderRadius: 10, zIndex: 4000 }}>{notice}</div>}</>;
+  if (!session) return <><AccessGate onNotice={setNotice} />{notice && <div role="alert" style={{ position: 'fixed', bottom: 15, left: 15, right: 15, padding: 12, background: '#733b41', color: 'white', borderRadius: 10, zIndex: 4000 }}>{notice}</div>}</>;
   if (loadingAlbum) return <CenterPanel><p>Carregando as memórias compartilhadas…</p></CenterPanel>;
-  if (!allowed) return <CenterPanel>
-    <h2>🔒 Álbum privado</h2>
-    <p>Este e-mail ainda não foi autorizado a acessar o livro. Apenas os dois endereços adicionados à lista de acesso poderão entrar.</p>
-    {notice && <p role="alert" style={{ color: '#ffd0ce' }}>{notice}</p>}
-    <button style={buttonStyle} onClick={() => void supabase?.auth.signOut()}>Sair</button>
-  </CenterPanel>;
+  if (!allowed) return <>
+    <PendingAccess session={session} onNotice={setNotice} onApproved={() => setApprovalTick(v => v + 1)} />
+    {notice && <div role="alert" style={{ position: 'fixed', bottom: 15, left: 15, right: 15, padding: 12, background: '#733b41', color: 'white', borderRadius: 10, zIndex: 4000, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+      <span>{notice}</span><button type="button" onClick={() => setNotice('')} style={{ color: '#fff', background: 'transparent', border: 0 }}>✕</button>
+    </div>}
+  </>;
 
   return <>
     <div style={uiStyle}>
       <div style={{ background: '#291b25cf', borderRadius: 14, padding: '8px 12px', border: '1px solid #ffffff26', pointerEvents: 'auto', color: '#fff', fontSize: 12 }}>
         <strong>💞 Nosso álbum</strong> · {status}
       </div>
-      <button style={{ ...buttonStyle, padding: '7px 12px', pointerEvents: 'auto', background: '#291b25d5', fontSize: 12 }} onClick={async () => { await flushPending(); await supabase?.auth.signOut(); }}>Sair</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'auto' }}>
+        {role === 'owner' && <ApprovalBell onNotice={setNotice} />}
+        <button style={{ ...buttonStyle, padding: '7px 12px', background: '#291b25d5', fontSize: 12 }} onClick={async () => { await flushPending(); await supabase?.auth.signOut(); }}>Sair</button>
+      </div>
     </div>
     <Album controlledSheets={sheets} onUpdatePage={updatePage} onCreateSheet={addSheet}
       onUploadPhoto={async (_index, _side, file) => uploadPrivatePhoto(file, session.user.id)}
