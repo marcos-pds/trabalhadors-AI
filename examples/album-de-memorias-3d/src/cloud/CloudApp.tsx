@@ -24,6 +24,7 @@ export default function CloudApp() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [role, setRole] = useState<string | null>(null);
+  const [allowedUserId, setAllowedUserId] = useState<string | null>(null);
   const [approvalTick, setApprovalTick] = useState(0);
   const [loadingAlbum, setLoadingAlbum] = useState(false);
   const [status, setStatus] = useState('Conectando…');
@@ -125,7 +126,7 @@ export default function CloudApp() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !session) { setAllowed(false); setRole(null); return; }
+    if (!supabase || !session) { setAllowed(false); setRole(null); setAllowedUserId(null); return; }
     let active = true;
     setLoadingAlbum(true);
     const initialize = async () => {
@@ -135,6 +136,7 @@ export default function CloudApp() {
         if (!active) return;
         setRole(data || null);
         setAllowed(Boolean(data));
+        setAllowedUserId(data ? session.user.id : null);
         if (!data) { setStatus('Acesso não autorizado'); return; }
         await fetchAlbum(true);
         if (active) setStatus('Sincronizado ✓');
@@ -152,7 +154,7 @@ export default function CloudApp() {
   }, [session?.user.id, fetchAlbum, approvalTick]);
 
   useEffect(() => {
-    if (!supabase || !allowed || !session) return;
+    if (!supabase || !allowed || !session || allowedUserId !== session.user.id) return;
     const channel = supabase.channel('nosso-album')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'album_pages' }, (change) => {
         const updatedBy = (change.new as { updated_by?: string }).updated_by;
@@ -177,7 +179,7 @@ export default function CloudApp() {
       clearInterval(renewal);
       if (remoteTimerRef.current) clearTimeout(remoteTimerRef.current);
     };
-  }, [allowed, session?.user.id, fetchAlbum]);
+  }, [allowed, allowedUserId, session?.user.id, fetchAlbum]);
 
   useEffect(() => () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -219,7 +221,7 @@ export default function CloudApp() {
   if (checkingAuth) return <CenterPanel><p>Preparando seu álbum…</p></CenterPanel>;
   if (!session) return <><AccessGate onNotice={setNotice} />{notice && <div role="alert" style={{ position: 'fixed', bottom: 15, left: 15, right: 15, padding: 12, background: '#733b41', color: 'white', borderRadius: 10, zIndex: 4000 }}>{notice}</div>}</>;
   if (loadingAlbum) return <CenterPanel><p>Carregando as memórias compartilhadas…</p></CenterPanel>;
-  if (!allowed) return <>
+  if (!allowed || allowedUserId !== session.user.id) return <>
     <PendingAccess session={session} onNotice={setNotice} onApproved={() => setApprovalTick(v => v + 1)} />
     {notice && <div role="alert" style={{ position: 'fixed', bottom: 15, left: 15, right: 15, padding: 12, background: '#733b41', color: 'white', borderRadius: 10, zIndex: 4000, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
       <span>{notice}</span><button type="button" onClick={() => setNotice('')} style={{ color: '#fff', background: 'transparent', border: 0 }}>✕</button>
