@@ -25,18 +25,12 @@ jobs:
         working-directory: examples/album-de-memorias-3d
         run: npm test
       - name: Verificar configuracao publica do Supabase
-        env:
-          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        working-directory: examples/album-de-memorias-3d
         run: |
-          test -n "$VITE_SUPABASE_URL" || (echo 'Configure SUPABASE_URL em Actions Variables' && exit 1)
-          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" || (echo 'Configure SUPABASE_PUBLISHABLE_KEY em Actions Variables' && exit 1)
+          grep -q '^VITE_SUPABASE_URL=https://' .env.pages
+          grep -q '^VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_' .env.pages
       - name: Compilar site
         working-directory: examples/album-de-memorias-3d
-        env:
-          GITHUB_PAGES: 'true'
-          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: npm run build -- --mode pages
       - uses: actions/upload-pages-artifact@v4
         with:
