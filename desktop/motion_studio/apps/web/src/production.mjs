@@ -24,7 +24,7 @@ export function parseProductionPlan(raw) {
 }
 
 export function sceneReference(references, number) {
-  return references.find((reference) => reference.scene_number === number && reference.image_data);
+  return references.findLast((reference) => reference.scene_number === number && reference.image_data);
 }
 
 export function allSceneImagesReady(scenes, references) {
@@ -38,6 +38,10 @@ export function meanPixelDifference(left, right) {
     total += Math.abs(left[index] - right[index]) + Math.abs(left[index + 1] - right[index + 1]) + Math.abs(left[index + 2] - right[index + 2]);
   }
   return total / (left.length / 4 * 3);
+}
+
+export function sceneTimingForSpeech(dialogue) {
+  return { frames: 49, fps: String(dialogue ?? "").trim() ? 12 : 16 };
 }
 
 export function referenceAnchor(references, number) {

@@ -12,6 +12,19 @@ from .motion_contracts import ContractError, _text
 
 DEFAULT_HF_MODEL = "black-forest-labs/FLUX.1-schnell"
 LOCAL_MODEL = "sd_xl_base_1.0.safetensors"
+IP_ADAPTER_MODEL = "ip-adapter-plus_sdxl_vit-h.safetensors"
+CLIP_VISION_MODEL = "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+
+
+def identity_adapter_available(config):
+    if not config or not config.comfy_root:
+        return False
+    root = Path(config.comfy_root)
+    adapter = root / "models/ipadapter" / IP_ADAPTER_MODEL
+    vision = root / "models/clip_vision" / CLIP_VISION_MODEL
+    return ((root / "custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py").is_file() and
+            adapter.is_file() and adapter.stat().st_size >= 800_000_000 and
+            vision.is_file() and vision.stat().st_size >= 2_500_000_000)
 
 
 def provider_status(config=None):
@@ -20,7 +33,7 @@ def provider_status(config=None):
     token = bool(os.environ.get("CENTRAL_HF_TOKEN"))
     return {
         "local_comfyui": {"available": local_model, "configured": local_model,
-                           "model": LOCAL_MODEL},
+                           "model": LOCAL_MODEL, "identity_adapter": identity_adapter_available(config)},
         "huggingface": {"available": token, "configured": token, "model": os.environ.get("CENTRAL_HF_REFERENCE_MODEL", DEFAULT_HF_MODEL)},
     }
 
@@ -81,11 +94,25 @@ def generate_local(prompt, config, reference_image_data=None):
         input_file.parent.mkdir(parents=True, exist_ok=True)
         with input_file.open("xb") as stream:
             stream.write(image)
-        workflow["4"] = {"class_type": "LoadImage", "inputs": {"image": name}}
-        workflow["8"] = {"class_type": "ImageScale", "inputs": {"image": ["4", 0],
-                         "upscale_method": "lanczos", "width": 576, "height": 1024, "crop": "center"}}
-        workflow["9"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["8", 0], "vae": ["1", 2]}}
-        workflow["5"]["inputs"].update(latent_image=["9", 0], denoise=0.28)
+        workflow["8"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        if identity_adapter_available(config):
+            workflow["12"] = {"class_type": "ImageScale", "inputs": {"image": ["8", 0],
+                              "upscale_method": "lanczos", "width": 576, "height": 1024, "crop": "center"}}
+            workflow["13"] = {"class_type": "ImageCrop", "inputs": {
+                "image": ["12", 0], "width": 384, "height": 400, "x": 96, "y": 250}}
+            workflow["9"] = {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": IP_ADAPTER_MODEL}}
+            workflow["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIP_VISION_MODEL}}
+            workflow["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {
+                "model": ["1", 0], "ipadapter": ["9", 0], "image": ["13", 0],
+                "clip_vision": ["10", 0], "weight": 0.65, "weight_type": "ease out",
+                "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
+                "embeds_scaling": "V only"}}
+            workflow["5"]["inputs"].update(model=["11", 0])
+        else:
+            workflow["9"] = {"class_type": "ImageScale", "inputs": {"image": ["8", 0],
+                             "upscale_method": "lanczos", "width": 576, "height": 1024, "crop": "center"}}
+            workflow["10"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["9", 0], "vae": ["1", 2]}}
+            workflow["5"]["inputs"].update(latent_image=["10", 0], denoise=0.28)
     endpoint = config.comfy_endpoint.rstrip("/")
     try:
         with httpx.Client(timeout=30) as client:

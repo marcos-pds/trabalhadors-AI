@@ -73,3 +73,39 @@ def test_local_reference_rejects_corrupt_anchor(tmp_path):
         references.generate_local("Caio in the lab", MotionConfig(
             comfy_root=str(tmp_path), comfy_endpoint="http://127.0.0.1:8188"),
             "data:image/png;base64,AAAA")
+
+
+def test_identity_adapter_uses_reference_without_locking_scene_latent(tmp_path, monkeypatch):
+    import base64
+    checkpoint = tmp_path / "models" / "checkpoints" / references.LOCAL_MODEL
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"model")
+    (tmp_path / "output").mkdir()
+    monkeypatch.setattr(references, "identity_adapter_available", lambda config: True)
+    seen = []
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, url, json):
+            seen.append(json["prompt"])
+            name = seen[-1]["7"]["inputs"]["filename_prefix"] + "_00001_.png"
+            (tmp_path / "output" / name).write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 128)
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"prompt_id": "owned"})
+        def get(self, url):
+            name = seen[-1]["7"]["inputs"]["filename_prefix"] + "_00001_.png"
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+                "owned": {"status": {"status_str": "success"}, "outputs": {
+                    "7": {"images": [{"filename": name, "type": "output", "subfolder": ""}]}}}})
+
+    monkeypatch.setattr(references.httpx, "Client", Client)
+    anchor = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 128).decode()
+    references.generate_local("Caio on a rainy street", MotionConfig(
+        comfy_root=str(tmp_path), comfy_endpoint="http://127.0.0.1:8188"), anchor)
+    workflow = seen[0]
+    assert workflow["5"]["inputs"]["latent_image"] == ["4", 0]
+    assert workflow["5"]["inputs"]["model"] == ["11", 0]
+    assert workflow["11"]["class_type"] == "IPAdapterAdvanced"
+    assert workflow["11"]["inputs"]["image"] == ["13", 0]
+    assert workflow["13"]["class_type"] == "ImageCrop"

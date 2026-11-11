@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, meanPixelDifference, parseProductionPlan, referenceAnchor } from "./production.mjs";
+import { allSceneImagesReady, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneReference, sceneTimingForSpeech } from "./production.mjs";
 
 const scenes = Array.from({ length: 8 }, (_, index) => ({ scene: index + 1, title: `Cena ${index + 1}`,
   image_prompt: "Caio at the laboratory bench", prompt: "Caio lifts the flask" }));
@@ -33,9 +33,20 @@ test("image review detects nearly unchanged frames before video", () => {
   assert.ok(meanPixelDifference(first, changed) >= 10);
 });
 
+test("spoken scenes reserve more playback time within the local video limit", () => {
+  assert.deepEqual(sceneTimingForSpeech(""), { frames: 49, fps: 16 });
+  assert.deepEqual(sceneTimingForSpeech("Pensamentos flutuam ao redor."), { frames: 49, fps: 12 });
+});
+
 test("uploaded master anchors each scene; otherwise the prior scene does", () => {
   const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
   const master = { kind: "character", image_data: "master" };
   assert.equal(referenceAnchor([prior], 2), prior);
   assert.equal(referenceAnchor([prior, master], 2), master);
+});
+
+test("revised scene references keep earlier versions and select the latest", () => {
+  const references = [{ scene_number: 6, image_data: "orange jacket" }, { scene_number: 6, image_data: "gray coat" }];
+  assert.equal(sceneReference(references, 6).image_data, "gray coat");
+  assert.equal(references.length, 2);
 });
