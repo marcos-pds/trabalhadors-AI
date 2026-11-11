@@ -137,6 +137,8 @@ export default function App() {
   const [sceneSpeechText, setSceneSpeechText] = useState("");
   const [sceneSpeaker, setSceneSpeaker] = useState("Lara");
   const [sceneSpeechBusy, setSceneSpeechBusy] = useState(false);
+  const [voiceReferenceText, setVoiceReferenceText] = useState("");
+  const [voiceReferenceBusy, setVoiceReferenceBusy] = useState(false);
   const [episodeNumber] = useState(1);
   const [sceneNumber] = useState(1);
   const [videoModel] = useState<"wan" | "ltxv">("wan");
@@ -735,6 +737,33 @@ export default function App() {
     } finally { setSceneSpeechBusy(false); }
   }
 
+  async function importBrazilianVoice(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !sceneSpeaker.trim() || !voiceReferenceText.trim() || voiceReferenceBusy) return;
+    if (file.type !== "audio/wav" && !file.name.toLowerCase().endsWith(".wav")) {
+      setError("Envie uma gravação WAV da voz do personagem."); return;
+    }
+    if (file.size > 5_000_000) { setError("A gravação deve ter até 5 MB."); return; }
+    setVoiceReferenceBusy(true);
+    try {
+      const audio_data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Não foi possível ler a gravação."));
+        reader.readAsDataURL(file);
+      });
+      const imported = await centralRequest<{ id: string; name: string }>("/api/motion/qwen/voices/import", {
+        method: "POST", body: JSON.stringify({ name: `${sceneSpeaker.trim()} · Brasil`,
+          transcript: voiceReferenceText.trim(), audio_data }),
+      });
+      setVoiceCatalog((current) => ({ ready: true, voices: [imported, ...current.voices] }));
+      setSceneVoice(imported.id);
+      setError("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível importar a voz."); }
+    finally { setVoiceReferenceBusy(false); }
+  }
+
   async function regenerateSelectedScene() {
     if (!selected || selected.kind !== "video" || wanBusy) return;
     const direction = String(selected.style.planned_prompt ?? scenePrompt).trim();
@@ -910,6 +939,14 @@ export default function App() {
             <select id="review-voice" value={project?.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? ""} onChange={(event) => setSceneVoice(event.target.value)}>
               <option value="">Selecione uma voz</option>{voiceCatalog.voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
             </select>
+            <details className="chat-references"><summary>Usar gravação brasileira para {sceneSpeaker}</summary>
+              <p className="helper-text">Envie 3 a 30 segundos de fala clara em WAV mono e escreva exatamente o que foi dito. A voz fica salva neste computador para as próximas cenas.</p>
+              <label className="field-label" htmlFor="voice-reference-text">TEXTO DA GRAVAÇÃO</label>
+              <input id="voice-reference-text" value={voiceReferenceText} maxLength={300} onChange={(event) => setVoiceReferenceText(event.target.value)} />
+              <label className="reference-upload">{voiceReferenceBusy ? "IMPORTANDO VOZ…" : "ENVIAR GRAVAÇÃO WAV"}
+                <input type="file" accept="audio/wav,.wav" onChange={(event) => void importBrazilianVoice(event)} disabled={voiceReferenceBusy || !voiceReferenceText.trim()} />
+              </label>
+            </details>
             <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()} disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim()}>{sceneSpeechBusy ? "GERANDO FALA…" : "↻ REFAZER FALA"}</button>
           </> : <><p className="helper-text">Selecione um clipe de vídeo na timeline para aprovar ou solicitar uma alteração.</p><button className="quiet-button" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved")}>APROVAR EPISÓDIO</button></>}
           {[2, 8].includes(episodePlan.length) && videoClips.length === episodePlan.length && <button className="quiet-button" onClick={() => void exportCurrentEpisode().catch((reason) => setError(reason instanceof Error ? reason.message : "Falha na montagem."))} disabled={autoBusy}>ATUALIZAR MP4 FINAL</button>}

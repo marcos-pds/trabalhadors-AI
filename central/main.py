@@ -1894,7 +1894,29 @@ def motion_voices(request:Request,user=Depends(current_user)):
 def motion_qwen_voices(request:Request,user=Depends(current_user)):
     local_only(request)
     from .motion_qwen import available_voices, engine_ready
-    return {'engine':'qwen','ready':engine_ready(),'voices':available_voices()}
+    voices=available_voices(user['id'])
+    return {'engine':'qwen','ready':bool(voices),'voices':voices}
+
+
+class MotionQwenVoiceImportIn(BaseModel):
+    name: str = Field(min_length=1,max_length=80)
+    transcript: str = Field(min_length=1,max_length=300)
+    audio_data: str = Field(min_length=1000,max_length=7_000_000)
+
+
+@app.post('/api/motion/qwen/voices/import')
+def motion_qwen_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import binascii
+    from .motion_qwen import QwenVoiceError, import_voice
+    header,sep,encoded=data.audio_data.partition(',')
+    if sep and header not in ('data:audio/wav;base64','data:audio/x-wav;base64','data:audio/wave;base64'):
+        raise HTTPException(422,'Envie um WAV válido.')
+    raw=encoded if sep else data.audio_data
+    try:
+        return import_voice(user['id'],data.name,data.transcript,base64.b64decode(raw,validate=True))
+    except (QwenVoiceError,binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
 
 
 @app.post('/api/motion/voices/import')
