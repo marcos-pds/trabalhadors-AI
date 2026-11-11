@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneReference, sceneTimingForSpeech } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneReference, sceneTimingForSpeech } from "./production.mjs";
 
 const scenes = Array.from({ length: 8 }, (_, index) => ({ scene: index + 1, title: `Cena ${index + 1}`,
   image_prompt: "Caio at the laboratory bench", prompt: "Caio lifts the flask" }));
@@ -43,6 +43,13 @@ test("uploaded master anchors each scene; otherwise the prior scene does", () =>
   const master = { kind: "character", image_data: "master" };
   assert.equal(referenceAnchor([prior], 2), prior);
   assert.equal(referenceAnchor([prior, master], 2), master);
+});
+
+test("generated character master anchors later scenes and carries the visual bible", () => {
+  const master = { kind: "character", image_data: "master", source: "generated_image" };
+  const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
+  assert.equal(referenceAnchor([prior, master], 2), master);
+  assert.match(characterMasterPrompt("Caio wears blue goggles and a white coat"), /blue goggles and a white coat/);
 });
 
 test("revised scene references keep earlier versions and select the latest", () => {

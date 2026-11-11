@@ -48,3 +48,9 @@ export function referenceAnchor(references, number) {
   return references.find((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number) ??
     sceneReference(references, number - 1);
 }
+
+export function characterMasterPrompt(visualBible) {
+  return ["Single full-body character portrait on a plain neutral background, front three-quarter view.",
+    "Show only the recurring main character. Preserve exact face shape, hair, skin tone, outfit and accessories in every later scene.",
+    String(visualBible ?? "").trim(), "Vertical 9:16, no letters, no caption, no other people or scenery."].join(" ").slice(0, 4096);
+}

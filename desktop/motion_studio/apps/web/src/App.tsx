@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
 import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
-import { allSceneImagesReady, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
 
 type Clip = {
   id: string;
@@ -528,6 +528,24 @@ export default function App() {
       setEpisodePlan(scenes);
       }
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
+      if (!(planned.timeline.storyboard?.references ?? []).some((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number)) {
+        setAutoProgress("Criando a imagem mestra do personagem antes dos cenários…");
+        const status = await centralRequest<{ local_comfyui: { identity_adapter: boolean } }>("/api/motion/reference-providers");
+        if (!status.local_comfyui.identity_adapter) throw new Error("O motor local de identidade visual não está pronto. Instale o adaptador de personagens antes de gerar as cenas.");
+        const masterPrompt = characterMasterPrompt(planned.timeline.storyboard?.visual_bible);
+        const master = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+          method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: masterPrompt }),
+        });
+        const current = await request<Project>(`/api/projects/${planned.id}`);
+        const storyboard = current.timeline.storyboard!;
+        planned = await request<Project>(`/api/projects/${planned.id}`, { method: "PUT", body: JSON.stringify({
+          title: current.title, summary: current.summary, timeline: { ...current.timeline,
+            storyboard: { ...storyboard, references: [...(storyboard.references ?? []), { id: makeId("ref"), kind: "character",
+              name: "Imagem mestra do personagem", prompt: masterPrompt, image_data: master.image_data, source: "generated_image" }] } },
+        }) });
+        setProject(planned);
+        addChatMessage("assistant", "Imagem mestra salva. Vou usá-la para manter o personagem nas oito cenas.");
+      }
       for (const scene of scenes) {
         let current = await request<Project>(`/api/projects/${planned.id}`);
         if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
@@ -559,6 +577,11 @@ export default function App() {
         if (meanPixelDifference(imageSamples[index - 1], imageSamples[index]) < 10) {
           throw new Error(`Os quadros ${index} e ${index + 1} ficaram parecidos demais para cenários diferentes. Revise as referências antes de animar; nenhum vídeo foi iniciado.`);
         }
+      }
+      if (!ideaOverride && ready.timeline.storyboard?.references?.some((reference) => reference.kind === "character" && reference.source === "generated_image" && !reference.scene_number)) {
+        setAutoProgress("Revise os oito quadros. A identidade do personagem precisa de aprovação antes de gastar tempo renderizando os vídeos.");
+        addChatMessage("assistant", "As imagens estão salvas. Confira rosto, cabelo, roupa e cenários. Se estiverem fiéis, use Continuar produção; caso contrário, refaça as referências.");
+        return;
       }
       addChatMessage("assistant", "As oito imagens estão prontas e salvas no projeto. Vou animar cada cena e colocar o resultado na timeline.");
       for (const scene of scenes) {
@@ -832,7 +855,8 @@ export default function App() {
           <div className="motion-chat-feed" ref={chatFeedRef} aria-live="polite">
             {!chatMessages.length && !episodePlan.length && <div className="motion-chat-welcome"><span className="motion-chat-orbit">✧</span><h2>Qual é a história?</h2><p>Conte o tema em uma mensagem. Você pode anexar uma imagem ou deixar a Central criar todas as referências.</p><button onClick={() => setChatPrompt("Um inventor descobre que uma gota muda a cor de todo o laboratório. Mini série vertical, humor e suspense, com Caio como protagonista.")}>Experimentar um tema</button></div>}
             {chatMessages.map((message) => <div key={message.id} className={`motion-chat-message ${message.role}`}><span>{message.role === "user" ? "Você" : "✦ Central IA"}</span><p>{message.text}</p></div>)}
-            {episodePlan.length > 0 && !chatMessages.length && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void (imageStageReady && !videoClips.length ? redoImagesAndContinue() : createEpisodeFromChat(project.summary))} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady && !videoClips.length ? "Refazer imagens e continuar →" : "Continuar este episódio →"}</button>}</div>}
+            {episodePlan.length > 0 && !chatMessages.length && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}</div>}
+            {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os oito quadros</button>}
             {sceneImages.length > 0 && <div className="motion-chat-images"><strong>Quadros de referência · {sceneImages.length}/{episodePlan.length || 8}</strong><div>{sceneImages.map((reference) => <figure key={reference.id}><img src={reference.image_data} alt={reference.name} /><figcaption>{reference.name}</figcaption></figure>)}</div></div>}
             {autoProgress && <p className="motion-chat-progress" role="status">✦ {autoProgress}</p>}
             {wanRun && <p className="motion-chat-run">Cena em andamento: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}

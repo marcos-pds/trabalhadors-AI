@@ -31,4 +31,11 @@ Gerar uma narração contínua com uma única voz brasileira autorizada e dividi
 - O MP4 de comparação usa movimento de câmera controlado sobre o primeiro quadro e a segunda tomada LTX, com corte direto, legendas e áudio contínuo. Duração: 8,56 s, H.264 720 × 1280 a 24 fps e AAC. Arquivo local: `work/caio-two-shot-pilot/caio-two-shot-controlled.mp4`.
 - Este piloto usa geração de imagens e montagem locais fora do fluxo automático do Motion Studio. Demonstra que referências múltiplas e narração contínua ajudam, mas **não prova** que a Central já produz esse resultado com um único prompt. A integração e a avaliação auditiva pelo usuário continuam pendentes.
 
+## Teste dentro da Central com imagem mestra automática
+
+- O chat criou o projeto **O Incidente | Episódio 1** e salvou um roteiro de oito cenas, uma imagem mestra gerada pelo modelo local e oito imagens de cena. A primeira cena foi renderizada com vídeo, fala e legenda e entrou na timeline.
+- As oito imagens passaram na checagem de repetição de pixels, mas a revisão visual mostrou troca de formato do rosto, cabelo e figurino entre cenas. Portanto, essa checagem não mede consistência de identidade e o resultado não está aprovado para um episódio completo.
+- O fluxo agora cria e reutiliza uma imagem mestra quando não há upload e exige revisão dos quadros antes de continuar para os vídeos. O teste foi interrompido após a primeira cena para evitar renderizar sete cenas com referências inadequadas. O projeto e seus artefatos ficaram salvos na Central.
+- O modelo de imagens local SDXL/IP-Adapter ainda não reproduziu a fidelidade do piloto feito com outro gerador. A narração contínua do piloto também ainda não está integrada; a Central continua sintetizando uma fala por cena. Esses são os dois bloqueios de qualidade restantes.
+
 Fontes técnicas: [IP-Adapter Plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [requisitos do Fish Audio S2-Pro](https://speech.fish.audio/install/). O S2-Pro oficial recomenda 24 GB de VRAM; a RTX 3060 local tem 12 GB, portanto não é o próximo teste local prioritário.
