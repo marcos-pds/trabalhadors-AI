@@ -23,4 +23,12 @@ O adaptador de imagem única serve para exploração, mas não garante personage
 
 Gerar uma narração contínua com uma única voz brasileira autorizada e dividir o áudio por marcas de tempo das cenas, em vez de sintetizar oito frases isoladas. Testar primeiro duas cenas com variação de emoção e medir as pausas. A amostra do Reel é referência de ritmo e acabamento, não uma voz a copiar.
 
+## Piloto controlado de duas tomadas
+
+- A ficha visual de Caio foi gerada a partir da imagem mestra, com frente, três quartos e perfil. Dois quadros consecutivos foram criados com a ficha e o primeiro quadro como referências. Rosto, óculos, cabelo, jaleco e paleta permaneceram reconhecíveis nos quadros estáticos.
+- A narração foi sintetizada uma única vez pelo Qwen Base com o perfil brasileiro de Caio. Duração: 8,56 s. A análise de silêncio detectou apenas duas pausas internas de 0,39 s e 0,50 s; não houve os intervalos de 1 a 2 s entre falas do episódio anterior.
+- O LTX local foi testado nas duas imagens com 49 quadros a 12 fps. Na primeira tomada ele ampliou o rosto e mudou o braço de forma brusca. Na segunda, o anel de energia e o recuo apareceram, mas os braços ainda oscilaram.
+- O MP4 de comparação usa movimento de câmera controlado sobre o primeiro quadro e a segunda tomada LTX, com corte direto, legendas e áudio contínuo. Duração: 8,56 s, H.264 720 × 1280 a 24 fps e AAC. Arquivo local: `work/caio-two-shot-pilot/caio-two-shot-controlled.mp4`.
+- Este piloto usa geração de imagens e montagem locais fora do fluxo automático do Motion Studio. Demonstra que referências múltiplas e narração contínua ajudam, mas **não prova** que a Central já produz esse resultado com um único prompt. A integração e a avaliação auditiva pelo usuário continuam pendentes.
+
 Fontes técnicas: [IP-Adapter Plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [requisitos do Fish Audio S2-Pro](https://speech.fish.audio/install/). O S2-Pro oficial recomenda 24 GB de VRAM; a RTX 3060 local tem 12 GB, portanto não é o próximo teste local prioritário.
