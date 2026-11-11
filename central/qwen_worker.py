@@ -11,7 +11,8 @@ def main():
     request = json.load(sys.stdin)
     torch.manual_seed(request['seed'])
     model = Qwen3TTSModel.from_pretrained(request['model'], device_map='cuda:0',
-                                          dtype=torch.bfloat16, attn_implementation='sdpa')
+                                          dtype=torch.bfloat16 if 'reference' in request else torch.float16,
+                                          attn_implementation='sdpa')
     if 'reference' in request:
         wavs, rate = model.generate_voice_clone(text=request['text'], language='Portuguese',
                                                 ref_audio=request['reference'], ref_text=request['transcript'])
