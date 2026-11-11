@@ -107,5 +107,6 @@ def test_identity_adapter_uses_reference_without_locking_scene_latent(tmp_path, 
     assert workflow["5"]["inputs"]["latent_image"] == ["4", 0]
     assert workflow["5"]["inputs"]["model"] == ["11", 0]
     assert workflow["11"]["class_type"] == "IPAdapterAdvanced"
+    assert workflow["11"]["inputs"]["weight"] == 0.85
     assert workflow["11"]["inputs"]["image"] == ["13", 0]
     assert workflow["13"]["class_type"] == "ImageCrop"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
-import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 import { allSceneImagesReady, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
 
 type Clip = {
@@ -487,7 +487,7 @@ export default function App() {
         "Planejamento criativo de uma minissérie vertical animada original para Instagram. Resposta exclusivamente em JSON com história e instruções para imagem e vídeo; esta etapa é apenas texto.",
         `Brief narrativo: "${idea.replace(/["\r\n]/g, " ")}"`,
         promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
-        "O roteiro tem exatamente 8 cenas consecutivas de cerca de 3 segundos. Cada ação decorre da anterior. Visual 3D estilizado 9:16. Os mesmos personagens têm rosto, cabelo, roupa e paleta invariantes em todas as imagens. image_prompt representa um único quadro estático em inglês; prompt representa apenas a ação e o movimento de câmera que o vídeo LTX animará a partir desse quadro. Ambos são filmáveis, sem texto na imagem. Há uma fala narrativa de até 6 palavras em português brasileiro natural em TODAS as cenas. A narração é fora de cena, sem sincronização labial. Se o protagonista for Caio, o campo speaker será Caio e a narração será em primeira pessoa.",
+        "O roteiro tem exatamente 8 cenas consecutivas de cerca de 4 segundos. Cada ação decorre da anterior. Com imagem enviada, preserve exatamente sua linguagem visual, proporções e figurino; sem imagem, defina um estilo original. Composição vertical 9:16. Os mesmos personagens têm rosto, cabelo, acessórios, roupa e paleta invariantes em todas as imagens. Repita no image_prompt de cada cena os traços e o figurino definidos na visual_bible. image_prompt representa um único quadro estático em inglês; prompt representa apenas a ação e o movimento de câmera que o vídeo LTX animará a partir desse quadro. Ambos são filmáveis, sem texto na imagem. Há uma fala narrativa de 7 a 9 palavras em português brasileiro natural em TODAS as cenas, formando uma história contínua, com variação de emoção e sem repetir a mesma estrutura. A narração é fora de cena, sem sincronização labial. Se o protagonista for Caio, o campo speaker será Caio e a narração será em primeira pessoa.",
         "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual, figurino e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês, personagens idênticos\",\"prompt\":\"movimento da cena em inglês\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\"}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
@@ -610,6 +610,15 @@ export default function App() {
 
   async function exportCurrentEpisode(projectId = project?.id) {
     if (!projectId) return;
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const timeline = compactSceneSequence(current.timeline);
+    if (timeline !== current.timeline) {
+      const repaired = await request<Project>(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({
+        title: current.title, summary: current.summary, timeline,
+      }) });
+      setProject(repaired);
+      setProjects((items) => items.map((item) => item.id === projectId ? repaired : item));
+    }
     const rendered = await centralRequest<{ id: string; url: string; duration: number }>(`/api/motion/projects/${projectId}/export`, { method: "POST", body: "{}" });
     setFinalExport(rendered);
   }

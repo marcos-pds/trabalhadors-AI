@@ -103,14 +103,19 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       review_comment: "",
     },
   };
+  const oldEnd = replaced ? replaced.start_frame + replaced.duration_frames : 0;
+  const shift = replaced ? clip.duration_frames - replaced.duration_frames : 0;
   return {
     ...timeline,
     tracks: timeline.tracks.map((item) => item.id === track.id ?
       { ...item, clips: replaced
-        ? item.clips.map((candidate) => candidate.id === replaced.id ? clip : candidate)
+        ? item.clips.map((candidate) => candidate.id === replaced.id ? clip :
+          shift && candidate.start_frame >= oldEnd ? { ...candidate, start_frame: candidate.start_frame + shift } : candidate)
         : [...item.clips, clip] } :
-      replaced && (item.kind === 'audio' || item.kind === 'text') ?
-        { ...item, clips: item.clips.filter((candidate) => candidate.style?.source_video_clip_id !== replaced.id) } : item),
+      replaced ? { ...item, clips: item.clips
+        .filter((candidate) => candidate.style?.source_video_clip_id !== replaced.id)
+        .map((candidate) => shift && candidate.start_frame >= oldEnd ?
+          { ...candidate, start_frame: candidate.start_frame + shift } : candidate) } : item),
   };
 }
 
@@ -204,6 +209,8 @@ export function restoreClipVersion(timeline, clipId, version) {
   if (!target || !snapshot || !snapshot.style) throw new Error("Scene version not found");
   const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: (target.style.previous_versions ?? [])
     .filter((item) => item.version !== snapshot.version) };
+  const oldEnd = target.start_frame + target.duration_frames;
+  const shift = snapshot.duration_frames - target.duration_frames;
   return {
     ...timeline,
     tracks: timeline.tracks.map((track) => ({
@@ -211,12 +218,32 @@ export function restoreClipVersion(timeline, clipId, version) {
       clips: track.clips.map((clip) => clip.id === clipId ? {
         ...clip,
         name: snapshot.name ?? clip.name,
-        start_frame: snapshot.start_frame,
+        start_frame: target.start_frame,
         duration_frames: snapshot.duration_frames,
         style: restoredStyle,
-      } : clip),
+      } : shift && clip.start_frame >= oldEnd ? { ...clip, start_frame: clip.start_frame + shift } : clip),
     })),
   };
+}
+
+/** Repair gaps in a consecutive episode while keeping each scene's speech and captions aligned. */
+export function compactSceneSequence(timeline) {
+  const video = timeline.tracks.find((track) => track.kind === "video")?.clips ?? [];
+  if (!video.length || video.some((clip) => !Number.isInteger(clip.style?.scene_number))) return timeline;
+  const ordered = [...video].sort((left, right) => left.start_frame - right.start_frame);
+  const offsets = new Map();
+  let end = 0;
+  for (const clip of ordered) {
+    offsets.set(clip.id, end - clip.start_frame);
+    end += clip.duration_frames;
+  }
+  if ([...offsets.values()].every((offset) => offset === 0)) return timeline;
+  return { ...timeline, tracks: timeline.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => {
+    const anchor = clip.style?.source_video_clip_id;
+    const preceding = [...ordered].reverse().find((scene) => scene.start_frame <= clip.start_frame);
+    const offset = offsets.get(track.kind === "video" ? clip.id : anchor) ?? (preceding ? offsets.get(preceding.id) : 0) ?? 0;
+    return offset ? { ...clip, start_frame: clip.start_frame + offset } : clip;
+  }) })) };
 }
 
 /** Single-scene runs use the legacy "motion-" prefix; episode runs use the raw project ID. */

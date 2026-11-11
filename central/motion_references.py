@@ -104,7 +104,7 @@ def generate_local(prompt, config, reference_image_data=None):
             workflow["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": CLIP_VISION_MODEL}}
             workflow["11"] = {"class_type": "IPAdapterAdvanced", "inputs": {
                 "model": ["1", 0], "ipadapter": ["9", 0], "image": ["13", 0],
-                "clip_vision": ["10", 0], "weight": 0.65, "weight_type": "ease out",
+                "clip_vision": ["10", 0], "weight": 0.85, "weight_type": "ease out",
                 "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
                 "embeds_scaling": "V only"}}
             workflow["5"]["inputs"].update(model=["11", 0])

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);
@@ -142,6 +142,41 @@ test("regenerating a scene replaces it in place and keeps its previous version r
   const restored = restoreClipVersion(next, clip.id, 1).tracks[0].clips[0];
   assert.equal(restored.style.motion_artifact_id, "video-old");
   assert.equal(restored.style.version, 1);
+});
+
+test("changing scene length moves later video, captions and speech; restoring reverses the shift", () => {
+  const timeline = { fps: 24, tracks: [
+    { id: "video", kind: "video", clips: [
+      { id: "first", name: "Primeira", start_frame: 0, duration_frames: 72, style: { motion_run_id: "run-old", motion_artifact_id: "video-old", version: 1 } },
+      { id: "second", name: "Segunda", start_frame: 72, duration_frames: 72, style: { scene_number: 2 } },
+    ] },
+    { id: "text", kind: "text", clips: [{ id: "caption", start_frame: 72, duration_frames: 72, style: { source_video_clip_id: "second" } }] },
+    { id: "audio", kind: "audio", clips: [{ id: "speech", start_frame: 72, duration_frames: 72, style: { source_video_clip_id: "second" } }] },
+  ] };
+  const next = addWanVideoClip(timeline, { runId: "run-new", artifactId: "video-new", frames: 49, fps: 12, replaceClipId: "first" });
+  assert.equal(next.tracks[0].clips[1].start_frame, 98);
+  assert.equal(next.tracks[1].clips[0].start_frame, 98);
+  assert.equal(next.tracks[2].clips[0].start_frame, 98);
+  const restored = restoreClipVersion(next, next.tracks[0].clips[0].id, 1);
+  assert.equal(restored.tracks[0].clips[1].start_frame, 72);
+  assert.equal(restored.tracks[1].clips[0].start_frame, 72);
+  assert.equal(restored.tracks[2].clips[0].start_frame, 72);
+});
+
+test("compacting an existing episode closes scene gaps and aligns its audio and captions", () => {
+  const timeline = { tracks: [
+    { kind: "video", clips: [
+      { id: "first", start_frame: 0, duration_frames: 98, style: { scene_number: 1 } },
+      { id: "second", start_frame: 72, duration_frames: 72, style: { scene_number: 2 } },
+    ] },
+    { kind: "audio", clips: [{ start_frame: 72, duration_frames: 72, style: { source_video_clip_id: "second" } }] },
+    { kind: "text", clips: [{ start_frame: 72, duration_frames: 72, style: { source_video_clip_id: "second" } }] },
+  ] };
+  const compacted = compactSceneSequence(timeline);
+  assert.equal(compacted.tracks[0].clips[1].start_frame, 98);
+  assert.equal(compacted.tracks[1].clips[0].start_frame, 98);
+  assert.equal(compacted.tracks[2].clips[0].start_frame, 98);
+  assert.strictEqual(compactSceneSequence(compacted), compacted);
 });
 
 test("video URLs remain same-origin and reject non-identifier paths", () => {
