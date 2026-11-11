@@ -72,10 +72,21 @@ def available_voices(user_id):
             and isinstance(item.get('name'), str) and (voice_dir(user_id) / (item['id'] + '.wav')).is_file()]
 
 
-def import_voice(user_id, name, wav_bytes):
+def voice_settings(user_id, profile_id):
+    profile = next((item for item in _profiles(user_id)
+                    if isinstance(item, dict) and item.get('id') == profile_id), None)
+    if not profile:
+        return 0.5, 0.5
+    return profile.get('exaggeration', 0.5), profile.get('cfg_weight', 0.5)
+
+
+def import_voice(user_id, name, wav_bytes, *, exaggeration=0.5, cfg_weight=0.5):
     name = name.strip()
     if not 1 <= len(name) <= 80 or not 1000 <= len(wav_bytes) <= 5_000_000:
         raise ChatterboxError('Nome ou referência de voz inválidos.')
+    if (type(exaggeration) not in (int, float) or not math.isfinite(exaggeration) or not 0.25 <= exaggeration <= 2.0 or
+            type(cfg_weight) not in (int, float) or not math.isfinite(cfg_weight) or not 0 <= cfg_weight <= 1.0):
+        raise ChatterboxError('A expressão ou o ritmo da voz está fora dos limites permitidos.')
     try:
         with wave.open(BytesIO(wav_bytes), 'rb') as stream:
             rate, channels, width = stream.getframerate(), stream.getnchannels(), stream.getsampwidth()
@@ -90,7 +101,8 @@ def import_voice(user_id, name, wav_bytes):
     path = directory / (profile_id + '.wav')
     path.write_bytes(wav_bytes)
     profiles = _profiles(user_id)
-    profiles.append({'id': profile_id, 'name': name})
+    profiles.append({'id': profile_id, 'name': name,
+                     'exaggeration': exaggeration, 'cfg_weight': cfg_weight})
     (directory / PROFILES).write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding='utf-8')
     return {'id': profile_id, 'name': name}
 

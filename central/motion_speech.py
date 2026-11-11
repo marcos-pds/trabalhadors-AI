@@ -22,13 +22,21 @@ class SpeechError(RuntimeError):
 
 def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, user_id):
     """Generate one character line without trimming speech to fit the scene."""
-    from .motion_chatterbox import ChatterboxError, available_voices, synthesize_lines
+    from .motion_chatterbox import ChatterboxError, available_voices, synthesize_lines, voice_settings
     from .motion_qwen import QwenVoiceError, available_voices as qwen_voices, synthesize_line
     qwen_profiles = {voice['id'] for voice in qwen_voices(user_id)}
     if profile not in qwen_profiles and profile not in {voice['id'] for voice in available_voices(user_id)}:
         raise SpeechError('Escolha uma voz disponível para este personagem.')
     try:
-        audio = synthesize_line(text, profile, user_id) if profile in qwen_profiles else synthesize_lines([(text, profile)], user_id)[0]
+        if profile in qwen_profiles:
+            audio = synthesize_line(text, profile, user_id)
+        else:
+            exaggeration, cfg_weight = voice_settings(user_id, profile)
+            if (exaggeration, cfg_weight) == (0.5, 0.5):
+                audio = synthesize_lines([(text, profile)], user_id)[0]
+            else:
+                audio = synthesize_lines([(text, profile)], user_id,
+                                         exaggeration=exaggeration, cfg_weight=cfg_weight)[0]
     except (ChatterboxError, QwenVoiceError) as exc:
         raise SpeechError(str(exc)) from exc
     rate = 48000

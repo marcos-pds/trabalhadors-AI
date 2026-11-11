@@ -34,6 +34,18 @@ def test_references_are_scoped_to_the_owner(tmp_path, monkeypatch):
         chatterbox.import_voice('owner', 'Invalid', b'not a wav')
 
 
+def test_expressive_ptbr_profile_preserves_generation_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv('CENTRAL_DATA_DIR', str(tmp_path))
+    profile = chatterbox.import_voice('owner', 'Caio · pt-BR', reference(),
+                                      exaggeration=0.7, cfg_weight=0.35)
+    assert chatterbox.voice_settings('owner', profile['id']) == (0.7, 0.35)
+    calls = []
+    monkeypatch.setattr(chatterbox, 'synthesize_lines',
+                        lambda lines, owner, **settings: calls.append(settings) or [b'\x01\x00' * 4800])
+    synthesize_scene(tmp_path, 'ptbr', 'Nossa!', 'Caio', profile['id'], 49, 16, 'owner')
+    assert calls == [{'exaggeration': 0.7, 'cfg_weight': 0.35}]
+
+
 def test_episode_batches_lines_and_preserves_character_voice(tmp_path, monkeypatch):
     monkeypatch.setattr(chatterbox, 'available_voices', lambda owner: [{'id': 'lara', 'name': 'Lara'}])
     calls = []

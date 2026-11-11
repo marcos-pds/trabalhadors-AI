@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
 import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { allSceneImagesReady, parseProductionPlan, referenceAnchor, sceneReference as findSceneReference } from "./production.mjs";
 
 type Clip = {
   id: string;
@@ -14,12 +15,12 @@ type Clip = {
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload"; scene_number?: number };
 type VoiceProfile = string;
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
-type PlannedScene = { scene: number; title: string; prompt: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string };
+type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -147,7 +148,10 @@ export default function App() {
   const [wanBusy, setWanBusy] = useState(false);
   const [, setEpisodeRun] = useState(false);
   const [voiceCatalog, setVoiceCatalog] = useState<{ ready: boolean; voices: { id: string; name: string }[] }>({ ready: false, voices: [] });
-  const [chatPrompt, setChatPrompt] = useState("Crie um mini episódio vertical animado, com humor e suspense, sobre uma máquina de refrigerantes que transforma palavras em mundos. Narração clara em português brasileiro, personagens 3D estilizados, cores vivas, cenas conectadas e final com gancho. Use o vídeo de referência apenas como inspiração de ritmo e linguagem visual; crie história e personagens originais.");
+  const [chatPrompt, setChatPrompt] = useState("");
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: "user" | "assistant"; text: string }>>([]);
+  const [promptImage, setPromptImage] = useState<{ name: string; image_data: string } | null>(null);
+  const promptImageInputRef = useRef<HTMLInputElement | null>(null);
   const [autoProgress, setAutoProgress] = useState("");
   const [autoBusy, setAutoBusy] = useState(false);
   const [finalExport, setFinalExport] = useState<{ id: string | null; url: string | null; duration?: number } | null>(null);
@@ -161,8 +165,26 @@ export default function App() {
   const [reviewComment, setReviewComment] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const chatFeedRef = useRef<HTMLDivElement | null>(null);
   const pendingPlaybackClipRef = useRef<string | null>(null);
   const embedded = new URLSearchParams(window.location.search).get("embedded") === "central";
+
+  function addChatMessage(role: "user" | "assistant", text: string) {
+    setChatMessages((messages) => [...messages, { id: makeId("chat"), role, text }]);
+  }
+
+  function uploadPromptImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/image\/(png|jpeg|webp)/.test(file.type) || file.size > 6 * 1024 * 1024) {
+      setError("Envie PNG, JPG ou WebP de até 6 MB."); return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setPromptImage({ name: file.name, image_data: String(reader.result) });
+    reader.onerror = () => setError("Não foi possível ler a imagem enviada.");
+    reader.readAsDataURL(file);
+  }
 
   const load = useCallback(async () => {
     try {
@@ -253,9 +275,15 @@ export default function App() {
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
   const visualReferences = project?.timeline.storyboard?.references ?? [];
+  const sceneImages = visualReferences.filter((reference) => reference.scene_number && reference.image_data);
+  const imageStageReady = allSceneImagesReady(episodePlan, visualReferences);
   const characterReferences = visualReferences.filter((reference) => reference.kind === "character" && reference.image_data);
   const characterReference = characterReferences.find((reference) => reference.id === characterReferenceId) ?? characterReferences[0];
   const plannedScenesComplete = !episodePlan.length || episodePlan.every((scene) => videoClips.some((clip) => clip.style.scene_number === scene.scene));
+
+  useEffect(() => {
+    if (chatFeedRef.current) chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
+  }, [chatMessages, autoProgress, sceneImages.length]);
 
   function saveVisualReference(reference: VisualReference) {
     if (!project) return;
@@ -479,6 +507,9 @@ export default function App() {
       setProject(seeded);
       setProjects((current) => [seeded, ...current]);
       setSelectedClip(null);
+      setChatMessages([]);
+      setChatPrompt("");
+      setPromptImage(null);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao criar projeto.");
@@ -540,26 +571,29 @@ export default function App() {
     } finally { setAutoBusy(false); }
   }
 
-  async function createEpisodeFromChat() {
-    const idea = chatPrompt.trim();
-    if (!idea || autoBusy) return;
+  async function createEpisodeFromChat(ideaOverride?: string) {
+    const idea = (ideaOverride ?? chatPrompt).trim();
+    if (!idea || autoBusy || !embedded || !wanConfigSaved) return;
+    addChatMessage("user", idea + (promptImage ? ` · Imagem: ${promptImage.name}` : ""));
     setAutoBusy(true);
     setError("");
     try {
       let scenes: PlannedScene[];
       let planned: Project;
-      if (project?.summary === idea && project.timeline.storyboard?.scenes.length === 8) {
+      if (!promptImage && project?.summary === idea && project.timeline.storyboard?.scenes.length === 8) {
         scenes = project.timeline.storyboard.scenes;
         planned = project;
-        setAutoProgress("Retomando as cenas pendentes deste projeto…");
+        setAutoProgress("Retomando imagens ou cenas pendentes deste projeto…");
       } else {
       setAutoProgress("Trabalhadores criando roteiro, falas e direção visual…");
+      addChatMessage("assistant", "Vou montar a história e definir a aparência dos personagens antes de gerar os quadros.");
       const conversation = await centralRequest<{ id: string }>("/api/conversations", { method: "POST", body: JSON.stringify({ title: `Mini episódio · ${idea.slice(0, 60)}` }) });
       const planning = await centralRequest<{ id: string }>("/api/runs", { method: "POST", body: JSON.stringify({ conversation_id: conversation.id, mode: "auto", autonomous: false, prompt: [
-        "Escreva somente JSON com roteiro e descrições visuais de uma minissérie vertical animada original para Instagram.",
+        "Trabalhadores de roteiro e direção de arte: escrevam somente JSON com a história e as instruções para imagem e vídeo de uma minissérie vertical animada original para Instagram.",
         `Brief narrativo: "${idea.replace(/["\r\n]/g, " ")}"`,
-        "O roteiro deve ter exatamente 8 cenas consecutivas de cerca de 3 segundos. Cada ação deve decorrer claramente da cena anterior. Visual 3D estilizado 9:16, personagens com aparência e roupa consistentes, ações filmáveis em LTX e sem texto legível na imagem. No máximo uma fala muito curta por cena, de até 6 palavras, ou fala vazia. Falas devem caber em 3 segundos e usar português brasileiro natural, sem palavras de outro idioma. Prefira narração fora de cena quando houver personagem falando, pois sincronização labial ainda não está disponível.",
-        "Responda SOMENTE JSON válido: [{\"scene\":1,\"title\":\"...\",\"hook\":\"...\",\"prompt\":\"direção visual detalhada em inglês, vertical 9:16, sem texto na imagem\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\",\"cliffhanger\":\"...\"}].",
+        promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
+        "Crie exatamente 8 cenas consecutivas de cerca de 3 segundos. Cada ação decorre da anterior. Visual 3D estilizado 9:16. Descreva os mesmos personagens com rosto, cabelo, roupa e paleta invariantes em todas as imagens. image_prompt é um único quadro estático em inglês; prompt é apenas a ação e o movimento de câmera que o vídeo LTX deve animar a partir desse quadro. Ambos devem ser filmáveis, sem texto na imagem. No máximo uma fala de 6 palavras por cena, em português brasileiro natural; prefira narração fora de cena porque sincronização labial ainda não está disponível.",
+        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual, figurino e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês, personagens idênticos\",\"prompt\":\"movimento da cena em inglês\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\"}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
       for (let attempt = 0; attempt < 180 && ["queued", "running", "awaiting_approval"].includes(status); attempt += 1) {
@@ -569,10 +603,9 @@ export default function App() {
       if (status !== "completed") throw new Error(`O planejamento terminou com estado ${status}.`);
       const messages = await centralRequest<Array<{ role: string; content: string }>>(`/api/conversations/${conversation.id}/messages`);
       const raw = messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
-      const jsonBlock = raw.match(/\[\s*\{[\s\S]*?\}\s*\]/)?.[0];
-      if (!jsonBlock) throw new Error("O planejamento não trouxe cenas estruturadas.");
-      scenes = JSON.parse(jsonBlock) as PlannedScene[];
-      if (!Array.isArray(scenes) || scenes.length !== 8 || scenes.some((scene, index) => scene.scene !== index + 1 || !scene.title?.trim() || !scene.prompt?.trim())) throw new Error("O roteiro não retornou oito cenas válidas.");
+      const plan = parseProductionPlan(raw);
+      scenes = plan.scenes;
+      addChatMessage("assistant", `História pronta: ${scenes.map((scene) => `${scene.scene}. ${scene.title}`).join(" · ")}. Agora vou gerar as oito imagens antes de animar.`);
       setAutoProgress("Criando o projeto e preparando a produção…");
       const created = await request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ title: `${scenes[0].title.slice(0, 110)} | Episódio 1`, summary: idea }) });
       const fresh = await request<Project>(`/api/projects/${created.id}`, { method: "PUT", body: JSON.stringify({ title: created.title, summary: idea, timeline: { ...initialTimeline(), fps: 24, width: 720, height: 1280 } }) });
@@ -586,39 +619,51 @@ export default function App() {
       const cast = [...new Set(scenes.filter((scene) => scene.dialogue?.trim()).map((scene) => scene.speaker?.trim() || "Narradora"))];
       const alternatives = allVoices.filter((item) => item.id !== voice?.id);
       const voiceProfiles = Object.fromEntries(cast.map((speaker, index) => [speaker,
+        allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")) && /pt-br|brasil/i.test(item.name))?.id ??
         allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")))?.id ??
         (/narrad/i.test(speaker) ? allVoices.find((item) => /narrad/i.test(item.name))?.id : undefined) ??
         (index === 0 ? voice?.id : alternatives[(index - 1) % alternatives.length]?.id) ?? voice?.id ?? ""]));
-      const masters = (project?.timeline.storyboard?.references ?? []).filter((reference) => reference.image_data && !reference.scene_number);
-      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, scenes, references: masters, voice_profiles: voiceProfiles, episode_status: "draft" } } }) });
+      const masters: VisualReference[] = promptImage ? [{ id: makeId("ref"), kind: "character", name: promptImage.name,
+        prompt: "Imagem mestra enviada no chat.", image_data: promptImage.image_data, source: "upload" }] : [];
+      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, visual_bible: plan.visual_bible, scenes, references: masters, voice_profiles: voiceProfiles, episode_status: "draft" } } }) });
+      setPromptImage(null);
       setProject(planned);
       setProjects((current) => current.map((item) => item.id === planned.id ? planned : item));
       setEpisodePlan(scenes);
       }
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
-      let scenesProduced = 0;
       for (const scene of scenes) {
         let current = await request<Project>(`/api/projects/${planned.id}`);
+        if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
+        setAutoProgress(`Trabalhador de arte e motor de imagem: quadro ${scene.scene}/8…`);
+        const references = current.timeline.storyboard?.references ?? [];
+        const anchor = referenceAnchor(references, scene.scene);
+        const imagePrompt = [current.timeline.storyboard?.visual_bible, scene.image_prompt || scene.prompt,
+          "Vertical 9:16, consistent character face, hair, clothes and palette, no letters or captions."].filter(Boolean).join(". ").slice(0, 4096);
+        const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+          method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: imagePrompt,
+            ...(anchor?.image_data ? { reference_image_data: anchor.image_data } : {}) }),
+        });
+        const generatedReference: VisualReference = { id: makeId("ref"), kind: "setting",
+          name: `Cena ${scene.scene} · ${scene.title}`, prompt: imagePrompt,
+          image_data: image.image_data, source: "generated_image", scene_number: scene.scene };
+        const storyboard = current.timeline.storyboard!;
+        current = await request<Project>(`/api/projects/${planned.id}`, { method: "PUT", body: JSON.stringify({
+          title: current.title, summary: current.summary, timeline: { ...current.timeline,
+            storyboard: { ...storyboard, references: [...references, generatedReference] } },
+        }) });
+        setProject(current);
+      }
+      const ready = await request<Project>(`/api/projects/${planned.id}`);
+      if (!allSceneImagesReady(scenes, ready.timeline.storyboard?.references ?? [])) {
+        throw new Error("A animação aguarda as oito imagens de referência.");
+      }
+      addChatMessage("assistant", "As oito imagens estão prontas e salvas no projeto. Vou animar cada cena e colocar o resultado na timeline.");
+      for (const scene of scenes) {
+        const current = await request<Project>(`/api/projects/${planned.id}`);
         if (current.timeline.tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.style.scene_number === scene.scene))) continue;
-        let sceneReference = current.timeline.storyboard?.references?.find((reference) => reference.scene_number === scene.scene && reference.image_data);
-        if (!sceneReference) {
-          setAutoProgress(`Criando imagem de referência da cena ${scene.scene}/8…`);
-          const master = current.timeline.storyboard?.references?.find((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number);
-          const previous = current.timeline.storyboard?.references?.find((reference) => reference.scene_number === scene.scene - 1 && reference.image_data);
-          const anchor = master ?? previous;
-          const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-            method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: scene.prompt.slice(0, 3500),
-              ...(anchor?.image_data ? { reference_image_data: anchor.image_data } : {}) }),
-          });
-          sceneReference = { id: makeId("ref"), kind: "setting", name: `Cena ${scene.scene} · ${scene.title}`,
-            prompt: scene.prompt, image_data: image.image_data, source: "generated_image", scene_number: scene.scene };
-          const storyboard = current.timeline.storyboard!;
-          current = await request<Project>(`/api/projects/${planned.id}`, { method: "PUT", body: JSON.stringify({
-            title: current.title, summary: current.summary, timeline: { ...current.timeline,
-              storyboard: { ...storyboard, references: [...(storyboard.references ?? []), sceneReference] } },
-          }) });
-          setProject(current);
-        }
+        const sceneReference = findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene);
+        if (!sceneReference?.image_data) throw new Error(`Falta a imagem da cena ${scene.scene}.`);
         setAutoProgress(`Produzindo cena ${scene.scene}/8 com vídeo${scene.dialogue?.trim() ? " e voz" : ""}…`);
         const generated = await centralRequest<MotionRun>("/api/motion/ltx/scenes", { method: "POST", body: JSON.stringify({
           project_id: planned.id, episode: 1, scene: scene.scene, prompt: scene.prompt.slice(0, 1024), frames: 49, fps: 16,
@@ -634,18 +679,17 @@ export default function App() {
         }
         if (latest.state !== "completed") throw new Error(`Cena ${scene.scene}: ${latest.error || latest.state}. As cenas prontas permanecem na timeline.`);
         await syncCompletedVideos([latest], planned.id);
-        scenesProduced += 1;
-        if (scenesProduced === 2 && scene.scene < scenes.length) {
-          setAutoProgress("Duas cenas prontas para revisão. Confira personagem, ação e voz na timeline; use o mesmo pedido para continuar.");
-          return;
-        }
+        addChatMessage("assistant", `Cena ${scene.scene}/8 pronta na timeline.`);
       }
       setAutoProgress("Montando o MP4 final com as falas das oito cenas…");
       await exportCurrentEpisode(planned.id);
       setAutoProgress("Mini episódio pronto. Assista ao MP4 e revise cada cena e fala na timeline.");
+      addChatMessage("assistant", "O episódio está montado. Você pode assistir, revisar cada trecho e baixar o MP4.");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Não foi possível produzir o episódio.");
+      const message = reason instanceof Error ? reason.message : "Não foi possível produzir o episódio.";
+      setError(message);
       setAutoProgress("Produção interrompida; as cenas concluídas foram preservadas.");
+      addChatMessage("assistant", `A produção parou: ${message} O roteiro, as imagens e as cenas concluídas continuam salvos para retomar.`);
     } finally { setAutoBusy(false); }
   }
 
@@ -820,30 +864,37 @@ export default function App() {
     <main className="studio" data-theme={theme}>
       <header className="topbar">
         <a className="brand" href="#" aria-label="AI Motion Studio início"><span className="brand-mark">M</span><span>AI MOTION <b>STUDIO</b><small>LOCAL CREATIVE SUITE</small></span></a>
-        <div className="project-switch"><span>PROJETO</span><select aria-label="Projeto ativo" value={project?.id ?? ""} onChange={(event) => setProject(projects.find((item) => item.id === event.target.value) ?? null)}><option value="">Selecione projeto</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button className="icon-button" onClick={() => void createProject()} aria-label="Criar novo projeto">＋</button></div>
+        <div className="project-switch"><span>PROJETO</span><select aria-label="Projeto ativo" value={project?.id ?? ""} onChange={(event) => { setProject(projects.find((item) => item.id === event.target.value) ?? null); setChatMessages([]); setChatPrompt(""); setPromptImage(null); }}><option value="">Selecione projeto</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button className="icon-button" onClick={() => void createProject()} aria-label="Criar novo projeto">＋</button></div>
         <div className="top-actions"><span className={saved ? "save-status" : "save-status pending"}><i />{saved ? "SALVO" : "SALVANDO"}</span>{finalExport?.url ? <a className="export-button" download href={finalExport.url}>BAIXAR EPISÓDIO <span>↗</span></a> : finalArtifact ? <a className="export-button" download href={`/api/motion/runs/${wanRun!.id}/artifacts/${finalArtifact.id}`}>EXPORTAR <span>↗</span></a> : <button className="export-button" disabled title={episodeApproved ? "Aguardando montagem final" : "Aguardando cenas e montagem final"}>EXPORTAR <span>↗</span></button>}</div>
       </header>
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")} aria-label="Fechar erro">×</button></div>}
       <section className="workspace">
-        <aside className="creation-chat panel">
-          <div className="panel-heading"><span>01 / CRIAR COM IA</span></div>
-          <h2>Conte sua ideia</h2>
-          <p>O roteiro, as cenas e as falas são preparados a partir de um único pedido. Depois, revise cada trecho na timeline.</p>
-          <label className="field-label" htmlFor="creation-prompt">SEU PEDIDO</label>
-          <textarea id="creation-prompt" value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} maxLength={2000} rows={12} placeholder="Descreva o tema, personagens e estilo do mini episódio…" />
-          <button className="primary-wide" onClick={() => void createEpisodeFromChat()} disabled={!embedded || !wanConfigSaved || autoBusy || !chatPrompt.trim()}>{autoBusy ? "PRODUZINDO…" : "✦ CRIAR MINI EPISÓDIO"}</button>
-          <p className="helper-text" role="status">{autoProgress || "Vídeo e voz são gerados por cena. A timeline é preenchida conforme cada cena termina."}</p>
-          <p className="helper-text">As vozes são alinhadas ao início de cada cena. A sincronização dos lábios ainda requer um motor específico e será indicada como pendente na revisão.</p>
-          {wanRun && <p className="helper-text">Última cena: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}
-          <details className="chat-references"><summary>Referências visuais opcionais ({visualReferences.length})</summary>
-            <p className="helper-text">Envie uma imagem mestra para testar duas tomadas consecutivas antes de produzir um episódio inteiro.</p>
-            <select aria-label="Tipo de referência" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select>
-            <select aria-label="Provedor de imagem" value={referenceProvider} onChange={(event) => setReferenceProvider(event.target.value as "local_comfyui" | "huggingface")}><option value="local_comfyui">Local</option><option value="huggingface">Gratuito</option></select>
-            <button className="quiet-button" onClick={() => void generateVisualReference()} disabled={!project || referenceBusy || autoBusy}>{referenceBusy ? "GERANDO…" : "GERAR IMAGEM"}</button>
-            <label className="reference-upload">ENVIAR IMAGEM<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadVisualReference} disabled={!project || autoBusy} /></label>
-            <div className="reference-thumbs">{visualReferences.map((reference) => reference.image_data && <img key={reference.id} src={reference.image_data} alt={reference.name} title={reference.name} />)}</div>
-            <button className="quiet-button" onClick={() => void createReferencePilot()} disabled={!embedded || !characterReference?.image_data || autoBusy}>TESTAR 2 TOMADAS COM IMAGEM MESTRA</button>
-          </details>
+        <aside className="motion-chat panel" aria-label="Chat de produção do Motion Studio">
+          <div className="motion-chat-header"><span className="motion-chat-mark">✦</span><div><strong>Central IA</strong><small>Direção do Motion Studio</small></div><span className="motion-chat-status">{autoBusy ? "Produzindo" : imageStageReady ? "Imagens prontas" : "Pronta"}</span></div>
+          <div className="motion-chat-feed" ref={chatFeedRef} aria-live="polite">
+            {!chatMessages.length && !episodePlan.length && <div className="motion-chat-welcome"><span className="motion-chat-orbit">✧</span><h2>Qual é a história?</h2><p>Conte o tema em uma mensagem. Você pode anexar uma imagem ou deixar a Central criar todas as referências.</p><button onClick={() => setChatPrompt("Um inventor descobre que uma gota muda a cor de todo o laboratório. Mini série vertical, humor e suspense, com Caio como protagonista.")}>Experimentar um tema</button></div>}
+            {chatMessages.map((message) => <div key={message.id} className={`motion-chat-message ${message.role}`}><span>{message.role === "user" ? "Você" : "✦ Central IA"}</span><p>{message.text}</p></div>)}
+            {episodePlan.length > 0 && <div className="motion-chat-story"><strong>Roteiro · {episodePlan.length} cenas</strong><ol>{episodePlan.map((scene) => <li key={scene.scene}>{scene.title}</li>)}</ol>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>Continuar este episódio →</button>}</div>}
+            {sceneImages.length > 0 && <div className="motion-chat-images"><strong>Quadros de referência · {sceneImages.length}/{episodePlan.length || 8}</strong><div>{sceneImages.map((reference) => <figure key={reference.id}><img src={reference.image_data} alt={reference.name} /><figcaption>{reference.name}</figcaption></figure>)}</div></div>}
+            {autoProgress && <p className="motion-chat-progress" role="status">✦ {autoProgress}</p>}
+            {wanRun && <p className="motion-chat-run">Cena em andamento: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}
+            {project && <details className="motion-chat-advanced"><summary>Referências e testes manuais</summary>
+              <p className="helper-text">A imagem anexada à mensagem entra no projeto automaticamente. Aqui você pode preparar outras referências.</p>
+              <select aria-label="Tipo de referência" value={referenceKind} onChange={(event) => setReferenceKind(event.target.value as VisualReference["kind"])}><option value="character">Personagem</option><option value="setting">Cenário</option></select>
+              <select aria-label="Provedor de imagem" value={referenceProvider} onChange={(event) => setReferenceProvider(event.target.value as "local_comfyui" | "huggingface")}><option value="local_comfyui">Local</option><option value="huggingface">Gratuito</option></select>
+              <button onClick={() => void generateVisualReference()} disabled={referenceBusy || autoBusy}>{referenceBusy ? "Gerando…" : "Gerar imagem avulsa"}</button>
+              <label>Enviar referência para este projeto<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadVisualReference} disabled={autoBusy} /></label>
+              <button onClick={() => void createReferencePilot()} disabled={!embedded || !characterReference?.image_data || autoBusy}>Testar duas tomadas</button>
+            </details>}
+          </div>
+          <div className="motion-chat-composer">
+            {promptImage && <div className="motion-chat-attachment"><img src={promptImage.image_data} alt="Imagem anexada ao pedido" /><span>{promptImage.name}</span><button onClick={() => setPromptImage(null)} aria-label="Remover imagem anexada">×</button></div>}
+            <div className="motion-chat-input-row"><button className="motion-attach" onClick={() => promptImageInputRef.current?.click()} disabled={autoBusy} aria-label="Anexar imagem de referência">＋</button>
+              <input ref={promptImageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadPromptImage} />
+              <textarea aria-label="Mensagem para a Central IA" value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} maxLength={2000} rows={3} placeholder="Conte um tema ou peça para continuar…" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void createEpisodeFromChat(); } }} />
+              <button className="motion-send" onClick={() => void createEpisodeFromChat()} disabled={!embedded || !wanConfigSaved || autoBusy || !chatPrompt.trim()} aria-label="Enviar pedido para criar episódio">➤</button></div>
+            <small>Roteiro → imagens → vídeo → revisão na timeline</small>
+          </div>
         </aside>
         <section className="center-column">
           <div className="preview-panel panel">

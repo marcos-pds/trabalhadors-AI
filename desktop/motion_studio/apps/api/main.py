@@ -73,6 +73,7 @@ class PlannedScene(BaseModel):
     scene: int = Field(ge=1, le=64)
     title: str = Field(max_length=120)
     prompt: str = Field(max_length=1024)
+    image_prompt: str = Field(default="", max_length=1024)
     hook: str = Field(default="", max_length=250)
     cliffhanger: str = Field(default="", max_length=250)
     speaker: str = Field(default="", max_length=64)
@@ -100,6 +101,7 @@ class Publication(BaseModel):
 class Storyboard(BaseModel):
     model_config = ConfigDict(extra="forbid")
     theme: str = Field(max_length=2000)
+    visual_bible: str = Field(default="", max_length=2000)
     scenes: list[PlannedScene] = Field(default_factory=list, max_length=64)
     references: list[VisualReference] = Field(default_factory=list, max_length=32)
     episode_status: Literal["draft", "approved"] = "draft"

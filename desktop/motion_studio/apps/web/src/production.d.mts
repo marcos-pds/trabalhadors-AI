@@ -1,0 +1,6 @@
+export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string };
+export type Reference = { scene_number?: number; kind: string; image_data?: string };
+export function parseProductionPlan(raw: string): { visual_bible: string; scenes: Scene[] };
+export function sceneReference<T extends Reference>(references: T[], number: number): T | undefined;
+export function allSceneImagesReady(scenes: Scene[], references: Reference[]): boolean;
+export function referenceAnchor<T extends Reference>(references: T[], number: number): T | undefined;
