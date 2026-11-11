@@ -1,10 +1,14 @@
 export function parseProductionPlan(raw) {
   const input = String(raw ?? "").trim();
   const fenced = input.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
-  const candidates = [input, fenced, input.slice(input.indexOf("{"), input.lastIndexOf("}") + 1)].filter(Boolean);
+  const sections = input.split(/(?:^|\n)##\s+[^\n]+\n/).map((section) => section.slice(section.indexOf("{"), section.lastIndexOf("}") + 1));
+  const candidates = [input, fenced, ...sections].filter(Boolean);
   let plan;
   for (const candidate of candidates) {
-    try { plan = JSON.parse(candidate); break; } catch { /* Try the next JSON boundary. */ }
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed.scenes) && parsed.scenes.length === 8) plan = parsed;
+    } catch { /* Worker messages may contain several titled JSON proposals. */ }
   }
   if (!plan || typeof plan !== "object" || Array.isArray(plan) ||
       typeof plan.visual_bible !== "string" || !plan.visual_bible.trim() || plan.visual_bible.length > 2000 ||
@@ -25,6 +29,15 @@ export function sceneReference(references, number) {
 
 export function allSceneImagesReady(scenes, references) {
   return scenes.length > 0 && scenes.every((scene) => Boolean(sceneReference(references, scene.scene)));
+}
+
+export function meanPixelDifference(left, right) {
+  if (!left || !right || left.length !== right.length || left.length % 4) throw new Error("Quadros inválidos para comparação.");
+  let total = 0;
+  for (let index = 0; index < left.length; index += 4) {
+    total += Math.abs(left[index] - right[index]) + Math.abs(left[index + 1] - right[index + 1]) + Math.abs(left[index + 2] - right[index + 2]);
+  }
+  return total / (left.length / 4 * 3);
 }
 
 export function referenceAnchor(references, number) {
