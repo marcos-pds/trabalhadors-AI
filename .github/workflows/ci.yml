@@ -35,6 +35,8 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Install frontend dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Motion Studio frontend dependencies
+        run: npm ci --prefix desktop/motion_studio/apps/web --ignore-scripts --no-audit --no-fund
       - name: Check Python syntax
         run: python -m compileall -q central
       - name: Build React frontend
@@ -76,6 +78,27 @@ jobs:
           node-version: "24"
       - name: Verify Chrome DevTools URL allowlist with real URLPattern
         run: python -m pytest tests/test_browser_mcp.py -k navigation_patterns_construct_in_node -q
+
+
+  resource-orchestrator:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install API test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Prepare read-only static mount for API smoke tests
+        run: python -c "from pathlib import Path; Path('static').mkdir(exist_ok=True)"
+      - name: Validate telemetry, reservations, API and Wan job contracts
+        run: python -m pytest tests/test_ollama_residency.py tests/test_resource_orchestrator.py tests/test_persistent_resources.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py tests/test_motion_wan_scene.py tests/test_motion_wan_episode.py -q
+
 
 
   docker-isolation:
