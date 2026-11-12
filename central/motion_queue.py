@@ -4,6 +4,7 @@ Runtime presence, successful execution and artifact verification are separate.
 This executor runs trusted local media tools; it is not an OS sandbox.
 """
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -65,10 +66,12 @@ def receipt(path, artifact):
 
 
 class MotionQueue:
-    def __init__(self,db,config=None,timeout=1800):
+    def __init__(self,db,config=None,timeout=1800,resources=None):
         self.db=db
         self.config=config
         self.timeout=timeout
+        # Cooperative process-local reservations; no model is unloaded here.
+        self.resources=resources
 
     def _config(self,user=None):
         if self.config:return self.config
@@ -246,12 +249,28 @@ class MotionQueue:
                     except Exception:
                         raise ContractError('comfy_startup_failed') from None
                     from .comfy_motion import execute as render_comfy
-                    source=job['inputs'][0]
-                    provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
-                        'central_motion_'+row['id']+'_'+job['id'],self._config(row['user_id']),
-                        lambda:self._check(row,stop),
-                        lambda prompt_id:self.db.execute('UPDATE motion_jobs SET remote_id=? WHERE run_id=? AND id=?',(prompt_id,row['id'],job['id'])),
-                        timeout=self.timeout,expected_digest=hashes[source])
+                    # Only the Wan rendering call holds the process-local GPU slot.
+                    # Planning, FFmpeg and other non-GPU steps are not serialized.
+                    context=nullcontext()
+                    if self.resources is not None:
+                        from .resource_orchestrator import ResourceRequest
+                        last_check=[0.0]
+                        def pending():
+                            now=time.monotonic()
+                            if stop.is_set() or now-last_check[0]>=2:
+                                self._check(row,stop)  # heartbeat and cancellation
+                                last_check[0]=now
+                            return False
+                        context=self.resources.reserve(
+                            ResourceRequest('motion_wan',gpu_slots=1,priority=5),
+                            timeout=self.timeout,cancelled=pending)
+                    with context:
+                        source=job['inputs'][0]
+                        provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
+                            'central_motion_'+row['id']+'_'+job['id'],self._config(row['user_id']),
+                            lambda:self._check(row,stop),
+                            lambda prompt_id:self.db.execute('UPDATE motion_jobs SET remote_id=? WHERE run_id=? AND id=?',(prompt_id,row['id'],job['id'])),
+                            timeout=self.timeout,expected_digest=hashes[source])
                 self._check(row,stop)
                 path=scoped_path(root,output['path'])
                 artifact=receipt(path,output)
