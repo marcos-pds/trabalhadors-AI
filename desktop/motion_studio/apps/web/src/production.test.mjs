@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneReference, sceneTimingForSpeech } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech } from "./production.mjs";
 
 const scenes = Array.from({ length: 8 }, (_, index) => ({ scene: index + 1, title: `Cena ${index + 1}`,
   image_prompt: "Caio at the laboratory bench", prompt: "Caio lifts the flask" }));
@@ -50,8 +50,21 @@ test("generated character master anchors later scenes and carries the visual bib
   const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
   assert.equal(referenceAnchor([prior, master], 2), master);
   assert.match(characterMasterPrompt("Caio wears blue goggles and a white coat"), /blue goggles and a white coat/);
-  assert.match(characterMasterPrompt("Caio wears blue goggles", "A young scientist"), /A young scientist/);
+  assert.match(characterMasterPrompt("Caio wears blue goggles", "A young scientist"), /Young clean-shaven face/);
   assert.match(characterMasterPrompt("Caio wears blue goggles", "Um jovem cientista"), /no beard or moustache/);
+  assert.match(characterMasterPrompt("Caio wears blue goggles", "Um jovem cientista sem barba"), /no beard or moustache/);
+  const concise = characterMasterPrompt("Caio has blue goggles. Cenários: laboratory, corridor, rainy street", "Conte oito cenas em cenários diferentes");
+  assert.doesNotMatch(concise, /corridor|rainy street|Conte oito cenas/);
+  assert.match(concise, /No collage, storyboard, contact sheet/);
+});
+
+test("scene image edit follows the isolated one-master method and keeps the action", () => {
+  const prompt = sceneImageEditPrompt({ scene: 2, title: "Fuga", image_prompt: "Caio runs through a hospital corridor", prompt: "Camera follows" }, "flat 2D", "show both feet off the ground");
+  assert.match(prompt, /<image1> is the exact recurring protagonist identity reference/);
+  assert.doesNotMatch(prompt, /<image2>|scene canvas/);
+  assert.match(prompt, /Caio runs through a hospital corridor/);
+  assert.match(prompt, /show both feet off the ground/);
+  assert.match(prompt, /flat 2D/);
 });
 
 test("revised scene references keep earlier versions and select the latest", () => {

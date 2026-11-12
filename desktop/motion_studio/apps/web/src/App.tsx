@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
 import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneImageEditPrompt, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
 
 type Clip = {
   id: string;
@@ -466,7 +466,7 @@ export default function App() {
     }
   }
 
-  async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false) {
+  async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false, resumeProject?: Project) {
     const idea = (ideaOverride ?? chatPrompt).trim();
     if (!idea || autoBusy || !embedded || !wanConfigSaved) return;
     addChatMessage("user", idea + (promptImage ? ` · Imagem: ${promptImage.name}` : ""));
@@ -475,9 +475,10 @@ export default function App() {
     try {
       let scenes: PlannedScene[];
       let planned: Project;
-      if (!promptImage && project?.summary === idea && project.timeline.storyboard?.scenes.length === 8) {
-        scenes = project.timeline.storyboard.scenes;
-        planned = project;
+      const sourceProject = resumeProject ?? project;
+      if (!promptImage && sourceProject?.summary === idea && sourceProject.timeline.storyboard?.scenes.length === 8) {
+        scenes = sourceProject.timeline.storyboard.scenes;
+        planned = sourceProject;
         setAutoProgress("Retomando imagens ou cenas pendentes deste projeto…");
       } else {
       setAutoProgress("Trabalhadores criando roteiro, falas e direção visual…");
@@ -549,21 +550,15 @@ export default function App() {
       for (const scene of scenes) {
         let current = await request<Project>(`/api/projects/${planned.id}`);
         if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
-        setAutoProgress(`Trabalhador de arte e motor de imagem: composição ${scene.scene}/8…`);
+        setAutoProgress(`Trabalhador de arte e motor de imagem: cena ${scene.scene}/8 com imagem mestra…`);
         const references = current.timeline.storyboard?.references ?? [];
         const anchor = referenceAnchor(references, scene.scene);
-        const basePrompt = [scene.image_prompt || scene.prompt, current.timeline.storyboard?.visual_bible,
-          "Show the exact location and action for this scene. Vertical 9:16, no letters or captions."].filter(Boolean).join(". ").slice(0, 4096);
-        const base = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-          method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: basePrompt }),
-        });
-        setAutoProgress(`Trabalhador de arte e motor de imagem: identidade ${scene.scene}/8…`);
-        const imagePrompt = ["Use <image1> as the scene canvas: preserve its location, action, framing and props. Use <image2> only as the recurring protagonist's identity and drawing-style reference. Replace the protagonist in <image1> with the exact face, hair, goggles, shirt and coat from <image2>. Preserve the scene background from <image1>.",
-          scene.image_prompt || scene.prompt, "Vertical 9:16, no letters or captions."].join(" ").slice(0, 4096);
-        const image = anchor?.image_data ? await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+        if (!anchor?.image_data || anchor.kind !== "character") throw new Error("Falta a imagem mestra do personagem para a cena.");
+        const imagePrompt = sceneImageEditPrompt(scene, current.timeline.storyboard?.visual_bible);
+        const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
           method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: imagePrompt,
-            reference_image_data: base.image_data, secondary_reference_image_data: anchor.image_data }),
-        }) : base;
+            reference_image_data: anchor.image_data }),
+        });
         const generatedReference: VisualReference = { id: makeId("ref"), kind: "setting",
           name: `Cena ${scene.scene} · ${scene.title}`, prompt: imagePrompt,
           image_data: image.image_data, source: "generated_image", scene_number: scene.scene };
@@ -624,17 +619,17 @@ export default function App() {
     } finally { setAutoBusy(false); }
   }
 
-  async function redoImagesAndContinue() {
+  async function redoImagesAndContinue(resetGeneratedMaster = false) {
     if (!project || autoBusy || videoClips.length) return;
     const storyboard = project.timeline.storyboard;
     if (!storyboard?.scenes.length) return;
     const updated = await request<Project>(`/api/projects/${project.id}`, { method: "PUT", body: JSON.stringify({
       title: project.title, summary: project.summary, timeline: { ...project.timeline,
-        storyboard: { ...storyboard, references: (storyboard.references ?? []).filter((reference) => !reference.scene_number && reference.source === "upload") } },
+        storyboard: { ...storyboard, references: (storyboard.references ?? []).filter((reference) => !reference.scene_number && (!resetGeneratedMaster || reference.source === "upload")) } },
     }) });
     setProject(updated);
-    addChatMessage("assistant", "Vou refazer os oito quadros com o motor de identidade visual e conferir os cenários antes dos vídeos.");
-    await createEpisodeFromChat(updated.summary, true);
+    addChatMessage("assistant", resetGeneratedMaster ? "Vou criar uma nova imagem mestra de um único personagem e refazer os oito quadros." : "Vou refazer os oito quadros a partir da imagem mestra atual.");
+    await createEpisodeFromChat(updated.summary, true, updated);
   }
 
   async function exportCurrentEpisode(projectId = project?.id) {
@@ -782,16 +777,10 @@ export default function App() {
     setSceneImageBusy(true);
     setError("");
     try {
-      const basePrompt = [scene.image_prompt || scene.prompt, project.timeline.storyboard?.visual_bible,
-        reviewComment.trim() ? `Requested correction: ${reviewComment.trim()}` : ""].filter(Boolean).join(". ").slice(0, 4096);
-      const base = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-        method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: basePrompt }),
-      });
-      const prompt = ["Use <image1> as the scene canvas and preserve its background, framing and action. Use <image2> only as the character identity and style reference. Replace the protagonist with the exact face, hair, goggles and outfit from <image2>.",
-        basePrompt].join(" ").slice(0, 4096);
+      const prompt = sceneImageEditPrompt(scene, project.timeline.storyboard?.visual_bible, reviewComment);
       const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
         method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt,
-          reference_image_data: base.image_data, secondary_reference_image_data: characterReference.image_data }),
+          reference_image_data: characterReference.image_data }),
       });
       const current = await request<Project>(`/api/projects/${project.id}`);
       const storyboard = current.timeline.storyboard!;
@@ -867,7 +856,8 @@ export default function App() {
             {!chatMessages.length && !episodePlan.length && <div className="motion-chat-welcome"><span className="motion-chat-orbit">✧</span><h2>Qual é a história?</h2><p>Conte o tema em uma mensagem. Você pode anexar uma imagem ou deixar a Central criar todas as referências.</p><button onClick={() => setChatPrompt("Um inventor descobre que uma gota muda a cor de todo o laboratório. Mini série vertical, humor e suspense, com Caio como protagonista.")}>Experimentar um tema</button></div>}
             {chatMessages.map((message) => <div key={message.id} className={`motion-chat-message ${message.role}`}><span>{message.role === "user" ? "Você" : "✦ Central IA"}</span><p>{message.text}</p></div>)}
             {episodePlan.length > 0 && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}</div>}
-            {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os oito quadros</button>}
+            {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <><button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os oito quadros</button>{characterReference?.source === "generated_image" && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue(true)}>Refazer personagem e quadros</button>}</>}
+            {characterReference?.image_data && <div className="motion-chat-images"><strong>Imagem mestra do personagem</strong><div><figure><img src={characterReference.image_data} alt="Imagem mestra do personagem" /><figcaption>{characterReference.name}</figcaption></figure></div></div>}
             {sceneImages.length > 0 && <div className="motion-chat-images"><strong>Quadros de referência · {sceneImages.length}/{episodePlan.length || 8}</strong><div>{sceneImages.map((reference) => <figure key={reference.id}><img src={reference.image_data} alt={reference.name} /><figcaption>{reference.name}</figcaption></figure>)}</div></div>}
             {autoProgress && <p className="motion-chat-progress" role="status">✦ {autoProgress}</p>}
             {wanRun && <p className="motion-chat-run">Cena em andamento: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}

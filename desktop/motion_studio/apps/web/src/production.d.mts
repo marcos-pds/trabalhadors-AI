@@ -7,3 +7,4 @@ export function meanPixelDifference(left: Uint8ClampedArray, right: Uint8Clamped
 export function sceneTimingForSpeech(dialogue?: string): { frames: number; fps: number };
 export function referenceAnchor<T extends Reference>(references: T[], number: number): T | undefined;
 export function characterMasterPrompt(visualBible?: string, brief?: string): string;
+export function sceneImageEditPrompt(scene: Scene, visualBible?: string, correction?: string): string;

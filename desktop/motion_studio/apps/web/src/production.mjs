@@ -50,11 +50,29 @@ export function referenceAnchor(references, number) {
 }
 
 export function characterMasterPrompt(visualBible, brief = "") {
-  const youngWithoutBeard = /\b(young|boy|child|jovem|menino|criança)\b/i.test(String(brief)) &&
-    !/\b(beard|moustache|barba|bigode)\b/i.test(`${brief} ${visualBible}`);
-  return ["Single full-body character portrait on a plain neutral background, front three-quarter view.",
-    "Show only the recurring main character. Preserve exact face shape, hair, skin tone, outfit and accessories in every later scene.",
-    youngWithoutBeard ? "Young clean-shaven face, no beard or moustache." : "Honor the age and facial hair in the brief.",
-    String(brief ?? "").trim(), String(visualBible ?? "").trim(),
-    "Vertical 9:16, no letters, no caption, no other people or scenery."].join(" ").slice(0, 4096);
+  const identity = String(visualBible ?? "").split(/\b(?:cenários|cenarios|scenes|locations|paleta|palette)\s*:/i)[0].trim();
+  const source = `${brief} ${identity}`;
+  const youngWithoutBeard = /\b(young|boy|child|jovem|menino|criança)\b/i.test(source) &&
+    (!/\b(beard|moustache|barba|bigode)\b/i.test(source) ||
+      /\b(no|sem|without)\s+(beard|moustache|barba|bigode)\b/i.test(source));
+  return ["Create ONE clean full-body 2D animated character portrait, front three-quarter view, on a plain light background.",
+    "Exactly one person in one image. Single panel only. No collage, storyboard, contact sheet, multiple poses, insets or scene examples.",
+    youngWithoutBeard ? "Young clean-shaven face, no beard or moustache." : "Honor the character's age and facial hair.",
+    identity,
+    "Crisp flat colors, clean outlines, consistent proportions. No laboratory or other location, no text or captions."].join(" ").slice(0, 4096);
+}
+
+export function sceneImageEditPrompt(scene, visualBible = "", correction = "") {
+  const direction = String(scene?.image_prompt || scene?.prompt || "").trim();
+  const action = String(scene?.prompt || "").trim();
+  return [
+    "Transform <image1> into the requested scene. <image1> is the exact recurring protagonist identity reference.",
+    "Keep the same face shape, age, skin tone, hairstyle, eyes, accessories, clothing, body proportions and 2D drawing style from <image1>.",
+    "Change the pose, expression, action, props and location as required by this scene. Show the requested action clearly in one still frame; do not leave the original plain background.",
+    direction,
+    action && action !== direction ? `Show a key pose from this action: ${action}` : "",
+    String(visualBible).trim(),
+    correction ? `Requested correction: ${String(correction).trim()}` : "",
+    "Vertical 9:16, consistent 2D cartoon scene, no writing, captions or logos.",
+  ].filter(Boolean).join(" ").slice(0, 4096);
 }
