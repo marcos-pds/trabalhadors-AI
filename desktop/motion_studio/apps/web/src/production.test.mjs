@@ -50,6 +50,8 @@ test("generated character master anchors later scenes and carries the visual bib
   const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
   assert.equal(referenceAnchor([prior, master], 2), master);
   assert.match(characterMasterPrompt("Caio wears blue goggles and a white coat"), /blue goggles and a white coat/);
+  assert.match(characterMasterPrompt("Caio wears blue goggles", "A young scientist"), /A young scientist/);
+  assert.match(characterMasterPrompt("Caio wears blue goggles", "Um jovem cientista"), /no beard or moustache/);
 });
 
 test("revised scene references keep earlier versions and select the latest", () => {

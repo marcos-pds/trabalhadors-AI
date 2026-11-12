@@ -6,4 +6,4 @@ export function allSceneImagesReady(scenes: Scene[], references: Reference[]): b
 export function meanPixelDifference(left: Uint8ClampedArray, right: Uint8ClampedArray): number;
 export function sceneTimingForSpeech(dialogue?: string): { frames: number; fps: number };
 export function referenceAnchor<T extends Reference>(references: T[], number: number): T | undefined;
-export function characterMasterPrompt(visualBible?: string): string;
+export function characterMasterPrompt(visualBible?: string, brief?: string): string;

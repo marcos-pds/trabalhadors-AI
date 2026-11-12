@@ -110,3 +110,51 @@ def test_identity_adapter_uses_reference_without_locking_scene_latent(tmp_path, 
     assert workflow["11"]["inputs"]["weight"] == 0.85
     assert workflow["11"]["inputs"]["image"] == ["13", 0]
     assert workflow["13"]["class_type"] == "ImageCrop"
+
+
+def test_qwen_reference_uses_turbo_schedule_and_image_conditioning(tmp_path, monkeypatch):
+    import base64
+    (tmp_path / "input").mkdir()
+    (tmp_path / "output").mkdir()
+    monkeypatch.setattr(references, "qwen_available", lambda config: True)
+    seen = []
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, url, json):
+            graph = json["prompt"]
+            seen.append(graph)
+            name = graph["13"]["inputs"]["filename_prefix"] + "_00001_.png"
+            (tmp_path / "output" / name).write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 128)
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"prompt_id": "owned"})
+        def get(self, url):
+            name = seen[-1]["13"]["inputs"]["filename_prefix"] + "_00001_.png"
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {
+                "owned": {"status": {"status_str": "success"}, "outputs": {
+                    "13": {"images": [{"filename": name, "type": "output", "subfolder": ""}]}}}})
+
+    monkeypatch.setattr(references.httpx, "Client", Client)
+    config = MotionConfig(comfy_root=str(tmp_path), comfy_endpoint="http://127.0.0.1:8188")
+    anchor = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 128).decode()
+    result = references.generate_reference("qwen_image_2_1", "Put Caio on a rainy street", config=config,
+                                            reference_image_data=anchor)
+    assert result["provider"] == "qwen_image_2_1"
+    assert seen[0]["5"]["inputs"]["images.image_1"] == ["14", 0]
+    assert seen[0]["10"]["inputs"]["latent_image"] == ["5", 2]
+    assert seen[0]["6"]["inputs"]["sigmas"] == references.QWEN_SIGMAS
+    assert list((tmp_path / "input").iterdir()) == []
+    references.generate_reference("qwen_image_2_1", "Caio portrait", config=config)
+    assert seen[1]["10"]["inputs"]["latent_image"] == ["11", 0]
+    assert "images.image_1" not in seen[1]["5"]["inputs"]
+    references.generate_reference("qwen_image_2_1", "Use two references", config=config,
+                                  reference_image_data=anchor, secondary_reference_image_data=anchor)
+    assert seen[2]["5"]["inputs"]["images.image_2"] == ["15", 0]
+    assert list((tmp_path / "input").iterdir()) == []
+
+
+def test_qwen_missing_model_fails_before_generation(tmp_path):
+    with pytest.raises(ContractError, match="qwen_image_model_required"):
+        references.generate_reference("qwen_image_2_1", "Caio", config=MotionConfig(
+            comfy_root=str(tmp_path), comfy_endpoint="http://127.0.0.1:8188"))

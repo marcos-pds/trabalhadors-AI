@@ -1822,10 +1822,11 @@ class MotionToolsIn(BaseModel):
 
 
 class MotionReferenceIn(BaseModel):
-    provider: Literal['local_comfyui', 'huggingface']
+    provider: Literal['local_comfyui', 'qwen_image_2_1', 'huggingface']
     prompt: str = Field(min_length=1, max_length=4096)
     model: str | None = Field(default=None, max_length=160)
     reference_image_data: str | None = Field(default=None, max_length=8_400_000)
+    secondary_reference_image_data: str | None = Field(default=None, max_length=8_400_000)
 
 
 class MotionWanSceneIn(BaseModel):
@@ -2056,11 +2057,12 @@ def motion_reference_providers(request: Request, user=Depends(current_user)):
 def motion_reference_generate(data: MotionReferenceIn, request: Request, user=Depends(current_user)):
     require_csrf(request); local_only(request)
     from .motion_references import generate_reference
-    if data.provider == 'local_comfyui':
+    if data.provider in ('local_comfyui', 'qwen_image_2_1'):
         try:COMFY_RUNTIME.ensure_started(MOTION._config(user['id']))
         except ComfyStartupError as exc:raise HTTPException(503,str(exc)) from None
     return motion_call(lambda: generate_reference(data.provider, data.prompt, data.model,
-                                                  MOTION._config(user['id']), data.reference_image_data))
+                                                  MOTION._config(user['id']), data.reference_image_data,
+                                                  data.secondary_reference_image_data))
 
 
 @app.post('/api/motion/plan')

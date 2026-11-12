@@ -49,8 +49,12 @@ export function referenceAnchor(references, number) {
     sceneReference(references, number - 1);
 }
 
-export function characterMasterPrompt(visualBible) {
+export function characterMasterPrompt(visualBible, brief = "") {
+  const youngWithoutBeard = /\b(young|boy|child|jovem|menino|criança)\b/i.test(String(brief)) &&
+    !/\b(beard|moustache|barba|bigode)\b/i.test(`${brief} ${visualBible}`);
   return ["Single full-body character portrait on a plain neutral background, front three-quarter view.",
     "Show only the recurring main character. Preserve exact face shape, hair, skin tone, outfit and accessories in every later scene.",
-    String(visualBible ?? "").trim(), "Vertical 9:16, no letters, no caption, no other people or scenery."].join(" ").slice(0, 4096);
+    youngWithoutBeard ? "Young clean-shaven face, no beard or moustache." : "Honor the age and facial hair in the brief.",
+    String(brief ?? "").trim(), String(visualBible ?? "").trim(),
+    "Vertical 9:16, no letters, no caption, no other people or scenery."].join(" ").slice(0, 4096);
 }

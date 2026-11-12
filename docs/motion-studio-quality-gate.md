@@ -38,4 +38,11 @@ Gerar uma narração contínua com uma única voz brasileira autorizada e dividi
 - O fluxo agora cria e reutiliza uma imagem mestra quando não há upload e exige revisão dos quadros antes de continuar para os vídeos. O teste foi interrompido após a primeira cena para evitar renderizar sete cenas com referências inadequadas. O projeto e seus artefatos ficaram salvos na Central.
 - O modelo de imagens local SDXL/IP-Adapter ainda não reproduziu a fidelidade do piloto feito com outro gerador. A narração contínua do piloto também ainda não está integrada; a Central continua sintetizando uma fala por cena. Esses são os dois bloqueios de qualidade restantes.
 
+## Novo motor de imagens em avaliação
+
+- A Central passa a ter um adaptador próprio para Qwen Image 2.1 Turbo no ComfyUI local. Ele cria a imagem mestra a partir do texto, gera uma composição específica para cada cena e a edita com duas referências: composição como imagem 1 e identidade do personagem como imagem 2. Não incorpora o código do aplicativo de terceiros usado como sugestão.
+- O fluxo só disponibiliza esse provedor quando os três arquivos oficiais (denoiser Turbo int8, encoder Qwen3VL int8 e VAE) têm tamanho compatível com uma instalação completa. A revisão de oito quadros continua sendo uma barreira antes da renderização de vídeo.
+- Piloto local: o modelo funcionou na RTX 3060 de 12 GB. Dois quadros no laboratório mantiveram rosto, óculos e jaleco; um quadro de rua com duas referências preservou o cenário da composição e transferiu Caio da imagem mestra. O cenário ainda ficou mais fotorrealista que o personagem 2D. Esses pilotos não demonstram qualidade de vídeo ou narração.
+- A recomendação é experimental até a revisão visual das oito cenas produzidas pela Central. A licença oficial do Qwen Image 2.1 Turbo é de pesquisa e avaliação não comercial; uso comercial exige licença separada do titular. Consulte [a licença oficial](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE).
+
 Fontes técnicas: [IP-Adapter Plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [requisitos do Fish Audio S2-Pro](https://speech.fish.audio/install/). O S2-Pro oficial recomenda 24 GB de VRAM; a RTX 3060 local tem 12 GB, portanto não é o próximo teste local prioritário.

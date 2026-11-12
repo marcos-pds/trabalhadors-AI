@@ -466,7 +466,7 @@ export default function App() {
     }
   }
 
-  async function createEpisodeFromChat(ideaOverride?: string) {
+  async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false) {
     const idea = (ideaOverride ?? chatPrompt).trim();
     if (!idea || autoBusy || !embedded || !wanConfigSaved) return;
     addChatMessage("user", idea + (promptImage ? ` · Imagem: ${promptImage.name}` : ""));
@@ -530,11 +530,11 @@ export default function App() {
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
       if (!(planned.timeline.storyboard?.references ?? []).some((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number)) {
         setAutoProgress("Criando a imagem mestra do personagem antes dos cenários…");
-        const status = await centralRequest<{ local_comfyui: { identity_adapter: boolean } }>("/api/motion/reference-providers");
-        if (!status.local_comfyui.identity_adapter) throw new Error("O motor local de identidade visual não está pronto. Instale o adaptador de personagens antes de gerar as cenas.");
-        const masterPrompt = characterMasterPrompt(planned.timeline.storyboard?.visual_bible);
+        const status = await centralRequest<{ qwen_image_2_1: { available: boolean } }>("/api/motion/reference-providers");
+        if (!status.qwen_image_2_1.available) throw new Error("O motor local Qwen Image 2.1 não está instalado. A produção aguarda o modelo de imagens.");
+        const masterPrompt = characterMasterPrompt(planned.timeline.storyboard?.visual_bible, idea);
         const master = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-          method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: masterPrompt }),
+          method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: masterPrompt }),
         });
         const current = await request<Project>(`/api/projects/${planned.id}`);
         const storyboard = current.timeline.storyboard!;
@@ -549,15 +549,21 @@ export default function App() {
       for (const scene of scenes) {
         let current = await request<Project>(`/api/projects/${planned.id}`);
         if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
-        setAutoProgress(`Trabalhador de arte e motor de imagem: quadro ${scene.scene}/8…`);
+        setAutoProgress(`Trabalhador de arte e motor de imagem: composição ${scene.scene}/8…`);
         const references = current.timeline.storyboard?.references ?? [];
         const anchor = referenceAnchor(references, scene.scene);
-        const imagePrompt = [scene.image_prompt || scene.prompt, current.timeline.storyboard?.visual_bible,
-          "The setting must match this scene, not the uploaded reference background. Transfer character identity only. Vertical 9:16, consistent character face, hair, clothes and palette, no letters or captions."].filter(Boolean).join(". ").slice(0, 4096);
-        const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-          method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt: imagePrompt,
-            ...(anchor?.image_data ? { reference_image_data: anchor.image_data } : {}) }),
+        const basePrompt = [scene.image_prompt || scene.prompt, current.timeline.storyboard?.visual_bible,
+          "Show the exact location and action for this scene. Vertical 9:16, no letters or captions."].filter(Boolean).join(". ").slice(0, 4096);
+        const base = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+          method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: basePrompt }),
         });
+        setAutoProgress(`Trabalhador de arte e motor de imagem: identidade ${scene.scene}/8…`);
+        const imagePrompt = ["Use <image1> as the scene canvas: preserve its location, action, framing and props. Use <image2> only as the recurring protagonist's identity and drawing-style reference. Replace the protagonist in <image1> with the exact face, hair, goggles, shirt and coat from <image2>. Preserve the scene background from <image1>.",
+          scene.image_prompt || scene.prompt, "Vertical 9:16, no letters or captions."].join(" ").slice(0, 4096);
+        const image = anchor?.image_data ? await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+          method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: imagePrompt,
+            reference_image_data: base.image_data, secondary_reference_image_data: anchor.image_data }),
+        }) : base;
         const generatedReference: VisualReference = { id: makeId("ref"), kind: "setting",
           name: `Cena ${scene.scene} · ${scene.title}`, prompt: imagePrompt,
           image_data: image.image_data, source: "generated_image", scene_number: scene.scene };
@@ -578,7 +584,7 @@ export default function App() {
           throw new Error(`Os quadros ${index} e ${index + 1} ficaram parecidos demais para cenários diferentes. Revise as referências antes de animar; nenhum vídeo foi iniciado.`);
         }
       }
-      if (!ideaOverride && ready.timeline.storyboard?.references?.some((reference) => reference.kind === "character" && reference.source === "generated_image" && !reference.scene_number)) {
+      if ((reviewAfterImages || !ideaOverride) && ready.timeline.storyboard?.references?.some((reference) => reference.kind === "character" && reference.source === "generated_image" && !reference.scene_number)) {
         setAutoProgress("Revise os oito quadros. A identidade do personagem precisa de aprovação antes de gastar tempo renderizando os vídeos.");
         addChatMessage("assistant", "As imagens estão salvas. Confira rosto, cabelo, roupa e cenários. Se estiverem fiéis, use Continuar produção; caso contrário, refaça as referências.");
         return;
@@ -624,11 +630,11 @@ export default function App() {
     if (!storyboard?.scenes.length) return;
     const updated = await request<Project>(`/api/projects/${project.id}`, { method: "PUT", body: JSON.stringify({
       title: project.title, summary: project.summary, timeline: { ...project.timeline,
-        storyboard: { ...storyboard, references: (storyboard.references ?? []).filter((reference) => !reference.scene_number) } },
+        storyboard: { ...storyboard, references: (storyboard.references ?? []).filter((reference) => !reference.scene_number && reference.source === "upload") } },
     }) });
     setProject(updated);
     addChatMessage("assistant", "Vou refazer os oito quadros com o motor de identidade visual e conferir os cenários antes dos vídeos.");
-    await createEpisodeFromChat(updated.summary);
+    await createEpisodeFromChat(updated.summary, true);
   }
 
   async function exportCurrentEpisode(projectId = project?.id) {
@@ -776,11 +782,16 @@ export default function App() {
     setSceneImageBusy(true);
     setError("");
     try {
-      const prompt = [scene.image_prompt || scene.prompt, project.timeline.storyboard?.visual_bible,
-        "Keep the character identity from the reference, but depict this scene's location and action. Do not copy the reference background. Vertical 9:16, no text or captions.",
+      const basePrompt = [scene.image_prompt || scene.prompt, project.timeline.storyboard?.visual_bible,
         reviewComment.trim() ? `Requested correction: ${reviewComment.trim()}` : ""].filter(Boolean).join(". ").slice(0, 4096);
+      const base = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+        method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: basePrompt }),
+      });
+      const prompt = ["Use <image1> as the scene canvas and preserve its background, framing and action. Use <image2> only as the character identity and style reference. Replace the protagonist with the exact face, hair, goggles and outfit from <image2>.",
+        basePrompt].join(" ").slice(0, 4096);
       const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
-        method: "POST", body: JSON.stringify({ provider: "local_comfyui", prompt, reference_image_data: characterReference.image_data }),
+        method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt,
+          reference_image_data: base.image_data, secondary_reference_image_data: characterReference.image_data }),
       });
       const current = await request<Project>(`/api/projects/${project.id}`);
       const storyboard = current.timeline.storyboard!;
@@ -855,7 +866,7 @@ export default function App() {
           <div className="motion-chat-feed" ref={chatFeedRef} aria-live="polite">
             {!chatMessages.length && !episodePlan.length && <div className="motion-chat-welcome"><span className="motion-chat-orbit">✧</span><h2>Qual é a história?</h2><p>Conte o tema em uma mensagem. Você pode anexar uma imagem ou deixar a Central criar todas as referências.</p><button onClick={() => setChatPrompt("Um inventor descobre que uma gota muda a cor de todo o laboratório. Mini série vertical, humor e suspense, com Caio como protagonista.")}>Experimentar um tema</button></div>}
             {chatMessages.map((message) => <div key={message.id} className={`motion-chat-message ${message.role}`}><span>{message.role === "user" ? "Você" : "✦ Central IA"}</span><p>{message.text}</p></div>)}
-            {episodePlan.length > 0 && !chatMessages.length && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}</div>}
+            {episodePlan.length > 0 && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}</div>}
             {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os oito quadros</button>}
             {sceneImages.length > 0 && <div className="motion-chat-images"><strong>Quadros de referência · {sceneImages.length}/{episodePlan.length || 8}</strong><div>{sceneImages.map((reference) => <figure key={reference.id}><img src={reference.image_data} alt={reference.name} /><figcaption>{reference.name}</figcaption></figure>)}</div></div>}
             {autoProgress && <p className="motion-chat-progress" role="status">✦ {autoProgress}</p>}
