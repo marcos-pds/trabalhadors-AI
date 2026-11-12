@@ -260,17 +260,22 @@ class MotionQueue:
                         context=self.resources.reserve(
                             ResourceRequest('motion_wan',gpu_slots=1,priority=5),
                             timeout=self.timeout,cancelled=pending)
-                    with context:
+                    with context as acquired_lease:
                         # Acquire the GPU slot before starting ComfyUI itself:
                         # loading its model can already allocate VRAM.
                         try:
                             COMFY_RUNTIME.ensure_started(self._config(row['user_id']))
                         except Exception:
                             raise ContractError('comfy_startup_failed') from None
+                        def checked():
+                            if acquired_lease is not None and hasattr(acquired_lease, 'assert_owned'):
+                                acquired_lease.assert_owned()
+                            self._check(row,stop)
+                        checked()
                         source=job['inputs'][0]
                         provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
                             'central_motion_'+row['id']+'_'+job['id'],self._config(row['user_id']),
-                            lambda:self._check(row,stop),
+                            checked,
                             lambda prompt_id:self.db.execute('UPDATE motion_jobs SET remote_id=? WHERE run_id=? AND id=?',(prompt_id,row['id'],job['id'])),
                             timeout=self.timeout,expected_digest=hashes[source])
                 self._check(row,stop)
