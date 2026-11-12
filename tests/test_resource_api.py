@@ -32,5 +32,6 @@ def test_local_resources_require_login_and_return_no_paths(monkeypatch):
         result = response.json()
         assert result["ram"]["total_mib"] == 16000
         assert result["gpu"]["status"] == "unavailable"
-        assert result["reservations"]["scope"] == "process_only"
+        assert result["reservations"]["scope"] == "shared_data_directory"
+        assert result["reservations"]["interprocess"] is True
         assert "password" not in str(result)
