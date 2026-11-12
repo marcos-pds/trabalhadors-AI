@@ -6,7 +6,7 @@ SQLite serializes claims with BEGIN IMMEDIATE; heartbeat/fencing rejects stale o
 """
 from __future__ import annotations
 
-import os
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import threading
@@ -104,10 +104,17 @@ class PersistentResourceOrchestrator:
         self.poll_seconds = poll_seconds
         self._init_db()
 
+    @contextmanager
     def _open(self):
         conn = sqlite3.connect(str(self.path), timeout=2, isolation_level=None)
-        conn.execute("PRAGMA busy_timeout=2000")
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout=2000")
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._open() as conn:
