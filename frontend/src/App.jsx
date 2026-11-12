@@ -13,6 +13,7 @@ import OperationalOverview from './OperationalOverview'
 import OrganizationPanel from './OrganizationPanel'
 import GitIntegrationsPanel from './GitIntegrationsPanel'
 import ResourcesPanel from './ResourcesPanel'
+import ResourceMonitorPanel from './ResourceMonitorPanel'
 import ChatResourcesPanel from './ChatResourcesPanel'
 import ConversationActivity from './ConversationActivity.jsx'
 import PauseLimitPrompt from './PauseLimitPrompt.jsx'
@@ -816,7 +817,7 @@ export default function App() {
             onFeedback={sendRunFeedback} onResume={() => resumeRun(currentRun || inspectedRun)}
             onClose={() => setExecutionPanelOpen(false)} width={executionWidth}/></>}
         </div>}
-        {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
+        {(page === 'dashboard' || page === 'monitoring') && <><Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>{page === 'monitoring' && <ResourceMonitorPanel api={api}/>}</>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})} onRestored={loadAll}/>}
         {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id)}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
