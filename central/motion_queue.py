@@ -244,10 +244,6 @@ class MotionQueue:
                 else:
                     if expected!={'endpoint':plan.endpoint,'service':'comfy_wan_v1'}:raise ContractError('runtime_changed')
                     from .comfy_runtime import COMFY_RUNTIME
-                    try:
-                        COMFY_RUNTIME.ensure_started(self._config(row['user_id']))
-                    except Exception:
-                        raise ContractError('comfy_startup_failed') from None
                     from .comfy_motion import execute as render_comfy
                     # Only the Wan rendering call holds the process-local GPU slot.
                     # Planning, FFmpeg and other non-GPU steps are not serialized.
@@ -265,6 +261,12 @@ class MotionQueue:
                             ResourceRequest('motion_wan',gpu_slots=1,priority=5),
                             timeout=self.timeout,cancelled=pending)
                     with context:
+                        # Acquire the GPU slot before starting ComfyUI itself:
+                        # loading its model can already allocate VRAM.
+                        try:
+                            COMFY_RUNTIME.ensure_started(self._config(row['user_id']))
+                        except Exception:
+                            raise ContractError('comfy_startup_failed') from None
                         source=job['inputs'][0]
                         provenance=render_comfy(scoped_path(root,by_id[source]['path']),destination,job['params'],
                             'central_motion_'+row['id']+'_'+job['id'],self._config(row['user_id']),
