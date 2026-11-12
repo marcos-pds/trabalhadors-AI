@@ -488,7 +488,7 @@ export default function App() {
         "Planejamento criativo de uma minissérie vertical animada original para Instagram. Resposta exclusivamente em JSON com história e instruções para imagem e vídeo; esta etapa é apenas texto.",
         `Brief narrativo: "${idea.replace(/["\r\n]/g, " ")}"`,
         promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
-        "O roteiro tem exatamente 8 cenas consecutivas de cerca de 4 segundos. Cada ação decorre da anterior. Com imagem enviada, preserve exatamente sua linguagem visual, proporções e figurino; sem imagem, defina um estilo original. Composição vertical 9:16. Os mesmos personagens têm rosto, cabelo, acessórios, roupa e paleta invariantes em todas as imagens. Repita no image_prompt de cada cena os traços e o figurino definidos na visual_bible. image_prompt representa um único quadro estático em inglês; prompt representa apenas a ação e o movimento de câmera que o vídeo LTX animará a partir desse quadro. Ambos são filmáveis, sem texto na imagem. Há uma fala narrativa de 7 a 9 palavras em português brasileiro natural em TODAS as cenas, formando uma história contínua, com variação de emoção e sem repetir a mesma estrutura. A narração é fora de cena, sem sincronização labial. Se o protagonista for Caio, o campo speaker será Caio e a narração será em primeira pessoa.",
+        "O roteiro tem exatamente 8 cenas consecutivas de cerca de 4 segundos. Cada ação decorre da anterior. Com imagem enviada, preserve exatamente sua linguagem visual, proporções e figurino; sem imagem, defina um estilo original. Composição vertical 9:16. Os mesmos personagens têm rosto, cabelo, acessórios, roupa e paleta invariantes em todas as imagens. Escreva a visual_bible com identidade do protagonista detalhada em inglês, incluindo idade aparente, forma do rosto, olhos, cabelo, acessórios, roupa e estilo de desenho; depois, em seção Locations:, enumere os cenários. Repita no image_prompt de cada cena os traços e o figurino definidos na visual_bible. image_prompt representa um único quadro estático em inglês, com cenário e ação visível específicos; prompt representa apenas a ação e o movimento de câmera que o vídeo LTX animará a partir desse quadro. Ambos são filmáveis, sem texto na imagem. Há uma fala narrativa de 7 a 9 palavras em português brasileiro natural em TODAS as cenas, formando uma história contínua, com variação de emoção e sem repetir a mesma estrutura. A narração é fora de cena, sem sincronização labial. Se o protagonista for Caio, o campo speaker será Caio e a narração será em primeira pessoa.",
         "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual, figurino e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês, personagens idênticos\",\"prompt\":\"movimento da cena em inglês\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\"}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
@@ -552,9 +552,9 @@ export default function App() {
         if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
         setAutoProgress(`Trabalhador de arte e motor de imagem: cena ${scene.scene}/8 com imagem mestra…`);
         const references = current.timeline.storyboard?.references ?? [];
-        const anchor = referenceAnchor(references, scene.scene);
+        const anchor = referenceAnchor(references);
         if (!anchor?.image_data || anchor.kind !== "character") throw new Error("Falta a imagem mestra do personagem para a cena.");
-        const imagePrompt = sceneImageEditPrompt(scene, current.timeline.storyboard?.visual_bible);
+        const imagePrompt = sceneImageEditPrompt(scene);
         const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
           method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: imagePrompt,
             reference_image_data: anchor.image_data }),
@@ -579,7 +579,7 @@ export default function App() {
           throw new Error(`Os quadros ${index} e ${index + 1} ficaram parecidos demais para cenários diferentes. Revise as referências antes de animar; nenhum vídeo foi iniciado.`);
         }
       }
-      if ((reviewAfterImages || !ideaOverride) && ready.timeline.storyboard?.references?.some((reference) => reference.kind === "character" && reference.source === "generated_image" && !reference.scene_number)) {
+      if (reviewAfterImages || !ideaOverride) {
         setAutoProgress("Revise os oito quadros. A identidade do personagem precisa de aprovação antes de gastar tempo renderizando os vídeos.");
         addChatMessage("assistant", "As imagens estão salvas. Confira rosto, cabelo, roupa e cenários. Se estiverem fiéis, use Continuar produção; caso contrário, refaça as referências.");
         return;
@@ -777,7 +777,7 @@ export default function App() {
     setSceneImageBusy(true);
     setError("");
     try {
-      const prompt = sceneImageEditPrompt(scene, project.timeline.storyboard?.visual_bible, reviewComment);
+      const prompt = sceneImageEditPrompt(scene, reviewComment);
       const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
         method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt,
           reference_image_data: characterReference.image_data }),

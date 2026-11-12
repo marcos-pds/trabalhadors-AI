@@ -44,9 +44,8 @@ export function sceneTimingForSpeech(dialogue) {
   return { frames: 49, fps: String(dialogue ?? "").trim() ? 12 : 16 };
 }
 
-export function referenceAnchor(references, number) {
-  return references.find((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number) ??
-    sceneReference(references, number - 1);
+export function referenceAnchor(references) {
+  return references.find((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number);
 }
 
 export function characterMasterPrompt(visualBible, brief = "") {
@@ -62,17 +61,15 @@ export function characterMasterPrompt(visualBible, brief = "") {
     "Crisp flat colors, clean outlines, consistent proportions. No laboratory or other location, no text or captions."].join(" ").slice(0, 4096);
 }
 
-export function sceneImageEditPrompt(scene, visualBible = "", correction = "") {
+export function sceneImageEditPrompt(scene, correction = "") {
   const direction = String(scene?.image_prompt || scene?.prompt || "").trim();
   const action = String(scene?.prompt || "").trim();
   return [
-    "Transform <image1> into the requested scene. <image1> is the exact recurring protagonist identity reference.",
-    "Keep the same face shape, age, skin tone, hairstyle, eyes, accessories, clothing, body proportions and 2D drawing style from <image1>.",
-    "Change the pose, expression, action, props and location as required by this scene. Show the requested action clearly in one still frame; do not leave the original plain background.",
+    "Transform <image1> into one full-body action frame in the requested location.",
+    "The exact same protagonist from <image1> performs the action below. Preserve exactly the face, hair, skin, accessories, clothes and flat 2D drawing style.",
     direction,
-    action && action !== direction ? `Show a key pose from this action: ${action}` : "",
-    String(visualBible).trim(),
+    action && action !== direction ? `Show the key visible pose from this action: ${action}` : "",
     correction ? `Requested correction: ${String(correction).trim()}` : "",
-    "Vertical 9:16, consistent 2D cartoon scene, no writing, captions or logos.",
+    "Show the complete scene background, with no inset panels or repeated character. Vertical 9:16, no text.",
   ].filter(Boolean).join(" ").slice(0, 4096);
 }

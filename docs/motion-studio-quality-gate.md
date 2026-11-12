@@ -52,4 +52,11 @@ Gerar uma narração contínua com uma única voz brasileira autorizada e dividi
 - O prompt da imagem mestra agora usa somente a descrição do personagem e proíbe montagens. O chat mostra a imagem mestra e permite refazer personagem e quadros juntos, ou manter a mestra e refazer apenas as cenas. Cada cena edita diretamente a imagem mestra; o prompt exige cenário e pose específicos.
 - Reteste feito pela interface da Central no projeto **A gota química | Episódio 1**: uma mestra limpa e oito quadros distintos foram salvos. Cabelo, óculos, camiseta e jaleco ficaram reconhecíveis nas oito cenas. Há pequenas variações de proporção e alguns cenários misturam rua e corredor; os quadros continuam em revisão editorial. Nenhum vídeo foi gerado nesse reteste.
 
+## Piloto com a mesma mestra do teste isolado
+
+- A imagem `work/qwen-fidelity-standalone/00-master.png` foi anexada pelo chat do Motion Studio. Os trabalhadores criaram um roteiro de oito cenas e uma ficha visual explícita do mesmo Caio. O projeto **Laboratório escuro, gota de substância | Episódio 1** salvou a imagem enviada e os oito quadros gerados pelo INT8 local.
+- Cada quadro partiu diretamente dessa imagem mestra. O prompt de edição descreve a ação e o cenário da cena, sem copiar a lista de todos os lugares da ficha visual. A imagem de uma cena anterior nunca serve como âncora da seguinte.
+- A revisão mostrou Caio reconhecível nos oito quadros. A corrida no corredor, a mão na têmpora na rua, o vazamento e a interação no hospital aparecem. A aparência dos cenários ainda oscila entre desenho e ilustração mais realista; a identidade não é pixel a pixel idêntica.
+- O fluxo pausa depois das imagens também quando a mestra foi enviada pelo usuário. O piloto terminou com 8/8 imagens e 0/8 vídeos; a etapa de vídeo continua dependente da revisão visual.
+
 Fontes técnicas: [IP-Adapter Plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [requisitos do Fish Audio S2-Pro](https://speech.fish.audio/install/). O S2-Pro oficial recomenda 24 GB de VRAM; a RTX 3060 local tem 12 GB, portanto não é o próximo teste local prioritário.

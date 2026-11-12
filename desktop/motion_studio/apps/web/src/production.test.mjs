@@ -38,17 +38,17 @@ test("spoken scenes reserve more playback time within the local video limit", ()
   assert.deepEqual(sceneTimingForSpeech("Pensamentos flutuam ao redor."), { frames: 49, fps: 12 });
 });
 
-test("uploaded master anchors each scene; otherwise the prior scene does", () => {
+test("each scene requires the same character master rather than a prior scene", () => {
   const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
   const master = { kind: "character", image_data: "master" };
-  assert.equal(referenceAnchor([prior], 2), prior);
-  assert.equal(referenceAnchor([prior, master], 2), master);
+  assert.equal(referenceAnchor([prior]), undefined);
+  assert.equal(referenceAnchor([prior, master]), master);
 });
 
 test("generated character master anchors later scenes and carries the visual bible", () => {
   const master = { kind: "character", image_data: "master", source: "generated_image" };
   const prior = { scene_number: 1, kind: "setting", image_data: "prior" };
-  assert.equal(referenceAnchor([prior, master], 2), master);
+  assert.equal(referenceAnchor([prior, master]), master);
   assert.match(characterMasterPrompt("Caio wears blue goggles and a white coat"), /blue goggles and a white coat/);
   assert.match(characterMasterPrompt("Caio wears blue goggles", "A young scientist"), /Young clean-shaven face/);
   assert.match(characterMasterPrompt("Caio wears blue goggles", "Um jovem cientista"), /no beard or moustache/);
@@ -59,12 +59,13 @@ test("generated character master anchors later scenes and carries the visual bib
 });
 
 test("scene image edit follows the isolated one-master method and keeps the action", () => {
-  const prompt = sceneImageEditPrompt({ scene: 2, title: "Fuga", image_prompt: "Caio runs through a hospital corridor", prompt: "Camera follows" }, "flat 2D", "show both feet off the ground");
-  assert.match(prompt, /<image1> is the exact recurring protagonist identity reference/);
+  const prompt = sceneImageEditPrompt({ scene: 2, title: "Fuga", image_prompt: "Caio runs through a hospital corridor", prompt: "Camera follows" }, "show both feet off the ground");
+  assert.match(prompt, /exact same protagonist from <image1>/);
   assert.doesNotMatch(prompt, /<image2>|scene canvas/);
   assert.match(prompt, /Caio runs through a hospital corridor/);
   assert.match(prompt, /show both feet off the ground/);
-  assert.match(prompt, /flat 2D/);
+  assert.match(prompt, /flat 2D drawing style/);
+  assert.doesNotMatch(prompt, /visual_bible|Locations:/);
 });
 
 test("revised scene references keep earlier versions and select the latest", () => {
