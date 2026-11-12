@@ -53,7 +53,9 @@ from .semantic_memory import preference as memory_preference
 SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
 from .motion_queue import MotionQueue
-MOTION = MotionQueue(DB)
+from .resource_orchestrator import ResourceOrchestrator
+RESOURCE_MANAGER = ResourceOrchestrator()
+MOTION = MotionQueue(DB, resources=RESOURCE_MANAGER)
 from .comfy_runtime import COMFY_RUNTIME, ComfyStartupError
 
 
@@ -1798,6 +1800,14 @@ def connect_external_runtime(runtime: str, data: ExternalRuntimeConnectIn,
     return {'provider': public_provider(require_owned(DB, 'providers', pid, user['id'])),
             'agent_id': worker, 'reviewer_id': reviewer, 'version': version,
             'generation_tested': False, 'native_tools': False}
+
+
+@app.get('/api/system/resources')
+def system_resource_status(request: Request, user=Depends(current_user)):
+    """Authenticated, localhost-only, read-only host resource snapshot."""
+    local_only(request)
+    from .resource_telemetry import host_resource_snapshot
+    return host_resource_snapshot(DATA_DIR, reservations=RESOURCE_MANAGER)
 
 
 @app.get('/api/motion/capabilities')
