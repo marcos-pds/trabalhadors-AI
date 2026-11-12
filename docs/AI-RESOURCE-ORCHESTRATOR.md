@@ -1,4 +1,4 @@
-# AI Resource Orchestrator — fases 1, 2 e 3
+# AI Resource Orchestrator — fases 1, 2, 3 e 4 (diagnóstico Ollama)
 
 Inspiração técnica: [kimi-k3-in-c](https://github.com/FareedKhan-dev/kimi-k3-in-c), especialmente `docs/ARCHITECTURE.md` e `docs/TUNING.md`. Este módulo é implementação independente; não reproduz o motor de inferência K3 nem seus pesos.
 
@@ -32,6 +32,16 @@ Inspiração técnica: [kimi-k3-in-c](https://github.com/FareedKhan-dev/kimi-k3-
 
 **Limitação crítica:** SQLite coordena apenas componentes integrados à Central. Ollama, um ComfyUI já aberto externamente, um processo que usa outra pasta de dados e o Qwen Image ainda não participam desses leases. Mesmo se uma requisição Ollama futura passar por um lease, o modelo pode permanecer na VRAM após a resposta — a residência deve ser tratada antes de prometer isolamento efetivo. Nenhum descarregamento de modelos é realizado automaticamente. Um processo congelado que continue gerando após perder o lease pode causar uso concorrente; por isso a verificação nos checkpoints é obrigatória, mas não equivale ao isolamento no driver NVIDIA.
 
+## Fase 4 — residência do Ollama (somente observação)
+
+- `central/ollama_residency.py`: consulta **somente por GET** o endpoint oficial `http://127.0.0.1:11434/api/ps`, sem enviar prompts nem comandos de `stop`, `load`, `generate` ou `keep_alive`. Não permite URL arbitrária, redirecionamentos ou proxies do ambiente. O corpo é limitado a 64 KiB, com timeout de conexão.
+- Valida e resume o retorno em `loaded_count`, `models[].name`, `models[].vram_mib`, `reported_vram_mib` e `all_vram_sizes_known`. Se faltar `size_vram` ou o endpoint não responder, **não presume zero de VRAM**.
+- `GET /api/system/resources` inclui o campo `ollama`. O painel **Monitoramento** identifica modelos ainda residentes depois da conclusão de chamadas e distingue a estimativa de VRAM do Ollama da VRAM total medida pelo NVIDIA-SMI. **Não somar os dois valores**: a VRAM Ollama já faz parte da medição global.
+- Testes determinísticos em `tests/test_ollama_residency.py` para parsing, endpoint fixo, respostas malformadas, limite de tamanho, falha de conexão e ausência de uso de proxy.
+- Fonte primária do contrato: [Ollama GET /api/ps](https://github.com/ollama/ollama/blob/main/docs/api.md).
+
+**Importante:** Ollama atualmente permanece um serviço independente. Uma reserva adquirida por Wan **não obriga Ollama a liberar seus modelos residentes**. O novo módulo fornece diagnóstico, não exclusividade GPU nem descarregamento automático. Não foram alteradas configurações do Ollama e não é necessário instalar modelos adicionais.
+
 ## Limites explícitos
 
 A fase 1 não estava ligada a motores. Na fase 3, a fila Wan reserva um slot compartilhado entre instâncias da Central que usam a mesma pasta de dados, mas **não há integração com o escalonamento do Ollama ou com a memória real alocada**. A Central agora mede a memória reportada pelo SO e pelo NVIDIA-SMI, mas não aloca memória, não move pesos, não faz streaming de parâmetros, não modifica a instalação e não controla processos externos. Reservas não equivalem a memória livre. Orçamentos `None` significam *desconhecidos*, não ilimitados. O lock e a fila agora são persistidos no SQLite local; serviços não participantes continuam fora da coordenação. Nenhuma rotina de eviction é automática.
@@ -51,8 +61,8 @@ Valores exemplificativos, não medições da RTX 3060 12 GB.
 
 ## Próximas etapas, ainda não implementadas
 
-1. Revisar integração assíncrona com Ollama, incluindo modelos residentes após a resposta, e adaptar um motor de imagens sem matar processos de terceiros.
-2. Configurar orçamentos conservadores com métricas físicas e autorização explícita para realocação; jamais assumir que uma leitura isolada garante capacidade.
+1. Evoluir da observação para uma política de admissão explícita (com consentimento) que avalie modelos Ollama residentes e tarefas Wan antes de prometer exclusividade, sem interromper modelos de outras aplicações.
+2. Integrar um motor de imagens com reservas cooperativas e configurar orçamentos conservadores com métricas físicas e autorização explícita para realocação; jamais assumir que uma leitura isolada garante capacidade.
 3. Estender checkpoints do motor Wan para verificar titularidade mesmo em operações longas que não enviam atualizações frequentes.
 4. Avaliar descarregamento opcional **somente após** confirmar ociosidade e permissão explícita do usuário.
 5. Testar na RTX 3060 real (pico de memória, latência, throughput, falhas, cancelamento e recuperação).
@@ -60,7 +70,7 @@ Valores exemplificativos, não medições da RTX 3060 12 GB.
 ## Validação
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_resource_orchestrator.py tests/test_persistent_resources.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_ollama_residency.py tests/test_resource_orchestrator.py tests/test_persistent_resources.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py -q
 ```
 
 A suíte adicionada foi projetada para rodar em CI sem GPU, verificando contratos, concorrência entre processos Python independentes e leituras simuladas. Não afirma ganho de desempenho nem homologação de execução com modelos reais. A UI exibe o diagnóstico efetivo somente quando a Central local está em execução.
