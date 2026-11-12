@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Callable
 
-_NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}\\Z")
+_NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 
 
 class ResourceBusy(RuntimeError):
