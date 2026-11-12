@@ -72,7 +72,7 @@ export default function ResourceMonitorPanel({ api }) {
               available={undefined} total={undefined}/>}
         </div>
         <p className="mt-3 text-[11px] text-muted">
-          {reserved ? `Reserva cooperativa no processo: ${reserved.reserved.gpu_slots} de ${reserved.limits.gpu_slots} slot(s) de GPU; ${reserved.waiting} pedido(s) aguardando.` : 'Reservas indisponíveis.'}
+          {reserved ? `Reserva cooperativa ${reserved.interprocess ? 'entre processos (mesma pasta de dados)' : 'no processo'}: ${reserved.reserved.gpu_slots} de ${reserved.limits.gpu_slots} slot(s) de GPU; ${reserved.waiting} pedido(s) aguardando.` : 'Reservas indisponíveis.'}
           {' '}As reservas são estimativas internas; a medição de VRAM também inclui outros programas.
         </p>
         <p className="mt-1 text-[10px] text-muted">
