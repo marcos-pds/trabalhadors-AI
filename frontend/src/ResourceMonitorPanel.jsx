@@ -20,6 +20,38 @@ function Meter({ title, detail, available, total }) {
   </article>
 }
 
+function OllamaResidency({ ollama }) {
+  const available = ollama?.status === 'available'
+  const count = available ? ollama.loaded_count : null
+  const knownTotal = available && ollama.all_vram_sizes_known
+  return <section aria-label="Residência de modelos Ollama"
+    className="mt-4 rounded-xl border border-white/10 p-3">
+    <h3 className="text-xs font-semibold">Modelos residentes · Ollama local</h3>
+    {!available ? <p className="mt-2 text-xs text-muted">
+      Não foi possível consultar o Ollama em 127.0.0.1:11434. Estado desconhecido; isso não confirma que a GPU está livre.
+    </p> : <>
+      <p className="mt-2 text-xs text-muted">
+        {count === 0 ? 'Nenhum modelo carregado na instância local consultada.' :
+          `${count} modelo(s) carregado(s). ${knownTotal ? `${gib(ollama.reported_vram_mib)} de VRAM reportada pelo Ollama.` : 'VRAM parcialmente desconhecida.'}`}
+      </p>
+      {count > 0 && <ul className="mt-2 space-y-1">
+        {ollama.models.slice(0, 8).map((model, index) =>
+          <li className="flex justify-between gap-3 text-xs" key={`${model.name}-${index}`}>
+            <span className="truncate">{model.name}</span>
+            <span className="shrink-0 text-muted">
+              {model.vram_mib === null ? 'VRAM não informada' : gib(model.vram_mib)}
+            </span>
+          </li>)}
+        {count > 8 && <li className="text-xs text-muted">Outros {count - 8} modelos não exibidos.</li>}
+      </ul>}
+    </>}
+    <p className="mt-2 text-[11px] text-muted">
+      A VRAM informada pelo Ollama já está incluída no uso global da GPU.
+      Os modelos podem continuar carregados após uma resposta. Nenhum modelo será descarregado automaticamente.
+    </p>
+  </section>
+}
+
 export default function ResourceMonitorPanel({ api }) {
   const [snapshot, setSnapshot] = useState(null)
   const [error, setError] = useState('')
@@ -71,6 +103,7 @@ export default function ResourceMonitorPanel({ api }) {
             <Meter title="GPU / VRAM" detail="NVIDIA-SMI indisponível; não significa VRAM zero."
               available={undefined} total={undefined}/>}
         </div>
+        <OllamaResidency ollama={snapshot.ollama}/>
         <p className="mt-3 text-[11px] text-muted">
           {reserved ? `Reserva cooperativa ${reserved.interprocess ? 'entre processos (mesma pasta de dados)' : 'no processo'}: ${reserved.reserved.gpu_slots} de ${reserved.limits.gpu_slots} slot(s) de GPU; ${reserved.waiting} pedido(s) aguardando.` : 'Reservas indisponíveis.'}
           {' '}As reservas são estimativas internas; a medição de VRAM também inclui outros programas.
