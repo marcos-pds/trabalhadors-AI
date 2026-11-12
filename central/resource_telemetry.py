@@ -165,7 +165,9 @@ def disk_snapshot(data_dir: Path | str) -> dict:
 
 def host_resource_snapshot(data_dir: Path | str, *, reservations=None) -> dict:
     """Safe response for authenticated local diagnostics; no paths or tokens."""
+    from .ollama_residency import ollama_residency_snapshot
     cooperative = reservations.snapshot() if reservations is not None else None
+    ollama = ollama_residency_snapshot()
     return {
         "sampled_at": datetime.now(timezone.utc).isoformat(),
         "scope": "host_snapshot",
@@ -173,9 +175,11 @@ def host_resource_snapshot(data_dir: Path | str, *, reservations=None) -> dict:
         "gpu": gpu_snapshot(),
         "disk": disk_snapshot(data_dir),
         "reservations": cooperative,
+        "ollama": ollama,
         "limitations": [
             "instantaneous_measurement",
             "gpu_used_includes_external_processes",
+            "ollama_vram_is_not_additional_to_nvidia_smi_used",
             "reservations_are_estimates",
             ("not_an_os_gpu_lock" if cooperative and cooperative.get("interprocess")
              else "not_a_cross_process_lock"),
