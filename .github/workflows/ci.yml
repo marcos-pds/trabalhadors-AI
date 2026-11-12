@@ -97,7 +97,7 @@ jobs:
       - name: Prepare read-only static mount for API smoke tests
         run: python -c "from pathlib import Path; Path('static').mkdir(exist_ok=True)"
       - name: Validate telemetry, reservations, API and Wan job contracts
-        run: python -m pytest tests/test_resource_orchestrator.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py tests/test_motion_wan_scene.py tests/test_motion_wan_episode.py -q
+        run: python -m pytest tests/test_resource_orchestrator.py tests/test_persistent_resources.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py tests/test_motion_wan_scene.py tests/test_motion_wan_episode.py -q
 
 
 
