@@ -121,8 +121,8 @@ def gpu_snapshot(*, runner=None, executable=None) -> dict:
         if not executable and os.name == "nt":
             # NVIDIA's Windows installer commonly omits NVSMI from PATH.
             # Probe fixed system locations, never arbitrary browser-provided paths.
-            roots = (Path(os.environ.get("ProgramFiles", r"C:\\Program Files")),
-                     Path(os.environ.get("WINDIR", r"C:\\Windows")))
+            roots = (Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+                     Path(os.environ.get("WINDIR", r"C:\Windows")))
             candidates = (roots[0] / "NVIDIA Corporation" / "NVSMI" / "nvidia-smi.exe",
                           roots[1] / "System32" / "nvidia-smi.exe")
             executable = next((str(p) for p in candidates if p.is_file() and
