@@ -137,3 +137,46 @@ def test_motion_settings_discover_local_comfyui_and_episode_runtime(queued,tmp_p
     assert settings['comfy_endpoint']=='http://127.0.0.1:8188'
     assert settings['comfy_root']==str(comfy.resolve())
     assert settings['executables']['episode_assembly']==str(python)
+
+
+def test_wan_reserves_gpu_during_startup_and_render(queued, tmp_path, monkeypatch):
+    """A real queue job holds the cooperative lease until the Wan step ends."""
+    from central.resource_orchestrator import ResourceBusy, ResourceOrchestrator, ResourceRequest
+    from central.comfy_runtime import COMFY_RUNTIME
+    from central import comfy_motion
+
+    db, root, _program, _queue = queued
+    (root / 'workflow.json').write_text('{}', encoding='utf-8')
+    comfy = tmp_path / 'comfy'
+    comfy.mkdir()
+    (comfy / 'main.py').write_text('# stub', encoding='utf-8')
+    resources = ResourceOrchestrator()
+    motion = MotionQueue(
+        db, MotionConfig(comfy_endpoint='http://127.0.0.1:8188',
+                         comfy_root=str(comfy)), resources=resources)
+    monkeypatch.setattr(motion, '_check_workflows', lambda *a, **k: None)
+
+    def assert_exclusive():
+        assert resources.snapshot()['reserved']['gpu_slots'] == 1
+        with pytest.raises(ResourceBusy):
+            resources.reserve(ResourceRequest('another_gpu_job', gpu_slots=1),
+                              timeout=0)
+
+    def start(_config):
+        assert_exclusive()
+        return 'running'
+    monkeypatch.setattr(COMFY_RUNTIME, 'ensure_started', start)
+
+    def render(source, destination, params, prompt_id, config,
+               checkpoint, on_prompt_id, *, timeout, expected_digest):
+        assert source.name == 'workflow.json'
+        assert_exclusive()
+        checkpoint()
+        destination.write_bytes(b'\\x00\\x00\\x00\\x18ftypisom\\x00\\x00\\x00\\x00fixture')
+        return None
+    monkeypatch.setattr(comfy_motion, 'execute', render)
+
+    run = motion.enqueue('u', manifest('comfyui_wan'), 'request-resource-wan')
+    assert motion.process_one() is True
+    assert motion.get('u', run['id'])['state'] == 'completed'
+    assert resources.snapshot()['active'] == 0
