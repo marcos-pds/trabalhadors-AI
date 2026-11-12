@@ -165,17 +165,19 @@ def disk_snapshot(data_dir: Path | str) -> dict:
 
 def host_resource_snapshot(data_dir: Path | str, *, reservations=None) -> dict:
     """Safe response for authenticated local diagnostics; no paths or tokens."""
+    cooperative = reservations.snapshot() if reservations is not None else None
     return {
         "sampled_at": datetime.now(timezone.utc).isoformat(),
         "scope": "host_snapshot",
         "ram": ram_snapshot(),
         "gpu": gpu_snapshot(),
         "disk": disk_snapshot(data_dir),
-        "reservations": reservations.snapshot() if reservations is not None else None,
+        "reservations": cooperative,
         "limitations": [
             "instantaneous_measurement",
             "gpu_used_includes_external_processes",
             "reservations_are_estimates",
-            "not_a_cross_process_lock",
+            ("not_an_os_gpu_lock" if cooperative and cooperative.get("interprocess")
+             else "not_a_cross_process_lock"),
         ],
     }
