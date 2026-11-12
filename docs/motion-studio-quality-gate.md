@@ -1,0 +1,62 @@
+# Motion Studio: identidade e narração
+
+## Piloto de 11/11/2026
+
+- Referência: `snapinsta-1794365777712.mp4`, 84,70 s, 720 × 1280. O personagem ilustrado mantém cabelo, fone, uniforme e proporções nas amostras de cenários diferentes. A narração tem continuidade entre cenas.
+- Episódio Caio anterior: oito cenas, 29,67 s. As falas curtas deixavam aproximadamente 0,8 a 2,4 s de silêncio no final de várias cenas. Roupa, óculos e rosto de Caio mudavam nas cenas finais.
+- O IP-Adapter SDXL com peso 0,85 recuperou melhor o jaleco na nova imagem da cena 6, mas transformou os óculos em boné e alterou o rosto. A imagem e o vídeo dessa cena continuam em revisão. Aumentar apenas o peso do adaptador não resolve a identidade.
+- Teste de voz: o perfil Qwen Base `Caio · Brasil (teste)` gerou uma fala de 3,28 s para a primeira cena. O novo vídeo reservou 4,08 s e substituiu somente a cena 1; a voz, a legenda e o MP4 foram atualizados na Central. As demais cenas continuam com as vozes anteriores.
+
+## Critério de aprovação
+
+1. Fixar uma imagem mestra e uma ficha de personagem com frente, perfil e corpo inteiro, aprovadas visualmente.
+2. Cada quadro deve manter rosto, cabelo, acessório e figurino, e mostrar o cenário e a ação previstos. Uma falha bloqueia a animação dessa cena; não basta comparar se dois quadros são diferentes.
+3. Ouvir a voz em português brasileiro em uma tomada de 10 a 15 s. Conferir inteligibilidade, sotaque, entonação e pausas antes de produzir o episódio.
+4. Medir duração da fala antes da animação; reservar tempo suficiente no vídeo. Conferir a ausência de lacunas e sobreposições na timeline e no MP4 exportado.
+5. Aprovar cenas individualmente. A exportação de teste não equivale à aprovação editorial.
+
+## Próxima abordagem visual
+
+O adaptador de imagem única serve para exploração, mas não garante personagem idêntico. O próximo experimento deve comparar um **modelo do personagem com poses aprovadas** (ficha de personagem e edição por máscara/controle de pose) com a geração SDXL atual, usando os mesmos cenários e avaliando lado a lado. A identidade do personagem deve ser tratada separadamente do cenário; só depois um quadro aprovado segue para o motor de vídeo. Se ainda houver troca de rosto ou figurino, considerar um personagem 2D em camadas ou um modelo ajustado especificamente para ele.
+
+## Próxima abordagem de voz
+
+Gerar uma narração contínua com uma única voz brasileira autorizada e dividir o áudio por marcas de tempo das cenas, em vez de sintetizar oito frases isoladas. Testar primeiro duas cenas com variação de emoção e medir as pausas. A amostra do Reel é referência de ritmo e acabamento, não uma voz a copiar.
+
+## Piloto controlado de duas tomadas
+
+- A ficha visual de Caio foi gerada a partir da imagem mestra, com frente, três quartos e perfil. Dois quadros consecutivos foram criados com a ficha e o primeiro quadro como referências. Rosto, óculos, cabelo, jaleco e paleta permaneceram reconhecíveis nos quadros estáticos.
+- A narração foi sintetizada uma única vez pelo Qwen Base com o perfil brasileiro de Caio. Duração: 8,56 s. A análise de silêncio detectou apenas duas pausas internas de 0,39 s e 0,50 s; não houve os intervalos de 1 a 2 s entre falas do episódio anterior.
+- O LTX local foi testado nas duas imagens com 49 quadros a 12 fps. Na primeira tomada ele ampliou o rosto e mudou o braço de forma brusca. Na segunda, o anel de energia e o recuo apareceram, mas os braços ainda oscilaram.
+- O MP4 de comparação usa movimento de câmera controlado sobre o primeiro quadro e a segunda tomada LTX, com corte direto, legendas e áudio contínuo. Duração: 8,56 s, H.264 720 × 1280 a 24 fps e AAC. Arquivo local: `work/caio-two-shot-pilot/caio-two-shot-controlled.mp4`.
+- Este piloto usa geração de imagens e montagem locais fora do fluxo automático do Motion Studio. Demonstra que referências múltiplas e narração contínua ajudam, mas **não prova** que a Central já produz esse resultado com um único prompt. A integração e a avaliação auditiva pelo usuário continuam pendentes.
+
+## Teste dentro da Central com imagem mestra automática
+
+- O chat criou o projeto **O Incidente | Episódio 1** e salvou um roteiro de oito cenas, uma imagem mestra gerada pelo modelo local e oito imagens de cena. A primeira cena foi renderizada com vídeo, fala e legenda e entrou na timeline.
+- As oito imagens passaram na checagem de repetição de pixels, mas a revisão visual mostrou troca de formato do rosto, cabelo e figurino entre cenas. Portanto, essa checagem não mede consistência de identidade e o resultado não está aprovado para um episódio completo.
+- O fluxo agora cria e reutiliza uma imagem mestra quando não há upload e exige revisão dos quadros antes de continuar para os vídeos. O teste foi interrompido após a primeira cena para evitar renderizar sete cenas com referências inadequadas. O projeto e seus artefatos ficaram salvos na Central.
+- O modelo de imagens local SDXL/IP-Adapter ainda não reproduziu a fidelidade do piloto feito com outro gerador. A narração contínua do piloto também ainda não está integrada; a Central continua sintetizando uma fala por cena. Esses são os dois bloqueios de qualidade restantes.
+
+## Novo motor de imagens em avaliação
+
+- A Central passa a ter um adaptador próprio para Qwen Image 2.1 Turbo no ComfyUI local. Ele cria a imagem mestra a partir do texto, gera uma composição específica para cada cena e a edita com duas referências: composição como imagem 1 e identidade do personagem como imagem 2. Não incorpora o código do aplicativo de terceiros usado como sugestão.
+- O fluxo só disponibiliza esse provedor quando os três arquivos oficiais (denoiser Turbo int8, encoder Qwen3VL int8 e VAE) têm tamanho compatível com uma instalação completa. A revisão de oito quadros continua sendo uma barreira antes da renderização de vídeo.
+- Piloto local: o modelo funcionou na RTX 3060 de 12 GB. Dois quadros no laboratório mantiveram rosto, óculos e jaleco; um quadro de rua com duas referências preservou o cenário da composição e transferiu Caio da imagem mestra. O cenário ainda ficou mais fotorrealista que o personagem 2D. Esses pilotos não demonstram qualidade de vídeo ou narração.
+- A recomendação é experimental até a revisão visual das oito cenas produzidas pela Central. A licença oficial do Qwen Image 2.1 Turbo é de pesquisa e avaliação não comercial; uso comercial exige licença separada do titular. Consulte [a licença oficial](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE).
+
+## Comparação de fidelidade em 12/11/2026
+
+- No teste isolado, editar diretamente uma única imagem mestra com a descrição da cena manteve melhor o rosto, os óculos e o figurino do que gerar uma composição separada e depois fazer uma edição com duas referências. O Q5_K_M não trouxe ganho visual evidente sobre o INT8 no mesmo conjunto de quatro imagens e demorou aproximadamente 34–38 s por quadro, contra 16–22 s no INT8.
+- A primeira reprodução desse método na Central falhou porque a imagem mestra antiga já era uma montagem de cenas e mostrava Caio adulto com barba. A causa estava no prompt da imagem mestra: incluía o pedido inteiro, inclusive a instrução de criar oito cenas. Reutilizar essa imagem contaminou os oito quadros seguintes.
+- O prompt da imagem mestra agora usa somente a descrição do personagem e proíbe montagens. O chat mostra a imagem mestra e permite refazer personagem e quadros juntos, ou manter a mestra e refazer apenas as cenas. Cada cena edita diretamente a imagem mestra; o prompt exige cenário e pose específicos.
+- Reteste feito pela interface da Central no projeto **A gota química | Episódio 1**: uma mestra limpa e oito quadros distintos foram salvos. Cabelo, óculos, camiseta e jaleco ficaram reconhecíveis nas oito cenas. Há pequenas variações de proporção e alguns cenários misturam rua e corredor; os quadros continuam em revisão editorial. Nenhum vídeo foi gerado nesse reteste.
+
+## Piloto com a mesma mestra do teste isolado
+
+- A imagem `work/qwen-fidelity-standalone/00-master.png` foi anexada pelo chat do Motion Studio. Os trabalhadores criaram um roteiro de oito cenas e uma ficha visual explícita do mesmo Caio. O projeto **Laboratório escuro, gota de substância | Episódio 1** salvou a imagem enviada e os oito quadros gerados pelo INT8 local.
+- Cada quadro partiu diretamente dessa imagem mestra. O prompt de edição descreve a ação e o cenário da cena, sem copiar a lista de todos os lugares da ficha visual. A imagem de uma cena anterior nunca serve como âncora da seguinte.
+- A revisão mostrou Caio reconhecível nos oito quadros. A corrida no corredor, a mão na têmpora na rua, o vazamento e a interação no hospital aparecem. A aparência dos cenários ainda oscila entre desenho e ilustração mais realista; a identidade não é pixel a pixel idêntica.
+- O fluxo pausa depois das imagens também quando a mestra foi enviada pelo usuário. O piloto terminou com 8/8 imagens e 0/8 vídeos; a etapa de vídeo continua dependente da revisão visual.
+
+Fontes técnicas: [IP-Adapter Plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [requisitos do Fish Audio S2-Pro](https://speech.fish.audio/install/). O S2-Pro oficial recomenda 24 GB de VRAM; a RTX 3060 local tem 12 GB, portanto não é o próximo teste local prioritário.

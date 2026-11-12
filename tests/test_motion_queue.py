@@ -34,6 +34,9 @@ def queued(tmp_path,monkeypatch):
     (root/'clip.mp4').write_bytes(b'input fixture')
     program=tmp_path/'ffmpeg.exe';program.write_bytes(b'inert runtime fixture')
     set_policy(db,'u','full',str(root))
+    monkeypatch.setattr('central.motion_queue.validate_media_with_ffprobe', lambda *args, **kwargs: {
+        'duration': 5.0, 'fps': '30/1', 'width': 720, 'height': 1280, 'audio': False,
+    })
     queue=FixtureQueue(db,MotionConfig(executables={'ffmpeg':str(program)}))
     yield db,root,program,queue
     db.close()

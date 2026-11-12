@@ -75,7 +75,7 @@ def build_episode_manifest(project_id, episode, prompts, seed, run_id):
             'id': job_id, 'adapter': 'comfyui_wan', 'stage': 'generate',
             'inputs': [workflow_id], 'outputs': [video_id],
             'params': {'model': 'wan', 'seed': scene_seed, 'frames': frames,
-                       'fps': EPISODE_FPS, 'prompt': prompt},
+                       'fps': EPISODE_FPS, 'prompt': prompt, 'scene_number': index},
         })
     audio_id = 'narration'
     captions_id = 'captions'

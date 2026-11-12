@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import hashlib
 import ipaddress
 import logging
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -1819,6 +1821,14 @@ class MotionToolsIn(BaseModel):
     comfy_root: str | None = Field(default=None,max_length=512)
 
 
+class MotionReferenceIn(BaseModel):
+    provider: Literal['local_comfyui', 'qwen_image_2_1', 'huggingface']
+    prompt: str = Field(min_length=1, max_length=4096)
+    model: str | None = Field(default=None, max_length=160)
+    reference_image_data: str | None = Field(default=None, max_length=8_400_000)
+    secondary_reference_image_data: str | None = Field(default=None, max_length=8_400_000)
+
+
 class MotionWanSceneIn(BaseModel):
     project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
     episode: int = Field(ge=1, le=99)
@@ -1827,6 +1837,16 @@ class MotionWanSceneIn(BaseModel):
     seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
     frames: int = Field(default=81, ge=5, le=129)
     fps: int = Field(default=16, ge=12, le=60)
+    replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    speech_text: str | None = Field(default=None, max_length=300)
+    speaker: str | None = Field(default=None, max_length=64)
+    voice_profile: str | None = Field(default=None, pattern=r'^[a-f0-9]{16}$')
+
+
+class MotionLtxSceneIn(MotionWanSceneIn):
+    image_data: str = Field(min_length=32, max_length=8_400_000)
+    width: int = Field(default=288, ge=288, le=480)
+    height: int = Field(default=512, ge=512, le=832)
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -1840,7 +1860,162 @@ class MotionWanEpisodeIn(BaseModel):
     episode: int = Field(ge=1, le=99)
     scene_prompts: list[str] = Field(min_length=8, max_length=8)
     dialogue: list[MotionWanDialogueIn] | None = Field(default=None, max_length=12)
+    voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
+    voice_engine: Literal['sapi', 'voicestudio', 'chatterbox'] = 'sapi'
     seed: int = Field(default_factory=lambda: secrets.randbits(32), ge=0, le=2**32-1)
+
+
+class MotionVoicePreviewIn(BaseModel):
+    text: str = Field(min_length=1, max_length=180)
+    profile: str = Field(min_length=1, max_length=128)
+    engine: Literal['sapi', 'voicestudio', 'chatterbox'] = 'sapi'
+
+
+class MotionSceneSpeechIn(BaseModel):
+    run_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    video_artifact_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    text: str = Field(min_length=1,max_length=300)
+    speaker: str = Field(min_length=1,max_length=64)
+    voice_profile: str = Field(pattern=r'^[a-f0-9]{16}$')
+
+
+class MotionVoiceImportIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    audio_data: str = Field(min_length=1000, max_length=7_000_000)
+
+
+@app.get('/api/motion/voices')
+def motion_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_chatterbox import available_voices, engine_ready
+    return {'engine':'chatterbox','ready':engine_ready(),'voices':available_voices(user['id'])}
+
+
+@app.get('/api/motion/qwen/voices')
+def motion_qwen_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_qwen import available_voices, engine_ready
+    voices=available_voices(user['id'])
+    return {'engine':'qwen','ready':bool(voices),'voices':voices}
+
+
+class MotionQwenVoiceImportIn(BaseModel):
+    name: str = Field(min_length=1,max_length=80)
+    transcript: str = Field(min_length=1,max_length=300)
+    audio_data: str = Field(min_length=1000,max_length=7_000_000)
+
+
+@app.post('/api/motion/qwen/voices/import')
+def motion_qwen_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import binascii
+    from .motion_qwen import QwenVoiceError, import_voice
+    header,sep,encoded=data.audio_data.partition(',')
+    if sep and header not in ('data:audio/wav;base64','data:audio/x-wav;base64','data:audio/wave;base64'):
+        raise HTTPException(422,'Envie um WAV válido.')
+    raw=encoded if sep else data.audio_data
+    try:
+        return import_voice(user['id'],data.name,data.transcript,base64.b64decode(raw,validate=True))
+    except (QwenVoiceError,binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/motion/voices/import')
+def motion_voice_import(data:MotionVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import base64
+    import binascii
+    from .motion_chatterbox import ChatterboxError, import_voice
+    raw = data.audio_data.partition(',')[2] if data.audio_data.startswith('data:audio/wav;base64,') else data.audio_data
+    try:
+        return import_voice(user['id'], data.name, base64.b64decode(raw, validate=True))
+    except (ChatterboxError, binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/motion/voices/preview')
+def motion_voice_preview(data:MotionVoicePreviewIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import base64
+    import tempfile
+    from .motion_speech import SpeechError, synthesize_episode
+    from .motion_contracts import ContractError, _text
+    try:
+        spoken=_text(data.text.strip(),180)
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'A fala precisa conter texto válido.') from None
+    with tempfile.TemporaryDirectory(prefix='motion-voice-preview-') as directory:
+        try:
+            audio,_=synthesize_episode(directory,'preview',[{'start':0,'speaker':'Prévia','text':spoken}],0,{'Prévia':data.profile},12,data.engine,user['id'])
+        except SpeechError as exc:
+            raise HTTPException(503,str(exc)) from None
+        return {'audio_data':base64.b64encode(audio.read_bytes()).decode('ascii')}
+
+
+@app.post('/api/motion/scene-speech')
+def motion_scene_speech(data:MotionSceneSpeechIn,request:Request,user=Depends(current_user)):
+    """Generate a new voice take for an existing video without re-rendering it."""
+    require_csrf(request);local_only(request)
+    from .motion_contracts import ContractError, _text
+    from .motion_queue import authorized_root, digest_file
+    from .motion_speech import SpeechError, synthesize_scene
+    try:
+        spoken=_text(data.text.strip(),300)
+        speaker=_text(data.speaker.strip(),64)
+    except (ContractError,AttributeError):
+        raise HTTPException(422,'A fala ou personagem contém texto inválido.') from None
+    run=MOTION.get(user['id'],data.run_id)
+    job=next((item for item in run['jobs'] if item['state']=='completed' and
+              item['artifact'] and item['artifact']['id']==data.video_artifact_id and
+              item['artifact'].get('kind')=='video'),None)
+    if not job or not job['frames'] or not job['fps']:
+        raise HTTPException(404,'Cena renderizada não encontrada.')
+    video_path=MOTION.artifact_path(user['id'],data.run_id,data.video_artifact_id)
+    _,grant=authorized_root(DB,user['id'])
+    speech_id=uid()
+    try:
+        audio_path,captions_path=synthesize_scene(video_path.parent,speech_id,spoken,speaker,
+            data.voice_profile,job['frames'],job['fps'],user['id'])
+    except SpeechError as exc:
+        raise HTTPException(422,str(exc)) from None
+    DB.execute('INSERT INTO motion_scene_speech(id,user_id,video_run_id,video_artifact_id,grant_root,audio_path,captions_path,audio_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        (speech_id,user['id'],data.run_id,data.video_artifact_id,grant,
+         audio_path.relative_to(grant).as_posix(),captions_path.relative_to(grant).as_posix(),
+         digest_file(audio_path),utcnow()))
+    return {'id':speech_id,'audio_url':f'/api/motion/scene-speech/{speech_id}/preview',
+            'speaker':speaker,'text':spoken,'voice_profile':data.voice_profile}
+
+
+def _scene_speech_path(user_id,speech_id):
+    from .motion_contracts import scoped_path
+    from .motion_queue import authorized_root, digest_file
+    row=DB.one('SELECT video_run_id,grant_root,audio_path,audio_sha256 FROM motion_scene_speech WHERE id=? AND user_id=?',
+               (speech_id,user_id))
+    if not row:
+        raise HTTPException(404,'Fala não encontrada.')
+    MOTION.get(user_id,row['video_run_id'])
+    root,grant=authorized_root(DB,user_id)
+    if grant!=row['grant_root']:
+        raise HTTPException(403,'Permissão de pasta alterada.')
+    path=scoped_path(root,row['audio_path'])
+    if digest_file(path)!=row['audio_sha256']:
+        raise HTTPException(409,'Áudio alterado após a geração.')
+    return path
+
+
+@app.get('/api/motion/scene-speech/{speech_id}/preview')
+def motion_scene_speech_preview(speech_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    path=_scene_speech_path(user['id'],speech_id)
+    return FileResponse(path,filename=path.name,media_type='audio/wav',content_disposition_type='inline',
+        headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+@app.get('/api/motion/scene-speech/{speech_id}')
+def motion_scene_speech_download(speech_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    path=_scene_speech_path(user['id'],speech_id)
+    return FileResponse(path,filename=path.name,media_type='audio/wav')
 
 
 def motion_call(operation):
@@ -1871,6 +2046,25 @@ def motion_tools_save(data:MotionToolsIn,request:Request,user=Depends(current_us
     return motion_call(lambda:MOTION.settings(user['id'],data.model_dump()))
 
 
+@app.get('/api/motion/reference-providers')
+def motion_reference_providers(request: Request, user=Depends(current_user)):
+    local_only(request)
+    from .motion_references import provider_status
+    return provider_status(MOTION._config(user['id']))
+
+
+@app.post('/api/motion/references/generate')
+def motion_reference_generate(data: MotionReferenceIn, request: Request, user=Depends(current_user)):
+    require_csrf(request); local_only(request)
+    from .motion_references import generate_reference
+    if data.provider in ('local_comfyui', 'qwen_image_2_1'):
+        try:COMFY_RUNTIME.ensure_started(MOTION._config(user['id']))
+        except ComfyStartupError as exc:raise HTTPException(503,str(exc)) from None
+    return motion_call(lambda: generate_reference(data.provider, data.prompt, data.model,
+                                                  MOTION._config(user['id']), data.reference_image_data,
+                                                  data.secondary_reference_image_data))
+
+
 @app.post('/api/motion/plan')
 def motion_plan(data:MotionPlanIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
@@ -1881,6 +2075,49 @@ def motion_plan(data:MotionPlanIn,request:Request,user=Depends(current_user)):
 def motion_enqueue(data:MotionPlanIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
     return motion_call(lambda:MOTION.enqueue(user['id'],data.manifest,data.request_id,data.directory))
+
+
+def attach_scene_speech(manifest, data, grant, run_id, user_id):
+    """Add optional character speech as owner-scoped, downloadable scene artifacts."""
+    from .motion_contracts import ContractError, _text
+    from .motion_speech import SpeechError, synthesize_scene
+    from .workspace_tools import target
+
+    spoken = (data.speech_text or '').strip()
+    if not spoken:
+        if data.speaker or data.voice_profile:
+            raise HTTPException(422,'Escreva a fala para usar a voz selecionada.')
+        return
+    if not data.speaker or not data.voice_profile:
+        raise HTTPException(422,'Escolha o personagem e sua voz para gerar a fala.')
+    try:
+        spoken = _text(spoken, 300)
+        speaker = _text(data.speaker.strip(), 64)
+    except (ContractError, AttributeError):
+        raise HTTPException(422,'A fala ou o personagem contém texto inválido.') from None
+    relative = f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}'
+    current = ''
+    for part in relative.split('/'):
+        current = f'{current}/{part}'.strip('/')
+        try:
+            target(grant,current,directory=True)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            target(grant,current,creating=True).mkdir()
+    directory = target(grant,relative,directory=True)
+    try:
+        audio_path, captions_path = synthesize_scene(directory,run_id,spoken,speaker,
+            data.voice_profile,data.frames,data.fps,user_id)
+    except SpeechError as exc:
+        raise HTTPException(422,str(exc)) from None
+    prefix = f'episodes/{data.project_id}/episode_{data.episode:02d}/'
+    manifest['artifacts'].extend((
+        {'id':'speech','kind':'audio','path':prefix+audio_path.name,'provenance':{'source':'local'}},
+        {'id':'speech_captions','kind':'captions','path':prefix+captions_path.name,'provenance':{'source':'local'}},
+    ))
+    manifest['jobs'][0]['params'].update(speech_artifact_id='speech',speech_text=spoken,
+        speaker=speaker,voice_profile=data.voice_profile)
 
 
 @app.post('/api/motion/wan/scenes')
@@ -1927,9 +2164,76 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
             {'id':'video','kind':'video','path':f'episodes/{data.project_id}/episode_{data.episode:02d}/scene_{data.scene:02d}_{run_id}.mp4','provenance':{'source':'planned','job_id':'generate','inputs':['workflow']}},
         ],
         'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow'],'outputs':['video'],
-                 'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt}}],
+                 'params':{'model':'wan','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
+                           'replace_clip_id':data.replace_clip_id,'scene_number':data.scene}}],
     }
+    attach_scene_speech(manifest,data,grant,run_id,user['id'])
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
+
+
+@app.post('/api/motion/ltx/scenes')
+def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    if (data.frames-1)%8:
+        raise HTTPException(422,'A duração LTX precisa usar 1 + múltiplos de 8 quadros.')
+    if (data.width,data.height) not in ((288,512),(480,832)) or (data.width==480 and data.frames>49):
+        raise HTTPException(422,'Use 288×512 ou 480×832 com até 49 quadros no modo de maior qualidade.')
+    from .motion_contracts import ContractError, _text, scoped_path
+    from .motion_ltx import MODEL, ENCODER, ltx_workflow
+    from .motion_queue import authorized_root
+    from .workspace_tools import target
+    prompt=motion_call(lambda:_text(data.prompt.strip(),1024))
+    formats={'image/jpeg':('.jpg',b'\xff\xd8\xff'),'image/png':('.png',b'\x89PNG\r\n\x1a\n'),'image/webp':('.webp',b'RIFF')}
+    header,sep,encoded=data.image_data.partition(',')
+    mime=header.removeprefix('data:').removesuffix(';base64')
+    if not sep or header!=f'data:{mime};base64' or mime not in formats:
+        raise HTTPException(422,'Envie uma imagem JPG, PNG ou WebP válida.')
+    try:
+        image=base64.b64decode(encoded,validate=True)
+    except (ValueError,base64.binascii.Error):
+        raise HTTPException(422,'A imagem de referência está corrompida.') from None
+    extension,signature=formats[mime]
+    if not 128<=len(image)<=6*1024*1024 or not image.startswith(signature) or (mime=='image/webp' and image[8:12]!=b'WEBP'):
+        raise HTTPException(422,'A imagem de referência é inválida ou muito grande.')
+    _,grant=authorized_root(DB,user['id'])
+    config=MOTION._config(user['id'])
+    if not config.comfy_root or not config.comfy_endpoint or not all((Path(config.comfy_root)/'models'/folder/name).is_file() for folder,name in (('checkpoints',MODEL),('text_encoders',ENCODER))):
+        raise HTTPException(503,'O modelo local LTX e seu codificador não estão instalados.')
+    try:
+        COMFY_RUNTIME.ensure_started(config)
+    except ComfyStartupError as exc:
+        raise HTTPException(503,str(exc)) from None
+    for relative in ('MotionStudio','MotionStudio/references'):
+        try:target(grant,relative,directory=True)
+        except HTTPException as exc:
+            if exc.status_code!=404:raise
+            target(grant,relative,creating=True).mkdir()
+    run_id=uid()
+    image_name=f'central_ltx_{run_id.replace("-","")}{extension}'
+    image_path=scoped_path(config.comfy_root,'input/'+image_name,output=True)
+    reference_name=f'references/{image_name}'
+    reference_path=target(grant,'MotionStudio/'+reference_name,creating=True)
+    with image_path.open('xb') as stream:stream.write(image)
+    with reference_path.open('xb') as stream:stream.write(image)
+    workflow_name=f'ltx_workflow_{run_id}.json'
+    workflow_path=target(grant,'MotionStudio/'+workflow_name,creating=True)
+    with workflow_path.open('x',encoding='utf-8') as stream:
+        json.dump(ltx_workflow(prompt,image_name,data.seed,data.frames,data.fps,'central_ltx_scene',
+                               data.width,data.height),stream,ensure_ascii=False,separators=(',',':'))
+    manifest={
+        'schema_version':1,'project_id':f'motion-{data.project_id}',
+        'artifacts':[
+            {'id':'workflow','kind':'workflow','path':workflow_name,'provenance':{'source':'local'}},
+            {'id':'reference','kind':'image','path':reference_name,'provenance':{'source':'local','sha256':hashlib.sha256(image).hexdigest()}},
+            {'id':'video','kind':'video','path':f'episodes/{data.project_id}/episode_{data.episode:02d}/scene_{data.scene:02d}_{run_id}.mp4','provenance':{'source':'planned','job_id':'generate','inputs':['workflow','reference']}},
+        ],
+        'jobs':[{'id':'generate','adapter':'comfyui_wan','stage':'generate','inputs':['workflow','reference'],'outputs':['video'],
+                 'params':{'model':'ltxv','seed':data.seed,'frames':data.frames,'fps':data.fps,'prompt':prompt,
+                           'image_sha256':hashlib.sha256(image).hexdigest(),'replace_clip_id':data.replace_clip_id,'scene_number':data.scene,
+                           'width':data.width,'height':data.height}}],
+    }
+    attach_scene_speech(manifest,data,grant,run_id,user['id'])
+    return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'ltx-{run_id}','MotionStudio'))
 
 
 @app.post('/api/motion/wan/episodes')
@@ -1983,7 +2287,7 @@ def motion_wan_episode(data:MotionWanEpisodeIn,request:Request,user=Depends(curr
     episode_folder=target(grant,f'MotionStudio/episodes/{data.project_id}/episode_{data.episode:02d}',directory=True)
     try:
         audio_path,captions_path=synthesize_episode(
-            episode_folder,run_id,dialogue,data.seed)
+            episode_folder,run_id,dialogue,data.seed,data.voice_profiles,60,data.voice_engine,user['id'])
     except SpeechError as exc:
         raise HTTPException(503,str(exc)) from None
     manifest,workflows=build_episode_manifest(
@@ -2026,6 +2330,145 @@ def motion_artifact(rid:str,aid:str,request:Request,user=Depends(current_user)):
     local_only(request)
     path=motion_call(lambda:MOTION.artifact_path(user['id'],rid,aid))
     return FileResponse(path,filename=path.name)
+
+
+@app.get('/api/motion/runs/{rid}/artifacts/{aid}/preview')
+def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_user)):
+    """Stream an authorized, immutable MP4 inline without changing its download route."""
+    local_only(request)
+    path=motion_call(lambda:MOTION.artifact_path(user['id'],rid,aid))
+    media_type = {'.mp4':'video/mp4','.wav':'audio/wav'}.get(path.suffix.lower())
+    if media_type is None:
+        raise HTTPException(415,'Prévia disponível somente para vídeos MP4 e áudios WAV.')
+    return FileResponse(path,filename=path.name,media_type=media_type,
+                        content_disposition_type='inline',
+                        headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+def _motion_project_timeline(project_id):
+    import sqlite3
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', project_id):
+        raise HTTPException(404, 'Projeto não encontrado.')
+    with sqlite3.connect(motion_studio_api.state.database) as connection:
+        row = connection.execute('SELECT timeline_json FROM projects WHERE id=?', (project_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, 'Projeto não encontrado.')
+    return row[0], json.loads(row[0])
+
+
+def _motion_export_digest(timeline):
+    """Identify rendered media independently of review notes and approval state."""
+    videos = sorted((clip for track in timeline['tracks'] if track['kind'] == 'video'
+                     for clip in track['clips']), key=lambda clip: clip['start_frame'])
+    audio = {clip.get('style', {}).get('source_video_clip_id'): clip
+             for track in timeline['tracks'] if track['kind'] == 'audio' for clip in track['clips']}
+    media = []
+    for clip in videos:
+        style = clip.get('style', {})
+        speech = (audio.get(clip['id']) or {}).get('style', {})
+        media.append((clip['id'], clip['start_frame'], clip['duration_frames'],
+                      style.get('motion_run_id'), style.get('motion_artifact_id'),
+                      speech.get('motion_speech_id'), speech.get('motion_run_id'),
+                      speech.get('motion_artifact_id'), speech.get('speech_text')))
+    return hashlib.sha256(json.dumps((timeline['fps'], media), ensure_ascii=False,
+                                     separators=(',', ':')).encode()).hexdigest()
+
+
+def _motion_export_record(user_id, project_id):
+    _, timeline = _motion_project_timeline(project_id)
+    digest = _motion_export_digest(timeline)
+    row = DB.one('SELECT * FROM motion_episode_exports WHERE user_id=? AND project_id=? '
+                 'AND timeline_sha256=? ORDER BY created_at DESC LIMIT 1', (user_id,project_id,digest))
+    if not row:
+        return None
+    from .motion_queue import authorized_root, digest_file
+    from .motion_contracts import scoped_path
+    root,grant = authorized_root(DB,user_id)
+    if grant != row['grant_root']:
+        return None
+    path = scoped_path(root,row['video_path'])
+    if digest_file(path) != row['video_sha256']:
+        raise HTTPException(409,'MP4 final alterado após a montagem.')
+    return {'id':row['id'],'url':f"/api/motion/exports/{row['id']}",'bytes':path.stat().st_size}
+
+
+@app.get('/api/motion/projects/{project_id}/export')
+def motion_existing_export(project_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    return _motion_export_record(user['id'],project_id) or {'id':None,'url':None}
+
+
+@app.post('/api/motion/projects/{project_id}/export')
+def motion_export_episode(project_id:str,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root, digest_file
+    from .workspace_tools import target
+    from .motion_export import assemble_episode, MotionExportError
+    _,timeline = _motion_project_timeline(project_id)
+    videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                     for clip in track['clips']), key=lambda clip:clip['start_frame'])
+    expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8
+    if expected not in (2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+                             for index,clip in enumerate(videos)):
+        raise HTTPException(422,'A montagem precisa de duas ou oito cenas consecutivas na timeline.')
+    audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
+                      for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
+    root,grant = authorized_root(DB,user['id'])
+    scenes=[]
+    captions=[]
+    for clip in videos:
+        style=clip['style']
+        run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+        if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{project_id}':
+            raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+        video=MOTION.artifact_path(user['id'],run_id,artifact_id)
+        if video.suffix.lower()!='.mp4':
+            raise HTTPException(422,'A cena precisa ser MP4.')
+        audio_clip=audio_by_video.get(clip['id'])
+        audio=None
+        if audio_clip:
+            audio_style=audio_clip['style']
+            if audio_style.get('motion_speech_id'):
+                audio=_scene_speech_path(user['id'],audio_style['motion_speech_id'])
+            elif audio_style.get('motion_run_id')==run_id and audio_style.get('motion_artifact_id'):
+                audio=MOTION.artifact_path(user['id'],run_id,audio_style['motion_artifact_id'])
+            else:
+                raise HTTPException(422,'A fala da cena não corresponde ao vídeo.')
+            if audio.suffix.lower()!='.wav':
+                raise HTTPException(422,'A fala precisa ser WAV.')
+        captions.append(str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+        scenes.append((video,audio,clip['duration_frames']/timeline['fps']))
+    export_id=uid()
+    relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'
+    output=target(grant,relative,creating=True)
+    try:
+        result=assemble_episode(scenes,output,captions=captions)
+    except MotionExportError as exc:
+        raise HTTPException(422,str(exc)) from None
+    if not result['path'].is_relative_to(root):
+        raise HTTPException(403,'Destino de exportação inválido.')
+    DB.execute('INSERT INTO motion_episode_exports(id,user_id,project_id,grant_root,video_path,video_sha256,timeline_sha256,created_at) '
+               'VALUES(?,?,?,?,?,?,?,?)', (export_id,user['id'],project_id,grant,
+                output.relative_to(root).as_posix(),digest_file(output),_motion_export_digest(timeline),utcnow()))
+    return {'id':export_id,'url':f'/api/motion/exports/{export_id}',
+            'bytes':output.stat().st_size,'duration':result['duration']}
+
+
+@app.get('/api/motion/exports/{export_id}')
+def motion_export_download(export_id:str,request:Request,user=Depends(current_user)):
+    local_only(request)
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',export_id):
+        raise HTTPException(404,'Exportação não encontrada.')
+    row=DB.one('SELECT project_id FROM motion_episode_exports WHERE id=? AND user_id=?',
+               (export_id,user['id']))
+    if not row or not (_motion_export_record(user['id'],row['project_id']) or {}).get('id')==export_id:
+        raise HTTPException(404,'Exportação não encontrada ou desatualizada.')
+    from .motion_queue import authorized_root
+    from .motion_contracts import scoped_path
+    root,_=authorized_root(DB,user['id'])
+    file=DB.one('SELECT video_path FROM motion_episode_exports WHERE id=?',(export_id,))
+    return FileResponse(scoped_path(root,file['video_path']),filename=f'mini-episodio-{row["project_id"]}.mp4',
+                        media_type='video/mp4')
 
 
 @app.post('/api/runtimes/codex/probe')

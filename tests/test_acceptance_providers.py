@@ -47,6 +47,20 @@ def test_read_only_source_descriptors_exclude_native_and_credentials(source):
         ap.SourceProviders.load(source, kinds={'codex_cli'})
 
 
+def test_lab_snapshot_excludes_new_apis_and_rejects_changed_original(source):
+    original = ap.SourceProviders.load(source).descriptors
+    with sqlite3.connect(source / 'central.sqlite3') as db:
+        db.execute("INSERT INTO providers SELECT 'new',user_id,kind,'other-model',base_url,api_key_enc,priority,input_price,output_price,enabled FROM providers WHERE id='allowed'")
+    current = ap.SourceProviders.load(source)
+    restricted = current.restrict_to_snapshot(original)
+    assert restricted.descriptors == original
+    assert len(restricted._selected) == 1
+    with sqlite3.connect(source / 'central.sqlite3') as db:
+        db.execute("UPDATE providers SET model='changed-model' WHERE id='allowed'")
+    with pytest.raises(ValueError, match='alterada'):
+        ap.SourceProviders.load(source).restrict_to_snapshot(original)
+
+
 def test_bridge_uses_only_selected_api_redacts_echoes_and_enforces_call_limit(source, monkeypatch):
     calls = []
 
