@@ -32,7 +32,7 @@ def test_missing_vram_is_unknown_not_free():
 def test_reject_malformed_and_unsafe_local_response():
     for payload in (
         None, {"models": None}, {"models": "not a list"},
-        {"models": [42]}, {"models": [{"name": "bad\\nname", "size_vram": 1}]},
+        {"models": [42]}, {"models": [{"name": "bad\nname", "size_vram": 1}]},
         {"models": [{"name": "model", "size_vram": True}]},
         {"models": [{"name": "model", "size_vram": -1}]},
         {"models": [{"name": "model", "size_vram": "1234"}]},
