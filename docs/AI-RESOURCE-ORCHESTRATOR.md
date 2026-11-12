@@ -60,7 +60,7 @@ Valores exemplificativos, não medições da RTX 3060 12 GB.
 ## Validação
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_resource_orchestrator.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_resource_orchestrator.py tests/test_persistent_resources.py tests/test_resource_telemetry.py tests/test_resource_api.py tests/test_motion_queue.py -q
 ```
 
-A suíte adicionada foi projetada para rodar em CI sem GPU, verificando contratos e leituras simuladas. Não afirma ganho de desempenho nem homologação de execução com modelos reais. A UI exibe o diagnóstico efetivo somente quando a Central local está em execução.
+A suíte adicionada foi projetada para rodar em CI sem GPU, verificando contratos, concorrência entre processos Python independentes e leituras simuladas. Não afirma ganho de desempenho nem homologação de execução com modelos reais. A UI exibe o diagnóstico efetivo somente quando a Central local está em execução.
