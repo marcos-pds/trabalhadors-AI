@@ -172,11 +172,12 @@ def test_wan_reserves_gpu_during_startup_and_render(queued, tmp_path, monkeypatc
         assert source.name == 'workflow.json'
         assert_exclusive()
         checkpoint()
-        destination.write_bytes(b'\\x00\\x00\\x00\\x18ftypisom\\x00\\x00\\x00\\x00fixture')
+        destination.write_bytes(bytes.fromhex('000000186674797069736f6d0000000066697874757265'))
         return None
     monkeypatch.setattr(comfy_motion, 'execute', render)
 
     run = motion.enqueue('u', manifest('comfyui_wan'), 'request-resource-wan')
     assert motion.process_one() is True
-    assert motion.get('u', run['id'])['state'] == 'completed'
+    result = motion.get('u', run['id'])
+    assert result['state'] == 'completed', result
     assert resources.snapshot()['active'] == 0
