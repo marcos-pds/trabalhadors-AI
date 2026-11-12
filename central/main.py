@@ -54,7 +54,12 @@ SEC = Security(DB, DATA_DIR)
 ENGINE = Engine(DB, SEC)
 from .motion_queue import MotionQueue
 from .resource_orchestrator import ResourceOrchestrator
-RESOURCE_MANAGER = ResourceOrchestrator()
+from .persistent_resources import PersistentResourceOrchestrator
+# Only Central instances using the SAME data directory coordinate resources.
+# Server deployments do not control the host's GPU.
+RESOURCE_MANAGER = (PersistentResourceOrchestrator(DATA_DIR / 'resource-leases.sqlite3')
+                    if os.environ.get('CENTRAL_DEPLOYMENT_MODE', 'local') == 'local'
+                    else ResourceOrchestrator())
 MOTION = MotionQueue(DB, resources=RESOURCE_MANAGER)
 from .comfy_runtime import COMFY_RUNTIME, ComfyStartupError
 
