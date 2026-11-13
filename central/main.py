@@ -2442,8 +2442,32 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'
     output=target(grant,relative,creating=True)
     try:
-        result=assemble_episode(scenes,output,captions=captions)
+        import tempfile
+        import wave
+        from .motion_chatterbox import available_voices, synthesize_lines, voice_settings, ChatterboxError
+        narration_clips=[audio_by_video.get(clip['id']) for clip in videos]
+        profiles={clip['style'].get('voice_profile') for clip in narration_clips if clip}
+        continuous=(all(clip and clip['style'].get('speaker')=='Narrador' and
+                        clip['style'].get('speech_text') for clip in narration_clips)
+                    and len(profiles)==1 and next(iter(profiles)) in
+                    {voice['id'] for voice in available_voices(user['id'])})
+        if continuous:
+            profile=next(iter(profiles))
+            script=' '.join(clip['style']['speech_text'].strip() for clip in narration_clips)
+            expression,pace=voice_settings(user['id'],profile)
+            with tempfile.TemporaryDirectory(prefix='motion-narration-') as folder:
+                narration=Path(folder)/'narration.wav'
+                audio=synthesize_lines([(script,profile)],user['id'],exaggeration=expression,cfg_weight=pace)[0]
+                if len(audio)/96000 > sum(scene[2] for scene in scenes):
+                    raise HTTPException(422,'A narração contínua excede o episódio; encurte o texto ou aumente a duração das cenas.')
+                with wave.open(str(narration),'wb') as stream:
+                    stream.setnchannels(1);stream.setsampwidth(2);stream.setframerate(48000);stream.writeframes(audio)
+                result=assemble_episode(scenes,output,captions=captions,narration=narration)
+        else:
+            result=assemble_episode(scenes,output,captions=captions)
     except MotionExportError as exc:
+        raise HTTPException(422,str(exc)) from None
+    except ChatterboxError as exc:
         raise HTTPException(422,str(exc)) from None
     if not result['path'].is_relative_to(root):
         raise HTTPException(403,'Destino de exportação inválido.')

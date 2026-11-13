@@ -32,3 +32,24 @@ def test_export_joins_scenes_with_voice_and_silence(tmp_path):
     streams = json.loads(probe)['streams']
     assert any(stream['codec_type'] == 'video' and stream['width'] == 720 and stream['height'] == 1280 for stream in streams)
     assert any(stream['codec_type'] == 'audio' and stream['codec_name'] == 'aac' for stream in streams)
+
+
+@pytest.mark.skipif(not shutil.which('ffmpeg') or not shutil.which('ffprobe'), reason='FFmpeg indisponível')
+def test_export_keeps_one_narration_across_scene_boundary(tmp_path):
+    videos = []
+    for color in ('red', 'blue'):
+        video = tmp_path / f'{color}.mp4'
+        subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                        '-f', 'lavfi', '-i', f'color=c={color}:s=160x240:r=24:d=0.5',
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video)], check=True)
+        videos.append(video)
+    narration = tmp_path / 'narration.wav'
+    subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
+                    str(narration)], check=True)
+    result = assemble_episode([(videos[0], None, .5), (videos[1], None, .5)],
+                              tmp_path / 'continuous.mp4', narration=narration)
+    decoded = subprocess.check_output(['ffmpeg', '-hide_banner', '-loglevel', 'error',
+        '-i', str(result['path']), '-f', 's16le', '-ac', '1', '-ar', '48000', '-'])
+    assert len(decoded) >= 48000 * 2 * .9
+    assert any(byte for byte in decoded[round(.48 * 96000):round(.52 * 96000)])
