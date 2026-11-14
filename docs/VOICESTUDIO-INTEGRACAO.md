@@ -49,15 +49,15 @@ A versão inicial usa `POST /v1/audio/speech`, `GET /v1/audio/voices` e `GET /he
 
 ## Evolução: expressividade, textos longos e identidade vocal
 
-A implementação foi conferida também contra o código do VoiceStudio **v0.5.7**, a versão instalada no computador de teste. Essa versão oferece \`POST /profiles\` (com \`name\`, \`ref_audio\`, \`ref_text\`, \`kind=clone\`) e \`GET /v1/audio/voices\`.
+A implementação foi conferida também contra o código do VoiceStudio **v0.5.7**, a versão instalada no computador de teste. Essa versão oferece `POST /profiles` (com `name`, `ref_audio`, `ref_text`, `kind=clone`) e `GET /v1/audio/voices`.
 
 ### 1. Expressividade de suspense
 
 - No menu **Voice Studio → Trecho natural**, gere uma primeira amostra com voz Padrão, velocidade 1,0×, 32 passos e seed 42.
 - Clique **Trecho com pausas**, mantendo os demais parâmetros. Compare as pausas de 500–900 ms após os momentos-chave.
-- A API compatível \`/v1/audio/speech\` envia o texto diretamente ao motor; para evitar que ele leia \`[pause 700ms]\` em voz alta, **a Central interpreta esses marcadores**, gera os trechos separadamente e insere silêncio PCM exato antes de montar o WAV.
-- Pausas aceitas: \`[pause]\` (350 ms), \`[pause 500ms]\` e \`[pause 1s]\`, de 100 ms até 10 segundos. Trechos longos recebem uma separação suave de 180 ms entre blocos.
-- **Suspense** não é uma emoção graduada do OmniVoice. O estilo usa pontuação e pausas; a opção **Sussurrada** envia somente a tag de estilo \`whisper\`, aceita pelo vocabulário fechado do motor, e deve ser avaliada separadamente.
+- A API compatível `/v1/audio/speech` envia o texto diretamente ao motor; para evitar que ele leia `[pause 700ms]` em voz alta, **a Central interpreta esses marcadores**, gera os trechos separadamente e insere silêncio PCM exato antes de montar o WAV.
+- Pausas aceitas: `[pause]` (350 ms), `[pause 500ms]` e `[pause 1s]`, de 100 ms até 10 segundos. Trechos longos recebem uma separação suave de 180 ms entre blocos.
+- **Suspense** não é uma emoção graduada do OmniVoice. O estilo usa pontuação e pausas; a opção **Sussurrada** envia somente a tag de estilo `whisper`, aceita pelo vocabulário fechado do motor, e deve ser avaliada separadamente.
 
 ### 2. Consistência em 1–2 minutos
 
@@ -69,7 +69,7 @@ O backend limita cada trecho a **650 caracteres** e compõe os WAVs de modo sequ
 
 O perfil é uma **referência de áudio**, e não um identificador mágico da voz que o modelo geraria no modo Padrão. Para reutilizar a mesma identidade:
 
-1. Escolha uma amostra curta gerada no painel e clique **Usar como referência de voz**. Ou importe o WAV do teste anterior (por exemplo \`Downloads\\teste-voz.wav\`).
+1. Escolha uma amostra curta gerada no painel e clique **Usar como referência de voz**. Ou importe o WAV do teste anterior (por exemplo `Downloads\teste-voz.wav`).
 2. Informe um **nome de perfil** e transcreva exatamente o que é falado no arquivo, sem as marcações de pausa.
 3. Clique **Salvar perfil no VoiceStudio**. O backend valida o upload WAV PCM e a duração de **3 a 20 segundos**; então encaminha a referência por multipart para a instalação local do VoiceStudio, que persiste o perfil.
 4. O perfil recém-criado aparecerá no seletor de voz da Central. Escolha-o para as amostras seguintes. Reabra o painel e confirme que ele permanece listado.
@@ -80,16 +80,16 @@ Não publique WAVs pessoais em repositórios. Somente salve referências com os 
 
 ### Atualizar a branch de teste no Windows (CMD)
 
-\`\`\`bat
-cd /d C:\\Users\\marco\\central-voice-teste
+```bat
+cd /d C:\Users\marco\central-voice-teste
 git fetch origin feat/voicestudio-local-prototype
 git switch feat/voicestudio-local-prototype
 git pull --ff-only
-.venv\\Scripts\\python.exe -m pytest tests\\test_voice_studio.py -q
+.venv\Scripts\python.exe -m pytest tests\test_voice_studio.py -q
 npm run build
-\`\`\`
+```
 
-Com VoiceStudio ativo em \`http://127.0.0.1:3900\`, execute novamente a Central de testes na porta 8876 conforme instruções anteriores. Não mescle esta PR à main antes de conferir os testes automatizados e ouvir as três novas narrações.
+Com VoiceStudio ativo em `http://127.0.0.1:3900`, execute novamente a Central de testes na porta 8876 conforme instruções anteriores. Não mescle esta PR à main antes de conferir os testes automatizados e ouvir as três novas narrações.
 
 #### Limitações
 
