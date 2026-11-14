@@ -8,6 +8,8 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
+from .voice_studio_audio import plan_script, stitch_wav
+
 
 MAX_AUDIO_BYTES = 30 * 1024 * 1024
 MAX_REFERENCE_BYTES = 12 * 1024 * 1024
@@ -83,8 +85,13 @@ def attach_voice_studio(app, current_user, require_csrf):
     async def studio_speech(data: SpeechInput, request: Request, user=Depends(current_user)):
         require_csrf(request)
         base, key = _settings()
+        try:
+            plan = plan_script(data.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
         payload = {
-            "model": data.model, "input": data.text, "voice": data.voice,
+            "model": data.model, "voice": data.voice,
             "language": data.language, "speed": data.speed, "num_step": data.steps,
             "response_format": "wav",
         }
@@ -92,35 +99,59 @@ def attach_voice_studio(app, current_user, require_csrf):
             payload["instructions"] = data.instructions.strip()
         if data.seed is not None:
             payload["seed"] = data.seed
-        chunks = []
-        size = 0
+
+        rendered = []
         try:
+            # The OpenAI-compatible route sends text directly to the model:
+            # split [pause] tags BEFORE calling it, so tags are not spoken.
+            # Long texts are chunked at sentence boundaries for reliability.
             async with _client(httpx.Timeout(630.0, connect=8.0)) as client:
-                async with client.stream("POST", base + "/v1/audio/speech",
-                                         json=payload, headers=_headers(key)) as upstream:
-                    if upstream.status_code == 429:
-                        raise HTTPException(429, "VoiceStudio ocupado. Tente novamente após a geração atual.")
-                    if upstream.status_code in (401, 403):
-                        raise HTTPException(503, "Credencial do VoiceStudio inválida ou ausente.")
-                    if upstream.status_code >= 400:
-                        raise HTTPException(502, "Falha na síntese. Confira motor, modelo e perfil de voz no VoiceStudio.")
-                    if not upstream.headers.get("content-type", "").lower().startswith(("audio/", "application/octet-stream")):
-                        raise HTTPException(502, "VoiceStudio não retornou áudio.")
-                    async for chunk in upstream.aiter_bytes():
-                        size += len(chunk)
-                        if size > MAX_AUDIO_BYTES:
-                            raise HTTPException(413, "O áudio excedeu o limite de 30 MB.")
-                        chunks.append(chunk)
+                for kind, value in plan:
+                    if kind == "pause":
+                        rendered.append(("pause", value))
+                        continue
+                    size = 0
+                    chunks = []
+                    async with client.stream(
+                        "POST", base + "/v1/audio/speech",
+                        json={**payload, "input": value}, headers=_headers(key),
+                    ) as upstream:
+                        if upstream.status_code == 429:
+                            raise HTTPException(429, "VoiceStudio ocupado. Tente após a geração atual.")
+                        if upstream.status_code in (401, 403):
+                            raise HTTPException(503, "Credencial do VoiceStudio inválida ou ausente.")
+                        if upstream.status_code >= 400:
+                            raise HTTPException(502, "Falha na síntese. Confira motor, modelo e perfil de voz.")
+                        if not upstream.headers.get("content-type", "").lower().startswith(
+                            ("audio/", "application/octet-stream")
+                        ):
+                            raise HTTPException(502, "VoiceStudio não retornou áudio.")
+                        async for chunk in upstream.aiter_bytes():
+                            size += len(chunk)
+                            if size > MAX_AUDIO_BYTES:
+                                raise HTTPException(413, "Um trecho de áudio excedeu 30 MB.")
+                            chunks.append(chunk)
+                    audio_part = b"".join(chunks)
+                    if not audio_part:
+                        raise HTTPException(502, "VoiceStudio retornou áudio vazio.")
+                    rendered.append(("text", audio_part))
         except httpx.TimeoutException:
             raise HTTPException(504, "Tempo limite de síntese excedido. Tente um trecho menor.")
         except httpx.RequestError:
             raise HTTPException(503, "VoiceStudio indisponível. Inicie o serviço local na porta 3900.")
-        audio = b"".join(chunks)
-        if not audio:
-            raise HTTPException(502, "VoiceStudio retornou áudio vazio.")
-        return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store",
-                         "X-Content-Type-Options": "nosniff"})
 
+        if len(rendered) == 1:
+            audio = rendered[0][1]
+        else:
+            try:
+                audio = stitch_wav(rendered)
+            except ValueError as exc:
+                raise HTTPException(502, str(exc)) from exc
+        return Response(audio, media_type="audio/wav", headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Central-Audio-Parts": str(sum(kind == "text" for kind, _ in plan)),
+        })
 
     @router.post("/profiles")
     async def studio_save_profile(
