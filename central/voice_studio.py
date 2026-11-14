@@ -1,13 +1,16 @@
 """Local VoiceStudio adapter. No VoiceStudio code is vendored into Central."""
+import io
 import os
+import wave
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 
 MAX_AUDIO_BYTES = 30 * 1024 * 1024
+MAX_REFERENCE_BYTES = 12 * 1024 * 1024
 
 
 class SpeechInput(BaseModel):
@@ -117,5 +120,73 @@ def attach_voice_studio(app, current_user, require_csrf):
             raise HTTPException(502, "VoiceStudio retornou áudio vazio.")
         return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store",
                          "X-Content-Type-Options": "nosniff"})
+
+
+    @router.post("/profiles")
+    async def studio_save_profile(
+        request: Request,
+        name: str = Form(..., min_length=1, max_length=80),
+        ref_text: str = Form(..., min_length=1, max_length=1000),
+        ref_audio: UploadFile = File(...),
+        user=Depends(current_user),
+    ):
+        """Save a reusable reference voice in VoiceStudio's persistent profile store.
+
+        Audio never enters Central's database or repository. Profiles are shared
+        with other users of the same configured VoiceStudio instance.
+        """
+        require_csrf(request)
+        if not name.strip() or not ref_text.strip():
+            raise HTTPException(422, "Informe o nome e a transcrição exata da amostra.")
+        if not (ref_audio.filename or "").lower().endswith(".wav"):
+            raise HTTPException(415, "Envie um arquivo WAV para criar o perfil.")
+        audio = await ref_audio.read(MAX_REFERENCE_BYTES + 1)
+        if len(audio) > MAX_REFERENCE_BYTES:
+            raise HTTPException(413, "A amostra excedeu o limite de 12 MB.")
+        if not audio.startswith(b"RIFF") or audio[8:12] != b"WAVE":
+            raise HTTPException(415, "O arquivo não contém áudio WAV válido.")
+        try:
+            with wave.open(io.BytesIO(audio), "rb") as source:
+                seconds = source.getnframes() / source.getframerate()
+                if source.getnchannels() not in (1, 2):
+                    raise ValueError("Número de canais não suportado.")
+        except (wave.Error, ValueError, ZeroDivisionError, EOFError):
+            raise HTTPException(415, "Utilize WAV PCM válido, de preferência 24 kHz.")
+        if not 3 <= seconds <= 20:
+            raise HTTPException(422, "Use 3 a 20 segundos de fala clara e contínua.")
+        base, key = _settings()
+        try:
+            async with _client(httpx.Timeout(90.0, connect=8.0)) as client:
+                upstream = await client.post(
+                    base + "/profiles",
+                    headers=_headers(key),
+                    data={
+                        "name": name.strip(),
+                        "ref_text": ref_text.strip(),
+                        "kind": "clone",
+                        "language": "Auto",
+                        "seed": "42",
+                    },
+                    files={"ref_audio": ("referencia.wav", audio, "audio/wav")},
+                )
+                if upstream.status_code in (401, 403):
+                    raise HTTPException(503, "O VoiceStudio recusou a autenticação.")
+                if upstream.status_code >= 400:
+                    raise HTTPException(502, "O VoiceStudio recusou o perfil. Confira o WAV e a transcrição.")
+                record = upstream.json()
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Tempo limite ao salvar o perfil.")
+        except httpx.RequestError:
+            raise HTTPException(503, "VoiceStudio indisponível ao salvar o perfil.")
+        except ValueError:
+            raise HTTPException(502, "Resposta inválida ao salvar o perfil.")
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+            raise HTTPException(502, "O VoiceStudio não confirmou o perfil.")
+        return {
+            "id": record["id"],
+            "name": record.get("name", name.strip()),
+            "stored_in": "VoiceStudio",
+            "reference_seconds": round(seconds, 2),
+        }
 
     app.include_router(router)
