@@ -168,3 +168,64 @@ def test_save_reference_rejects_invalid_audio_and_csrf(monkeypatch):
         assert long.status_code == 422
         assert client.post(url, headers=HEADERS, data={"name": "Narrador", "ref_text": ""},
                            files=valid_file).status_code == 422
+
+
+
+def test_explicit_suspense_pause_is_stitched_not_spoken(monkeypatch):
+    import io
+    import json
+    import wave
+    seen = []
+
+    def handler(request):
+        assert request.url.path == "/v1/audio/speech"
+        payload = json.loads(request.content)
+        seen.append(payload["input"])
+        assert "[pause" not in payload["input"]
+        assert payload["voice"] == "narrador"
+        return httpx.Response(200, content=_reference_wav(3.0),
+                              headers={"content-type": "audio/wav"})
+
+    monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://127.0.0.1:3900")
+    _fake_client(monkeypatch, handler)
+    with TestClient(app) as client:
+        _user(client)
+        response = client.post("/api/voice-studio/speech", headers=HEADERS,
+                               json={"text": "Era madrugada. [pause 700ms] Ouvi três batidas.",
+                                     "voice": "narrador"})
+        assert response.status_code == 200, response.text
+        assert len(seen) == 2
+        with wave.open(io.BytesIO(response.content)) as w:
+            assert w.getframerate() == 24000
+            assert abs(w.getnframes() / w.getframerate() - 6.7) < 0.01
+
+
+def test_long_narration_is_split_into_short_consistent_voice_requests(monkeypatch):
+    import json
+    seen = []
+    def handler(request):
+        body = json.loads(request.content)
+        seen.append(body)
+        return httpx.Response(200, content=_reference_wav(3.0),
+                              headers={"content-type": "audio/wav"})
+    monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://127.0.0.1:3900")
+    _fake_client(monkeypatch, handler)
+    text = "Era madrugada e as luzes se apagaram. " * 50
+    with TestClient(app) as client:
+        _user(client)
+        response = client.post("/api/voice-studio/speech", headers=HEADERS,
+                               json={"text": text, "voice": "narrador", "seed": 42})
+        assert response.status_code == 200, response.text
+        assert len(seen) >= 2
+        assert all(len(s["input"]) <= 650 for s in seen)
+        assert all(s["voice"] == "narrador" and s["seed"] == 42 for s in seen)
+        assert int(response.headers["x-central-audio-parts"]) == len(seen)
+
+
+def test_bad_pause_rejected_before_contacting_upstream(monkeypatch):
+    monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://127.0.0.1:3900")
+    with TestClient(app) as client:
+        _user(client)
+        for text in ("Olá [pause 15s] mundo.", "Olá [pause muito] mundo."):
+            response = client.post("/api/voice-studio/speech", headers=HEADERS, json={"text": text})
+            assert response.status_code == 422, response.text
