@@ -201,6 +201,10 @@ def require_csrf(request: Request):
             raise HTTPException(403,'Origem não autorizada.')
 
 
+from .voice_studio import attach_voice_studio
+attach_voice_studio(app, current_user, require_csrf)
+
+
 class Credentials(BaseModel):
     email: str = Field(min_length=5,max_length=180)
     password: str = Field(min_length=10,max_length=200)
@@ -1859,6 +1863,14 @@ class MotionLtxSceneIn(MotionWanSceneIn):
     height: int = Field(default=512, ge=512, le=832)
 
 
+class MotionPhotoSceneIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    scene: int = Field(ge=1, le=64)
+    background_data: str = Field(min_length=32, max_length=8_400_000)
+    poses: list[str] = Field(min_length=2, max_length=30)
+    frames: int = Field(default=96, ge=24, le=720)
+
+
 class MotionWanDialogueIn(BaseModel):
     start: float = Field(ge=0, lt=60)
     speaker: str = Field(min_length=1, max_length=64)
@@ -2209,6 +2221,65 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
 
 
+@app.post('/api/motion/photo/scenes')
+def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(current_user)):
+    """Render isolated image poses over one immutable scene background."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .photo_sequence import PhotoSequenceError, render_photo_scene
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    if not any(scene.get('scene')==data.scene for scene in
+               (timeline.get('storyboard') or {}).get('scenes',[])):
+        raise HTTPException(422,'A cena não está no roteiro deste projeto.')
+    if data.frames < len(data.poses):
+        raise HTTPException(422,'A duração precisa comportar todas as poses.')
+    total=0
+    def decode_image(value):
+        nonlocal total
+        header,sep,encoded=value.partition(',')
+        formats={'data:image/png;base64':('.png',b'\x89PNG\r\n\x1a\n'),
+                 'data:image/jpeg;base64':('.jpg',b'\xff\xd8\xff'),
+                 'data:image/webp;base64':('.webp',b'RIFF')}
+        if not sep or header not in formats:
+            raise HTTPException(422,'Use imagens PNG, JPEG ou WebP para a sequência.')
+        try:raw=base64.b64decode(encoded,validate=True)
+        except (ValueError,base64.binascii.Error):
+            raise HTTPException(422,'Uma imagem da sequência está corrompida.') from None
+        extension,signature=formats[header]
+        total+=len(raw)
+        if not 128<=len(raw)<=6*1024*1024 or total>36*1024*1024 or not raw.startswith(signature):
+            raise HTTPException(422,'Uma imagem é inválida ou o conjunto excede 36 MB.')
+        if extension=='.webp' and raw[8:12]!=b'WEBP':
+            raise HTTPException(422,'Uma imagem WebP é inválida.')
+        return extension,raw
+    images=[decode_image(data.background_data),*(decode_image(pose) for pose in data.poses)]
+    _,grant=authorized_root(DB,user['id'])
+    run_id=uid()
+    folder=f'MotionStudio/photos/{data.project_id}/scene_{data.scene:02d}_{run_id}'
+    output_dir=f'MotionStudio/episodes/{data.project_id}/episode_01'
+    for parent in ('MotionStudio','MotionStudio/photos',f'MotionStudio/photos/{data.project_id}',
+                   folder,'MotionStudio/episodes',f'MotionStudio/episodes/{data.project_id}',output_dir):
+        try:target(grant,parent,directory=True)
+        except HTTPException as exc:
+            if exc.status_code!=404:raise
+            target(grant,parent,creating=True).mkdir()
+    sources=[]
+    for index,(extension,raw) in enumerate(images):
+        relative=f'{folder}/{"background" if index==0 else f"pose_{index:02d}"}{extension}'
+        path=target(grant,relative,creating=True)
+        with path.open('xb') as stream:stream.write(raw)
+        sources.append(path)
+    relative_video=f'episodes/{data.project_id}/episode_01/photo_scene_{data.scene:02d}_{run_id}.mp4'
+    video=target(grant,'MotionStudio/'+relative_video,creating=True)
+    try:
+        render_photo_scene(sources[0],sources[1:],video,frames=data.frames)
+    except PhotoSequenceError as exc:
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative_video,
+                                      data.scene,data.frames,24)
+
+
 @app.post('/api/motion/ltx/scenes')
 def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
@@ -2423,7 +2494,7 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
     """Persist one continuous OmniVoice take for the owner's complete scene sequence."""
     require_csrf(request);local_only(request)
     from .motion_queue import authorized_root, digest_file
-    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_narration
+    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_aligned_narration
     from .workspace_tools import target
     import wave
     _,timeline=_motion_project_timeline(project_id,user['id'])
@@ -2448,17 +2519,25 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
     profile=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker)
     if not isinstance(profile,str) or not re.fullmatch(r'[a-f0-9]{8}',profile):
         raise HTTPException(422,'Selecione um perfil OmniVoice para o narrador.')
+    root,grant=authorized_root(DB,user['id'])
+    for relative_dir in ('MotionStudio','MotionStudio/narrations',f'MotionStudio/narrations/{project_id}'):
+        try:
+            target(grant,relative_dir,directory=True)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            target(grant,relative_dir,creating=True).mkdir()
     try:
         if profile not in {voice['id'] for voice in available_voices()}:
             raise HTTPException(422,'O perfil do narrador não está disponível no VoiceStudio.')
-        script=' [pause 180ms] '.join(str(scene['dialogue']).strip() for scene in planned)
-        audio=synthesize_narration(script,profile)
+        script=' '.join(str(scene['dialogue']).strip() for scene in planned)
+        audio=synthesize_aligned_narration([(str(scene['dialogue']).strip(),
+            clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile)
     except VoiceStudioError as exc:
         raise HTTPException(503,str(exc)) from None
     duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']
     if len(audio)/96000>duration:
         raise HTTPException(422,'A narração dura mais que o vídeo. Reduza o texto ou aumente as cenas.')
-    root,grant=authorized_root(DB,user['id'])
     speech_id=uid()
     relative=f'MotionStudio/narrations/{project_id}/narration_{speech_id}.wav'
     audio_path=target(grant,relative,creating=True)
@@ -2559,7 +2638,7 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
         if continuous_clip:
             speech_style=continuous_clip['style']
             planned=(timeline.get('storyboard') or {}).get('scenes') or []
-            script=' [pause 180ms] '.join(str(scene.get('dialogue') or '').strip() for scene in planned)
+            script=' '.join(str(scene.get('dialogue') or '').strip() for scene in planned)
             speaker=str(planned[0].get('speaker') or 'Narrador').strip() if planned else ''
             if (continuous_clip['start_frame']!=0 or
                     continuous_clip['duration_frames']!=sum(clip['duration_frames'] for clip in videos) or

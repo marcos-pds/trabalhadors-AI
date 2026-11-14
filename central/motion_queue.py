@@ -167,6 +167,35 @@ class MotionQueue:
                 self.db.conn.execute('ROLLBACK');raise
         return self.get(user,rid)
 
+    def register_photo_video(self,user,project_id,relative_video,scene_number,frames,fps):
+        """Register an already validated local photo montage as an owned Motion run."""
+        root,grant=authorized_root(self.db,user,'MotionStudio')
+        video=scoped_path(root,relative_video)
+        digest=digest_file(video)
+        artifact={'id':'video','path':relative_video,'sha256':digest,'kind':'video'}
+        receipt(video,artifact)
+        rid=uid(); now=utcnow()
+        manifest={'schema_version':1,'project_id':f'motion-{project_id}',
+                  'artifacts':[{'id':'video','kind':'video','path':relative_video,
+                                'provenance':{'source':'local','sha256':digest}}],
+                  'jobs':[{'id':'generate','adapter':'photo_sequence','stage':'generate',
+                           'inputs':[],'outputs':['video'],
+                           'params':{'frames':frames,'fps':fps,'scene_number':scene_number}}]}
+        serialized=json.dumps(manifest,sort_keys=True,separators=(',',':'))
+        with self.db.lock:
+            self.db.conn.execute('BEGIN IMMEDIATE')
+            try:
+                self.db.execute('INSERT INTO motion_runs(id,user_id,request_id,root,grant_root,manifest,digest,inputs,state,created_at,updated_at,runtimes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (rid,user,f'photo-{rid}',str(root),grant,serialized,
+                     hashlib.sha256(serialized.encode()).hexdigest(),json.dumps({'video':digest}),
+                     'completed',now,now,'{}'))
+                self.db.execute('INSERT INTO motion_jobs(run_id,id,adapter,state,artifact,started_at,finished_at) VALUES(?,?,?,?,?,?,?)',
+                    (rid,'generate','photo_sequence','completed',json.dumps(artifact),now,now))
+                self.db.conn.execute('COMMIT')
+            except BaseException:
+                self.db.conn.execute('ROLLBACK');raise
+        return self.get(user,rid)
+
     def get(self,user,rid):
         run=self.db.one('SELECT id,state,error,created_at,updated_at,cancel_requested,manifest FROM motion_runs WHERE id=? AND user_id=?',(rid,user))
         if not run:raise HTTPException(404,'Renderização não encontrada.')

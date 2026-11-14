@@ -24,6 +24,22 @@ class FixtureQueue(MotionQueue):
         path.write_bytes(b'\x00\x00\x00\x18ftypisom\x00\x00\x00\x00fixture')
 
 
+def test_registered_photo_video_is_owned_and_visible_on_timeline(queued):
+    db,root,_,queue=queued
+    folder=root/'MotionStudio'/'episodes'/'project-1'/'episode_01'
+    folder.mkdir(parents=True)
+    video=folder/'scene_01.mp4'
+    video.write_bytes(b'\x00\x00\x00\x18ftypisom\x00\x00\x00\x00fixture')
+    run=queue.register_photo_video('u','project-1','episodes/project-1/episode_01/scene_01.mp4',1,96,24)
+    assert run['state']=='completed'
+    assert run['project_id']=='motion-project-1'
+    assert run['jobs'][0]['adapter']=='photo_sequence'
+    assert run['jobs'][0]['scene_number']==1
+    with pytest.raises(HTTPException) as forbidden:
+        queue.get('other',run['id'])
+    assert forbidden.value.status_code==404
+
+
 @pytest.fixture
 def queued(tmp_path,monkeypatch):
     monkeypatch.setenv('CENTRAL_DEPLOYMENT_MODE','local')

@@ -102,6 +102,22 @@ def synthesize_narration(text, voice_id):
     return bytes(output)
 
 
+def synthesize_aligned_narration(lines, voice_id):
+    """Place each spoken line in its video scene, returning one continuous WAV payload."""
+    if not lines or sum(len(text) for text, _ in lines) > 4096:
+        raise VoiceStudioError('A narração excede o limite de 4096 caracteres.')
+    output = bytearray()
+    for text, seconds in lines:
+        slot_samples = round(seconds * 48000)
+        spoken = synthesize_line(text, voice_id)
+        spoken_samples = len(spoken) // 2
+        if slot_samples <= 0 or spoken_samples > slot_samples:
+            raise VoiceStudioError('Uma fala dura mais que sua cena. Reduza o texto ou aumente a cena.')
+        output.extend(spoken)
+        output.extend(b'\0\0' * (slot_samples - spoken_samples))
+    return bytes(output)
+
+
 def import_voice(name, transcript, wav):
     """Save a short, authorized reference only in the local VoiceStudio profile store."""
     if len(wav) > 7_000_000 or not wav.startswith(b'RIFF') or wav[8:12] != b'WAVE':

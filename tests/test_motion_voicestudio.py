@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from central.motion_speech import SpeechError, synthesize_episode
-from central.motion_voicestudio import VoiceStudioError, available_voices, engine_ready, import_voice, synthesize_line, synthesize_narration
+from central.motion_voicestudio import VoiceStudioError, available_voices, engine_ready, import_voice, synthesize_aligned_narration, synthesize_line, synthesize_narration
 
 
 def test_catalog_only_exposes_saved_voice_profiles(monkeypatch):
@@ -64,6 +64,18 @@ def test_continuous_narration_keeps_every_scene_and_pause(monkeypatch):
     result=synthesize_narration('Primeira. [pause 180ms] Segunda.','lara-id')
     assert calls==[('Primeira.','lara-id'),('Segunda.','lara-id')]
     assert len(result)==2*4800*2 + round(48000*.18)*2
+
+
+def test_narration_starts_each_line_at_its_scene_boundary(monkeypatch):
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line',
+                        lambda text, voice_id: b'\x01\x00' * 4800)
+    result=synthesize_aligned_narration([('Primeira.',1),('Segunda.',1)],'lara-id')
+    assert len(result)==2*48000*2
+    assert result[:2]==b'\x01\x00'
+    assert result[48000*2:48000*2+2]==b'\x01\x00'
+    assert result[48000*2-2:48000*2]==b'\x00\x00'
+    with pytest.raises(VoiceStudioError,match='dura mais'):
+        synthesize_aligned_narration([('Longa.',.05)],'lara-id')
 
 
 def test_import_creates_a_local_profile_from_short_pcm_reference(monkeypatch):

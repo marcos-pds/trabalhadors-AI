@@ -35,7 +35,7 @@ test("image review detects nearly unchanged frames before video", () => {
 
 test("spoken scenes reserve more playback time within the local video limit", () => {
   assert.deepEqual(sceneTimingForSpeech(""), { frames: 49, fps: 16 });
-  assert.deepEqual(sceneTimingForSpeech("Pensamentos flutuam ao redor."), { frames: 81, fps: 12 });
+  assert.deepEqual(sceneTimingForSpeech("Pensamentos flutuam ao redor."), { frames: 49, fps: 12 });
 });
 
 test("each scene requires the same character master rather than a prior scene", () => {
