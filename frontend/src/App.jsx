@@ -18,10 +18,11 @@ import ConversationActivity from './ConversationActivity.jsx'
 import PauseLimitPrompt from './PauseLimitPrompt.jsx'
 import { parseResourceCommand, matchingResources, setChatResourceState } from './chatResources.mjs'
 import TokenUsagePanel from './TokenUsagePanel'
+import VoiceStudioPanel from './VoiceStudioPanel'
 import { providerCategory } from './providerFilters'
 
-const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
-const navGroups = [['WORKSPACE', [['chat','message'],['dashboard','layout'],['agents','users'],['workflows','git'],['projects','folder']]], ['GERENCIAR', [['history','clock'],['monitoring','activity'],['tokens','chart'],['providers','sparkles'],['resources','puzzle'],['settings','settings']]]]
+const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', voice: 'Voice Studio', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
+const navGroups = [['WORKSPACE', [['chat','message'],['dashboard','layout'],['agents','users'],['workflows','git'],['projects','folder']]], ['GERENCIAR', [['history','clock'],['monitoring','activity'],['tokens','chart'],['providers','sparkles'],['voice','audio-lines'],['resources','puzzle'],['settings','settings']]]]
 const emptyData = { agents: [], providers: [], projects: [], conversations: [], workflows: [], runs: [] }
 const providerPresets = [
   {id:'zai',name:'Z.ai / GLM',kind:'zai',model:'glm-4.7-flash',base_url:'https://api.z.ai/api/paas/v4',group:'Grátis limitado',badge:'Modelos Flash gratuitos com limites',note:'Use glm-4.7-flash ou glm-4.5-flash e uma chave API padrão. Outros modelos podem ser pagos; confira as cotas da conta.'},
@@ -779,6 +780,7 @@ export default function App() {
         {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={useWorkflow}/>}
         {page === 'history' && <History data={data} onOpen={openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
         {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
+        {page === 'voice' && <VoiceStudioPanel/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
         {page === 'git' && <GitConnectPage api={api}/>}
         {page === 'settings' && <Settings theme={theme} onTheme={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} me={user} onLogout={() => logout().catch(e => notify(e.message))}/>}
