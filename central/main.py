@@ -161,6 +161,10 @@ def require_csrf(request: Request):
             raise HTTPException(403,'Origem não autorizada.')
 
 
+from .voice_studio import attach_voice_studio
+attach_voice_studio(app, current_user, require_csrf)
+
+
 class Credentials(BaseModel):
     email: str = Field(min_length=5,max_length=180)
     password: str = Field(min_length=10,max_length=200)
