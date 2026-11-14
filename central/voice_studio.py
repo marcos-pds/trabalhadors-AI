@@ -101,6 +101,7 @@ def attach_voice_studio(app, current_user, require_csrf):
             payload["seed"] = data.seed
 
         rendered = []
+        total_bytes = 0
         try:
             # The OpenAI-compatible route sends text directly to the model:
             # split [pause] tags BEFORE calling it, so tags are not spoken.
@@ -128,8 +129,9 @@ def attach_voice_studio(app, current_user, require_csrf):
                             raise HTTPException(502, "VoiceStudio não retornou áudio.")
                         async for chunk in upstream.aiter_bytes():
                             size += len(chunk)
-                            if size > MAX_AUDIO_BYTES:
-                                raise HTTPException(413, "Um trecho de áudio excedeu 30 MB.")
+                            total_bytes += len(chunk)
+                            if size > MAX_AUDIO_BYTES or total_bytes > MAX_AUDIO_BYTES:
+                                raise HTTPException(413, "A geração excedeu o limite total de áudio de 30 MB.")
                             chunks.append(chunk)
                     audio_part = b"".join(chunks)
                     if not audio_part:
