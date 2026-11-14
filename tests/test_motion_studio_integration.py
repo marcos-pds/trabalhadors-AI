@@ -45,6 +45,29 @@ def test_motion_studio_project_api_works_at_embedded_prefix():
     assert response.json()["title"] == "Embedded smoke"
 
 
+def test_motion_projects_are_isolated_between_authenticated_accounts():
+    with TemporaryDirectory() as directory:
+        studio=create_app(database=Path(directory)/'studio.sqlite3')
+        @studio.middleware('http')
+        async def owner(request,call_next):
+            request.state.motion_owner=request.headers.get('x-test-owner')
+            return await call_next(request)
+        root=FastAPI()
+        root.mount('/api/motion-studio',studio)
+        with TestClient(root) as client:
+            first=client.post('/api/motion-studio/api/projects',headers={'x-test-owner':'alice'},
+                              json={'title':'Projeto da Alice'}).json()
+            second=client.post('/api/motion-studio/api/projects',headers={'x-test-owner':'bob'},
+                               json={'title':'Projeto do Bob'}).json()
+            alice={'x-test-owner':'alice'}
+            bob={'x-test-owner':'bob'}
+            assert [item['id'] for item in client.get('/api/motion-studio/api/projects',headers=alice).json()]==[first['id']]
+            assert [item['id'] for item in client.get('/api/motion-studio/api/projects',headers=bob).json()]==[second['id']]
+            assert client.get(f"/api/motion-studio/api/projects/{first['id']}",headers=bob).status_code==404
+            assert client.put(f"/api/motion-studio/api/projects/{first['id']}",headers=bob,
+                              json={'title':'Tomado','timeline':first['timeline']}).status_code==404
+
+
 def test_storyboard_references_survive_project_save_and_reload():
     with TemporaryDirectory() as directory:
         root = FastAPI()

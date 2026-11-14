@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -156,10 +157,19 @@ FRONTEND_BUILD = ROOT/'static'/'build'
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 os.environ['MOTION_STUDIO_DATA'] = str(DATA_DIR/'motion-studio')
 from desktop.motion_studio.apps.api.main import app as motion_studio_api
+with sqlite3.connect(motion_studio_api.state.database) as motion_connection:
+    legacy=motion_connection.execute('SELECT COUNT(*) FROM projects WHERE owner_id IS NULL').fetchone()[0]
+    if legacy:
+        owners=DB.all('SELECT DISTINCT user_id FROM motion_tool_settings')
+        if not owners:
+            owners=DB.all('SELECT id AS user_id FROM users')
+        if len(owners)==1:
+            motion_connection.execute('UPDATE projects SET owner_id=? WHERE owner_id IS NULL',
+                                      (owners[0]['user_id'],))
 @motion_studio_api.middleware('http')
 async def authenticate_motion_studio(request: Request, call_next):
     try:
-        SEC.user(request)
+        request.state.motion_owner=SEC.user(request)['id']
     except HTTPException as error:
         return JSONResponse({'detail': error.detail}, status_code=error.status_code,
                             headers=error.headers)
@@ -2373,12 +2383,12 @@ def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_us
                         headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 
 
-def _motion_project_timeline(project_id):
-    import sqlite3
+def _motion_project_timeline(project_id,user_id):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', project_id):
         raise HTTPException(404, 'Projeto não encontrado.')
     with sqlite3.connect(motion_studio_api.state.database) as connection:
-        row = connection.execute('SELECT timeline_json FROM projects WHERE id=?', (project_id,)).fetchone()
+        row = connection.execute('SELECT timeline_json FROM projects WHERE id=? AND owner_id=?',
+                                 (project_id,user_id)).fetchone()
     if not row:
         raise HTTPException(404, 'Projeto não encontrado.')
     return row[0], json.loads(row[0])
@@ -2416,7 +2426,7 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
     from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_narration
     from .workspace_tools import target
     import wave
-    _,timeline=_motion_project_timeline(project_id)
+    _,timeline=_motion_project_timeline(project_id,user['id'])
     videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                    for clip in track['clips']),key=lambda clip:clip['start_frame'])
     planned=(timeline.get('storyboard') or {}).get('scenes') or []
@@ -2468,7 +2478,7 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
 
 
 def _motion_export_record(user_id, project_id):
-    _, timeline = _motion_project_timeline(project_id)
+    _, timeline = _motion_project_timeline(project_id,user_id)
     digest = _motion_export_digest(timeline)
     row = DB.one('SELECT * FROM motion_episode_exports WHERE user_id=? AND project_id=? '
                  'AND timeline_sha256=? ORDER BY created_at DESC LIMIT 1', (user_id,project_id,digest))
@@ -2497,7 +2507,7 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     from .motion_queue import authorized_root, digest_file
     from .workspace_tools import target
     from .motion_export import assemble_episode, MotionExportError
-    _,timeline = _motion_project_timeline(project_id)
+    _,timeline = _motion_project_timeline(project_id,user['id'])
     videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                      for clip in track['clips']), key=lambda clip:clip['start_frame'])
     expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8

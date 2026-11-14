@@ -13,7 +13,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -158,6 +158,10 @@ def initialize(database: Path) -> None:
             )
             """
         )
+        columns={row['name'] for row in connection.execute('PRAGMA table_info(projects)')}
+        if 'owner_id' not in columns:
+            connection.execute('ALTER TABLE projects ADD COLUMN owner_id TEXT')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id,updated_at)')
         connection.commit()
 
 
@@ -233,21 +237,24 @@ def create_app(
         }
 
     @app.get("/api/projects")
-    def list_projects() -> list[dict]:
+    def list_projects(request: Request) -> list[dict]:
+        owner=getattr(request.state,'motion_owner',None)
         with closing(connect(db_path)) as connection:
             rows = connection.execute(
-                "SELECT * FROM projects ORDER BY updated_at DESC, id"
+                'SELECT * FROM projects WHERE owner_id=? ORDER BY updated_at DESC, id' if owner else
+                'SELECT * FROM projects ORDER BY updated_at DESC, id', (owner,) if owner else ()
             ).fetchall()
         return [serialize(row) for row in rows]
 
     @app.post("/api/projects", status_code=201)
-    def create_project(data: ProjectCreate) -> dict:
+    def create_project(data: ProjectCreate, request: Request) -> dict:
+        owner=getattr(request.state,'motion_owner',None)
         project_id = uuid.uuid4().hex
         timestamp = now()
         timeline = Timeline().model_dump(mode="json")
         with closing(connect(db_path)) as connection:
             connection.execute(
-                "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO projects(id,title,summary,timeline_json,created_at,updated_at,owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     project_id,
                     data.title.strip(),
@@ -255,6 +262,7 @@ def create_app(
                     json.dumps(timeline, ensure_ascii=False),
                     timestamp,
                     timestamp,
+                    owner,
                 ),
             )
             connection.commit()
@@ -264,19 +272,21 @@ def create_app(
         return serialize(row)
 
     @app.get("/api/projects/{project_id}")
-    def get_project(project_id: str) -> dict:
+    def get_project(project_id: str, request: Request) -> dict:
         if not ID_PATTERN.fullmatch(project_id):
             raise HTTPException(404, "Project not found.")
         with closing(connect(db_path)) as connection:
             row = connection.execute(
-                "SELECT * FROM projects WHERE id=?", (project_id,)
+                'SELECT * FROM projects WHERE id=? AND owner_id=?' if getattr(request.state,'motion_owner',None) else
+                'SELECT * FROM projects WHERE id=?',
+                (project_id,request.state.motion_owner) if getattr(request.state,'motion_owner',None) else (project_id,),
             ).fetchone()
         if row is None:
             raise HTTPException(404, "Project not found.")
         return serialize(row)
 
     @app.put("/api/projects/{project_id}")
-    def update_project(project_id: str, data: ProjectUpdate) -> dict:
+    def update_project(project_id: str, data: ProjectUpdate, request: Request) -> dict:
         if not ID_PATTERN.fullmatch(project_id):
             raise HTTPException(404, "Project not found.")
         track_ids = [track.id for track in data.timeline.tracks]
@@ -292,7 +302,7 @@ def create_app(
                 """
                 UPDATE projects
                 SET title=?, summary=?, timeline_json=?, updated_at=?
-                WHERE id=?
+                WHERE id=? AND (? IS NULL OR owner_id=?)
                 """,
                 (
                     data.title.strip(),
@@ -300,6 +310,8 @@ def create_app(
                     data.timeline.model_dump_json(),
                     timestamp,
                     project_id,
+                    getattr(request.state,'motion_owner',None),
+                    getattr(request.state,'motion_owner',None),
                 ),
             )
             connection.commit()
