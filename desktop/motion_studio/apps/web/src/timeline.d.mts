@@ -40,6 +40,10 @@ export function addSceneSpeechClip<T extends TimelineShape>(
   timeline: T,
   speech: { audioId: string; videoClipId: string; speaker: string; text: string; voiceProfile: string },
 ): T;
+export function addContinuousNarrationClip<T extends TimelineShape>(
+  timeline: T,
+  narration: { audioId: string; speaker: string; text: string; voiceProfile: string },
+): T;
 
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;
 export function compositionEndFrame(timeline: TimelineShape): number;

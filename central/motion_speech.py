@@ -24,11 +24,18 @@ def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, use
     """Generate one character line without trimming speech to fit the scene."""
     from .motion_chatterbox import ChatterboxError, available_voices, synthesize_lines, voice_settings
     from .motion_qwen import QwenVoiceError, available_voices as qwen_voices, synthesize_line
+    from .motion_voicestudio import VoiceStudioError, available_voices as studio_voices, synthesize_line as studio_line
     qwen_profiles = {voice['id'] for voice in qwen_voices(user_id)}
-    if profile not in qwen_profiles and profile not in {voice['id'] for voice in available_voices(user_id)}:
+    try:
+        studio_profiles = {voice['id'] for voice in studio_voices()} if len(profile) == 8 else set()
+    except VoiceStudioError as exc:
+        raise SpeechError(str(exc)) from exc
+    if profile not in qwen_profiles and profile not in studio_profiles and profile not in {voice['id'] for voice in available_voices(user_id)}:
         raise SpeechError('Escolha uma voz disponível para este personagem.')
     try:
-        if profile in qwen_profiles:
+        if profile in studio_profiles:
+            audio = studio_line(text, profile)
+        elif profile in qwen_profiles:
             audio = synthesize_line(text, profile, user_id)
         else:
             exaggeration, cfg_weight = voice_settings(user_id, profile)
@@ -37,7 +44,7 @@ def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, use
             else:
                 audio = synthesize_lines([(text, profile)], user_id,
                                          exaggeration=exaggeration, cfg_weight=cfg_weight)[0]
-    except (ChatterboxError, QwenVoiceError) as exc:
+    except (ChatterboxError, QwenVoiceError, VoiceStudioError) as exc:
         raise SpeechError(str(exc)) from exc
     rate = 48000
     capacity = round(frames * rate / fps)
@@ -52,7 +59,7 @@ def synthesize_scene(directory, run_id, text, speaker, profile, frames, fps, use
         output.setframerate(rate)
         output.writeframes(audio + bytes(capacity * 2 - len(audio)))
     captions_path.write_text(json.dumps({
-        'language': 'pt-BR', 'engine': 'qwen' if profile in qwen_profiles else 'chatterbox',
+        'language': 'pt-BR', 'engine': 'omnivoice' if profile in studio_profiles else ('qwen' if profile in qwen_profiles else 'chatterbox'),
         'segments': [{'start': 0, 'end': len(audio) / (2 * rate),
                       'speaker': speaker, 'voice_profile': profile, 'text': text}],
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')

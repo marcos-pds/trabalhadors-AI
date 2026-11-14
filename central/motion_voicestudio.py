@@ -5,6 +5,7 @@ import os
 import wave
 
 import httpx
+from .voice_studio_audio import plan_script
 
 
 BASE_URL = 'http://127.0.0.1:3900'
@@ -37,13 +38,13 @@ def engine_ready():
     try:
         response = httpx.get(f'{BASE_URL}/engines/tts', headers=_headers(), timeout=8)
         response.raise_for_status()
-        available = any(item.get('id') == 'voxcpm2' and item.get('available')
+        available = any(item.get('id') == 'omnivoice' and item.get('available')
                         for item in response.json().get('backends', []))
         if not available:
             return False
         models = httpx.get(f'{BASE_URL}/models', headers=_headers(), timeout=8)
         models.raise_for_status()
-        return any(item.get('repo_id') == 'openbmb/VoxCPM2' and item.get('installed')
+        return any(item.get('repo_id') == 'k2-fsa/OmniVoice' and item.get('installed')
                    for item in models.json().get('models', []))
     except (httpx.HTTPError, ValueError, TypeError):
         return False
@@ -53,8 +54,8 @@ def synthesize_line(text, voice_id, *, instructions=None):
     voices = {voice['id'] for voice in available_voices()}
     if voice_id not in voices:
         raise VoiceStudioError('O perfil de voz selecionado não existe no VoiceStudio.')
-    body = {'model': 'voxcpm2', 'voice': voice_id, 'input': text,
-            'language': 'Portuguese', 'response_format': 'wav'}
+    body = {'model': 'omnivoice', 'voice': voice_id, 'input': text,
+            'language': 'pt', 'num_step': 32, 'response_format': 'wav'}
     if instructions:
         body['instructions'] = instructions
     try:
@@ -82,3 +83,47 @@ def synthesize_line(text, voice_id, *, instructions=None):
         return output.tobytes()
     except (httpx.HTTPError, wave.Error, EOFError) as exc:
         raise VoiceStudioError('Falha ao gerar fala com o VoiceStudio local.') from exc
+
+
+def synthesize_narration(text, voice_id):
+    """Keep a single profile while composing long narration with exact pauses."""
+    if len(text) > 4096:
+        raise VoiceStudioError('A narração excede o limite de 4096 caracteres.')
+    try:
+        plan = plan_script(text)
+    except ValueError as exc:
+        raise VoiceStudioError(str(exc)) from exc
+    output = bytearray()
+    for kind, value in plan:
+        if kind == 'pause':
+            output.extend(b'\0\0' * round(48000 * value / 1000))
+        else:
+            output.extend(synthesize_line(value, voice_id))
+    return bytes(output)
+
+
+def import_voice(name, transcript, wav):
+    """Save a short, authorized reference only in the local VoiceStudio profile store."""
+    if len(wav) > 7_000_000 or not wav.startswith(b'RIFF') or wav[8:12] != b'WAVE':
+        raise VoiceStudioError('Envie um WAV PCM de até 7 MB.')
+    try:
+        with wave.open(BytesIO(wav), 'rb') as source:
+            seconds = source.getnframes() / source.getframerate()
+            if source.getnchannels() not in (1, 2) or source.getsampwidth() != 2 or source.getcomptype() != 'NONE':
+                raise VoiceStudioError('A gravação precisa ser WAV PCM de 16 bits.')
+    except (wave.Error, EOFError, ZeroDivisionError) as exc:
+        raise VoiceStudioError('A gravação WAV não pôde ser lida.') from exc
+    if not 3 <= seconds <= 20:
+        raise VoiceStudioError('Use de 3 a 20 segundos de fala clara.')
+    try:
+        response = httpx.post(f'{BASE_URL}/profiles', headers=_headers(),
+            data={'name':name.strip(),'ref_text':transcript.strip(),'kind':'clone',
+                  'language':'Auto','seed':'42'},
+            files={'ref_audio':('referencia.wav',wav,'audio/wav')},timeout=90)
+        response.raise_for_status()
+        record=response.json()
+    except (httpx.HTTPError,ValueError) as exc:
+        raise VoiceStudioError('O VoiceStudio não salvou o perfil de voz.') from exc
+    if not isinstance(record,dict) or not isinstance(record.get('id'),str) or not record['id']:
+        raise VoiceStudioError('O VoiceStudio não confirmou o perfil de voz.')
+    return {'id':record['id'],'name':record.get('name') or name.strip()}

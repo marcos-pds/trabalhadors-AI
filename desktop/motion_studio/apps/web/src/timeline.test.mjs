@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { addContinuousNarrationClip, addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, restoreClipVersion, segmentGraphemes, standaloneSpeechPreviewUrl, updateClipReview, updateGraphemeStyle, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+
+test("one narration spans consecutive videos and a new take replaces only that audio", () => {
+  const timeline = { fps: 24, tracks: [
+    { id: "video", kind: "video", clips: [
+      { id: "one", start_frame: 0, duration_frames: 120 },
+      { id: "two", start_frame: 120, duration_frames: 120 },
+    ] },
+    { id: "audio", kind: "audio", clips: [] },
+  ] };
+  const first = addContinuousNarrationClip(timeline, { audioId: "take-one", speaker: "Narrador", text: "Olá.", voiceProfile: "443b36e2" });
+  assert.equal(first.tracks[1].clips[0].start_frame, 0);
+  assert.equal(first.tracks[1].clips[0].duration_frames, 240);
+  const second = addContinuousNarrationClip(first, { audioId: "take-two", speaker: "Narrador", text: "Oi.", voiceProfile: "443b36e2" });
+  assert.equal(second.tracks[1].clips.length, 1);
+  assert.equal(second.tracks[1].clips[0].style.motion_speech_id, "take-two");
+  assert.deepEqual(second.tracks[0], timeline.tracks[0]);
+});
 
 test("composition duration follows clips, frame rate, and empty projects", () => {
   assert.equal(compositionEndFrame({ fps: 24, tracks: [] }), 0);

@@ -1840,7 +1840,7 @@ class MotionWanSceneIn(BaseModel):
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
     speech_text: str | None = Field(default=None, max_length=300)
     speaker: str | None = Field(default=None, max_length=64)
-    voice_profile: str | None = Field(default=None, pattern=r'^[a-f0-9]{16}$')
+    voice_profile: str | None = Field(default=None, pattern=r'^(?:[a-f0-9]{8}|[a-f0-9]{16})$')
 
 
 class MotionLtxSceneIn(MotionWanSceneIn):
@@ -1876,7 +1876,7 @@ class MotionSceneSpeechIn(BaseModel):
     video_artifact_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
     text: str = Field(min_length=1,max_length=300)
     speaker: str = Field(min_length=1,max_length=64)
-    voice_profile: str = Field(pattern=r'^[a-f0-9]{16}$')
+    voice_profile: str = Field(pattern=r'^(?:[a-f0-9]{8}|[a-f0-9]{16})$')
 
 
 class MotionVoiceImportIn(BaseModel):
@@ -1899,6 +1899,20 @@ def motion_qwen_voices(request:Request,user=Depends(current_user)):
     return {'engine':'qwen','ready':bool(voices),'voices':voices}
 
 
+@app.get('/api/motion/voicestudio/voices')
+def motion_voicestudio_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_voicestudio import available_voices, engine_ready, VoiceStudioError
+    if not engine_ready():
+        return {'engine':'omnivoice','ready':False,'voices':[]}
+    try:
+        voices=[voice for voice in available_voices() if
+                re.fullmatch(r'[a-f0-9]{8}',voice['id'])]
+    except VoiceStudioError:
+        return {'engine':'omnivoice','ready':False,'voices':[]}
+    return {'engine':'omnivoice','ready':True,'voices':voices}
+
+
 class MotionQwenVoiceImportIn(BaseModel):
     name: str = Field(min_length=1,max_length=80)
     transcript: str = Field(min_length=1,max_length=300)
@@ -1917,6 +1931,20 @@ def motion_qwen_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=D
     try:
         return import_voice(user['id'],data.name,data.transcript,base64.b64decode(raw,validate=True))
     except (QwenVoiceError,binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/motion/voicestudio/voices/import')
+def motion_voicestudio_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import binascii
+    from .motion_voicestudio import VoiceStudioError, import_voice
+    header,sep,encoded=data.audio_data.partition(',')
+    if sep and header not in ('data:audio/wav;base64','data:audio/x-wav;base64','data:audio/wave;base64'):
+        raise HTTPException(422,'Envie um WAV válido.')
+    try:
+        return import_voice(data.name,data.transcript,base64.b64decode(encoded if sep else data.audio_data,validate=True))
+    except (VoiceStudioError,binascii.Error) as exc:
         raise HTTPException(422,str(exc)) from None
 
 
@@ -2362,6 +2390,8 @@ def _motion_export_digest(timeline):
                      for clip in track['clips']), key=lambda clip: clip['start_frame'])
     audio = {clip.get('style', {}).get('source_video_clip_id'): clip
              for track in timeline['tracks'] if track['kind'] == 'audio' for clip in track['clips']}
+    continuous = next((clip for track in timeline['tracks'] if track['kind'] == 'audio'
+                       for clip in track['clips'] if clip.get('style',{}).get('continuous_narration')), None)
     media = []
     for clip in videos:
         style = clip.get('style', {})
@@ -2370,8 +2400,71 @@ def _motion_export_digest(timeline):
                       style.get('motion_run_id'), style.get('motion_artifact_id'),
                       speech.get('motion_speech_id'), speech.get('motion_run_id'),
                       speech.get('motion_artifact_id'), speech.get('speech_text')))
-    return hashlib.sha256(json.dumps((timeline['fps'], media), ensure_ascii=False,
+    narrator = (continuous['style'].get('motion_speech_id'),
+                continuous['style'].get('speech_text'),
+                continuous['style'].get('voice_profile')) if continuous else None
+    digest_input=(timeline['fps'],media,narrator) if continuous else (timeline['fps'],media)
+    return hashlib.sha256(json.dumps(digest_input, ensure_ascii=False,
                                      separators=(',', ':')).encode()).hexdigest()
+
+
+@app.post('/api/motion/projects/{project_id}/narration')
+def motion_project_narration(project_id:str,request:Request,user=Depends(current_user)):
+    """Persist one continuous OmniVoice take for the owner's complete scene sequence."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root, digest_file
+    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_narration
+    from .workspace_tools import target
+    import wave
+    _,timeline=_motion_project_timeline(project_id)
+    videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                   for clip in track['clips']),key=lambda clip:clip['start_frame'])
+    planned=(timeline.get('storyboard') or {}).get('scenes') or []
+    if len(videos) not in (2,8) or len(videos)!=len(planned) or any(
+        clip['start_frame']!=sum(previous['duration_frames'] for previous in videos[:index])
+        for index,clip in enumerate(videos)):
+        raise HTTPException(422,'Conclua as cenas consecutivas na timeline antes da narração.')
+    for clip in videos:
+        style=clip['style']
+        run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+        if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{project_id}':
+            raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+        MOTION.artifact_path(user['id'],run_id,artifact_id)
+    speakers={str(scene.get('speaker') or 'Narrador').strip() for scene in planned}
+    if len(speakers)!=1 or not next(iter(speakers)).lower().startswith('narrad') or any(
+            not str(scene.get('dialogue') or '').strip() for scene in planned):
+        raise HTTPException(422,'A narração contínua exige fala do narrador em todas as cenas.')
+    speaker=next(iter(speakers))
+    profile=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker)
+    if not isinstance(profile,str) or not re.fullmatch(r'[a-f0-9]{8}',profile):
+        raise HTTPException(422,'Selecione um perfil OmniVoice para o narrador.')
+    try:
+        if profile not in {voice['id'] for voice in available_voices()}:
+            raise HTTPException(422,'O perfil do narrador não está disponível no VoiceStudio.')
+        script=' [pause 180ms] '.join(str(scene['dialogue']).strip() for scene in planned)
+        audio=synthesize_narration(script,profile)
+    except VoiceStudioError as exc:
+        raise HTTPException(503,str(exc)) from None
+    duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']
+    if len(audio)/96000>duration:
+        raise HTTPException(422,'A narração dura mais que o vídeo. Reduza o texto ou aumente as cenas.')
+    root,grant=authorized_root(DB,user['id'])
+    speech_id=uid()
+    relative=f'MotionStudio/narrations/{project_id}/narration_{speech_id}.wav'
+    audio_path=target(grant,relative,creating=True)
+    with audio_path.open('xb') as stream, wave.open(stream,'wb') as output:
+        output.setnchannels(1);output.setsampwidth(2);output.setframerate(48000)
+        output.writeframes(audio)
+    captions_path=audio_path.with_suffix('.json')
+    captions_path.write_text(json.dumps({'language':'pt-BR','engine':'omnivoice',
+        'speaker':speaker,'voice_profile':profile,'script':script},ensure_ascii=False),encoding='utf-8')
+    first=videos[0]['style']
+    DB.execute('INSERT INTO motion_scene_speech(id,user_id,video_run_id,video_artifact_id,grant_root,audio_path,captions_path,audio_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        (speech_id,user['id'],first['motion_run_id'],first['motion_artifact_id'],grant,
+         audio_path.relative_to(grant).as_posix(),captions_path.relative_to(grant).as_posix(),
+         digest_file(audio_path),utcnow()))
+    return {'id':speech_id,'url':f'/api/motion/scene-speech/{speech_id}/preview',
+            'speaker':speaker,'voice_profile':profile,'text':script,'duration':len(audio)/96000}
 
 
 def _motion_export_record(user_id, project_id):
@@ -2413,6 +2506,11 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
         raise HTTPException(422,'A montagem precisa de duas ou oito cenas consecutivas na timeline.')
     audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
                       for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
+    continuous_clips=[clip for track in timeline['tracks'] if track['kind']=='audio'
+                      for clip in track['clips'] if clip.get('style',{}).get('continuous_narration')]
+    if len(continuous_clips)>1:
+        raise HTTPException(422,'Há mais de uma narração contínua na timeline.')
+    continuous_clip=continuous_clips[0] if continuous_clips else None
     root,grant = authorized_root(DB,user['id'])
     scenes=[]
     captions=[]
@@ -2436,7 +2534,10 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
                 raise HTTPException(422,'A fala da cena não corresponde ao vídeo.')
             if audio.suffix.lower()!='.wav':
                 raise HTTPException(422,'A fala precisa ser WAV.')
-        captions.append(str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+        planned_scene=next((scene for scene in (timeline.get('storyboard') or {}).get('scenes',[])
+                            if scene.get('scene')==style.get('scene_number')),None)
+        captions.append(str((planned_scene or {}).get('dialogue') or '') if continuous_clip else
+                        str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
         scenes.append((video,audio,clip['duration_frames']/timeline['fps']))
     export_id=uid()
     relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'
@@ -2445,26 +2546,49 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
         import tempfile
         import wave
         from .motion_chatterbox import available_voices, synthesize_lines, voice_settings, ChatterboxError
-        narration_clips=[audio_by_video.get(clip['id']) for clip in videos]
-        profiles={clip['style'].get('voice_profile') for clip in narration_clips if clip}
-        continuous=(all(clip and clip['style'].get('speaker')=='Narrador' and
-                        clip['style'].get('speech_text') for clip in narration_clips)
-                    and len(profiles)==1 and next(iter(profiles)) in
-                    {voice['id'] for voice in available_voices(user['id'])})
-        if continuous:
-            profile=next(iter(profiles))
-            script=' '.join(clip['style']['speech_text'].strip() for clip in narration_clips)
-            expression,pace=voice_settings(user['id'],profile)
-            with tempfile.TemporaryDirectory(prefix='motion-narration-') as folder:
-                narration=Path(folder)/'narration.wav'
-                audio=synthesize_lines([(script,profile)],user['id'],exaggeration=expression,cfg_weight=pace)[0]
-                if len(audio)/96000 > sum(scene[2] for scene in scenes):
-                    raise HTTPException(422,'A narração contínua excede o episódio; encurte o texto ou aumente a duração das cenas.')
-                with wave.open(str(narration),'wb') as stream:
-                    stream.setnchannels(1);stream.setsampwidth(2);stream.setframerate(48000);stream.writeframes(audio)
-                result=assemble_episode(scenes,output,captions=captions,narration=narration)
+        if continuous_clip:
+            speech_style=continuous_clip['style']
+            planned=(timeline.get('storyboard') or {}).get('scenes') or []
+            script=' [pause 180ms] '.join(str(scene.get('dialogue') or '').strip() for scene in planned)
+            speaker=str(planned[0].get('speaker') or 'Narrador').strip() if planned else ''
+            if (continuous_clip['start_frame']!=0 or
+                    continuous_clip['duration_frames']!=sum(clip['duration_frames'] for clip in videos) or
+                    speech_style.get('speech_text')!=script or
+                    speech_style.get('voice_profile')!=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker) or
+                    not speech_style.get('motion_speech_id')):
+                raise HTTPException(422,'A narração da timeline está desatualizada; gere a voz novamente.')
+            saved_speech=DB.one('SELECT video_run_id,video_artifact_id FROM motion_scene_speech WHERE id=? AND user_id=?',
+                                (speech_style['motion_speech_id'],user['id']))
+            first_style=videos[0]['style']
+            if (not saved_speech or saved_speech['video_run_id']!=first_style.get('motion_run_id') or
+                    saved_speech['video_artifact_id']!=first_style.get('motion_artifact_id')):
+                raise HTTPException(422,'A narração não pertence a esta sequência de vídeo.')
+            narration=_scene_speech_path(user['id'],speech_style['motion_speech_id'])
+            with wave.open(str(narration),'rb') as source:
+                if source.getnframes()/source.getframerate()>sum(scene[2] for scene in scenes):
+                    raise HTTPException(422,'A narração excede o episódio.')
+            result=assemble_episode(scenes,output,captions=captions,narration=narration)
         else:
-            result=assemble_episode(scenes,output,captions=captions)
+            narration_clips=[audio_by_video.get(clip['id']) for clip in videos]
+            profiles={clip['style'].get('voice_profile') for clip in narration_clips if clip}
+            continuous=(all(clip and clip['style'].get('speaker')=='Narrador' and
+                            clip['style'].get('speech_text') for clip in narration_clips)
+                        and len(profiles)==1 and next(iter(profiles)) in
+                        {voice['id'] for voice in available_voices(user['id'])})
+            if continuous:
+                profile=next(iter(profiles))
+                script=' '.join(clip['style']['speech_text'].strip() for clip in narration_clips)
+                expression,pace=voice_settings(user['id'],profile)
+                with tempfile.TemporaryDirectory(prefix='motion-narration-') as folder:
+                    narration=Path(folder)/'narration.wav'
+                    audio=synthesize_lines([(script,profile)],user['id'],exaggeration=expression,cfg_weight=pace)[0]
+                    if len(audio)/96000 > sum(scene[2] for scene in scenes):
+                        raise HTTPException(422,'A narração contínua excede o episódio; encurte o texto ou aumente a duração das cenas.')
+                    with wave.open(str(narration),'wb') as stream:
+                        stream.setnchannels(1);stream.setsampwidth(2);stream.setframerate(48000);stream.writeframes(audio)
+                    result=assemble_episode(scenes,output,captions=captions,narration=narration)
+            else:
+                result=assemble_episode(scenes,output,captions=captions)
     except MotionExportError as exc:
         raise HTTPException(422,str(exc)) from None
     except ChatterboxError as exc:

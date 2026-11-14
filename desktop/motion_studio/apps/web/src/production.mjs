@@ -41,7 +41,7 @@ export function meanPixelDifference(left, right) {
 }
 
 export function sceneTimingForSpeech(dialogue) {
-  return { frames: 49, fps: String(dialogue ?? "").trim() ? 12 : 16 };
+  return String(dialogue ?? "").trim() ? { frames: 81, fps: 12 } : { frames: 49, fps: 16 };
 }
 
 export function referenceAnchor(references) {

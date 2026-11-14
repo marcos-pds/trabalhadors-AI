@@ -181,6 +181,23 @@ export function addSceneSpeechClip(timeline, { audioId, videoClipId, speaker, te
   return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
 }
 
+export function addContinuousNarrationClip(timeline, { audioId, speaker, text, voiceProfile }) {
+  if (!standaloneSpeechPreviewUrl(audioId)) throw new Error('Invalid narration reference');
+  const audioTrack = timeline.tracks.find((track) => track.kind === 'audio');
+  if (!audioTrack) throw new Error('A timeline precisa ter uma trilha de áudio.');
+  const totalFrames = Math.max(0, ...timeline.tracks.filter((track) => track.kind === 'video')
+    .flatMap((track) => track.clips.map((clip) => clip.start_frame + clip.duration_frames)));
+  if (!totalFrames) throw new Error('Adicione as cenas antes da narração.');
+  const previous = audioTrack.clips.find((clip) => clip.style?.continuous_narration);
+  const clip = { id: previous?.id ?? makeId('narration'), kind: 'audio', name: `${speaker} · narração contínua`,
+    start_frame: 0, duration_frames: totalFrames,
+    style: { motion_speech_id: audioId, continuous_narration: true,
+      speaker, speech_text: text, voice_profile: voiceProfile } };
+  return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id
+    ? { ...track, clips: [...track.clips.filter((item) => !item.style?.continuous_narration), clip] }
+    : track) };
+}
+
 /** Update review metadata for one scene without touching other clips or artifacts. */
 export function updateClipReview(timeline, clipId, patch) {
   const allowed = new Set(["pending", "approved", "needs_revision"]);
