@@ -87,3 +87,84 @@ def test_voice_down_and_invalid_url(monkeypatch):
         assert "síntese" in response.json()["detail"]
         monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://example.com:3900")
         assert client.get("/api/voice-studio/status").status_code == 503
+
+
+
+def _reference_wav(seconds=4.0):
+    import io
+    import wave
+    frames = int(24000 * seconds)
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as file:
+        file.setnchannels(1)
+        file.setsampwidth(2)
+        file.setframerate(24000)
+        file.writeframes(b"\x01\x00" * frames)
+    return stream.getvalue()
+
+
+def test_save_reference_profile_and_reuse_it(monkeypatch):
+    """Generated/imported PCM reference is stored by VoiceStudio and its ID is addressable."""
+    import json
+    profile_created = False
+
+    def handler(request):
+        nonlocal profile_created
+        if request.url.path == "/profiles":
+            assert request.method == "POST"
+            assert b' name="kind"' in request.content
+            assert b' name="ref_text"' in request.content
+            assert b' name="ref_audio"' in request.content
+            assert b"Narrador principal" in request.content
+            assert b"Eram exatamente" in request.content
+            assert b"RIFF" in request.content
+            profile_created = True
+            return httpx.Response(200, json={"id": "voz123", "name": "Narrador principal"})
+        if request.url.path == "/v1/audio/voices":
+            return httpx.Response(200, json={"voices": ([{
+                "type": "profile", "voice_id": "voz123", "name": "Narrador principal",
+            }] if profile_created else [])})
+        if request.url.path == "/v1/audio/speech":
+            assert json.loads(request.content)["voice"] == "voz123"
+            return httpx.Response(200, content=_reference_wav(),
+                                  headers={"content-type": "audio/wav"})
+        return httpx.Response(404)
+
+    monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://127.0.0.1:3900")
+    _fake_client(monkeypatch, handler)
+    with TestClient(app) as client:
+        _user(client)
+        saved = client.post("/api/voice-studio/profiles", headers=HEADERS,
+                            data={"name": "Narrador principal",
+                                  "ref_text": "Eram exatamente três e dezessete da madrugada."},
+                            files={"ref_audio": ("referencia.wav", _reference_wav(), "audio/wav")})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["id"] == "voz123"
+        assert saved.json()["stored_in"] == "VoiceStudio"
+        assert saved.json()["reference_seconds"] == 4.0
+        voices = client.get("/api/voice-studio/voices").json()["voices"]
+        assert {"id": "voz123", "name": "Narrador principal"} in voices
+        speech = client.post("/api/voice-studio/speech", headers=HEADERS,
+                             json={"text": "Esta é a mesma voz.", "voice": "voz123", "seed": 42})
+        assert speech.status_code == 200, speech.text
+
+
+def test_save_reference_rejects_invalid_audio_and_csrf(monkeypatch):
+    monkeypatch.setenv("CENTRAL_VOICESTUDIO_URL", "http://127.0.0.1:3900")
+    with TestClient(app) as client:
+        _user(client)
+        data = {"name": "Narrador", "ref_text": "Teste de narração."}
+        url = "/api/voice-studio/profiles"
+        valid_file = {"ref_audio": ("test.wav", _reference_wav(), "audio/wav")}
+        assert client.post(url, data=data, files=valid_file).status_code == 403
+        invalid = client.post(url, headers=HEADERS, data=data,
+                              files={"ref_audio": ("test.wav", b"not a real wav", "audio/wav")})
+        assert invalid.status_code == 415
+        short = client.post(url, headers=HEADERS, data=data,
+                            files={"ref_audio": ("test.wav", _reference_wav(2), "audio/wav")})
+        assert short.status_code == 422
+        long = client.post(url, headers=HEADERS, data=data,
+                           files={"ref_audio": ("test.wav", _reference_wav(21), "audio/wav")})
+        assert long.status_code == 422
+        assert client.post(url, headers=HEADERS, data={"name": "Narrador", "ref_text": ""},
+                           files=valid_file).status_code == 422
