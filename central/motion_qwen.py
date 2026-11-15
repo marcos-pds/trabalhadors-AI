@@ -98,7 +98,7 @@ def import_voice(user_id, name, transcript, wav_bytes):
     return {'id': profile_id, 'name': name}
 
 
-def synthesize_line(text, profile, user_id=None):
+def synthesize_line(text, profile, user_id=None, *, instructions=None):
     clone = next((item for item in _profiles(user_id)
                   if isinstance(item, dict) and item.get('id') == profile), None) if user_id is not None else None
     if profile not in PROFILES and (not clone or not base_ready()):
@@ -116,7 +116,7 @@ def synthesize_line(text, profile, user_id=None):
             payload.update(reference=str(voice_dir(user_id) / (profile + '.wav')),
                            transcript=clone['transcript'])
         else:
-            payload['instruction'] = PROFILES[profile][1]
+            payload['instruction'] = PROFILES[profile][1] + (f' {instructions}' if instructions else '')
         try:
             result = subprocess.run([str(python), str(ROOT / 'central' / 'qwen_worker.py')],
                                     input=json.dumps(payload, ensure_ascii=False), text=True,

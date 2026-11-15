@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
-import { addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneImageEditPrompt, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
+import { addContinuousNarrationClip, addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseDirectedScript, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneTimingForSpeech, timeScenesFromScript, voiceDirectionFromScript, sceneReference as findSceneReference } from "./production.mjs";
+import { directScene } from "./scene_direction.mjs";
 
 type Clip = {
   id: string;
@@ -15,12 +16,14 @@ type Clip = {
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload"; scene_number?: number };
 type VoiceProfile = string;
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
+type VisualQualityReview = { scene: number; reference_id: string; status: "pass" | "needs_revision"; findings: string[]; reviewer: string };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; quality_reviews?: VisualQualityReview[]; voice_profiles?: Record<string, VoiceProfile>; captions_enabled?: boolean; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; effect_preset?: string | null; effect_cue?: number | null; camera_motion?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
-type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string };
+type VoiceBeat = { speaker: string; text: string; direction: "neutral" | "whisper" | "breathless" | "fear" | "sad" | "excited" | "angry" | "calm" | "suspense"; pause_ms: number };
+type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; voice_direction?: VoiceBeat['direction']; voice_beats?: VoiceBeat[]; duration_frames?: number; pose_count?: number };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -121,13 +124,13 @@ export default function App() {
   const [titleDraft] = useState("O FUTURO COMEÇA AGORA");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(true);
-  const [wanConfigSaved, setWanConfigSaved] = useState(false);
   const [, setWanConfigStatus] = useState("Iniciando automaticamente os motores locais…");
   const [scenePrompt, setScenePrompt] = useState("Vertical cinematic 3D horror scene, a small geometric glass figure crossing a dim abandoned hallway, cold blue moonlight, deep shadows, slow camera push, unsettling atmosphere, polished motion design, no text.");
   const [sceneSpeechText, setSceneSpeechText] = useState("");
   const [sceneSpeaker, setSceneSpeaker] = useState("Lara");
   const [sceneSpeechBusy, setSceneSpeechBusy] = useState(false);
   const [voiceReferenceText, setVoiceReferenceText] = useState("");
+  const [newVoiceName, setNewVoiceName] = useState("");
   const [voiceReferenceBusy, setVoiceReferenceBusy] = useState(false);
   const [episodeNumber] = useState(1);
   const [sceneNumber] = useState(1);
@@ -137,7 +140,7 @@ export default function App() {
   const [wanBusy, setWanBusy] = useState(false);
   const [sceneImageBusy, setSceneImageBusy] = useState(false);
   const [, setEpisodeRun] = useState(false);
-  const [voiceCatalog, setVoiceCatalog] = useState<{ ready: boolean; voices: { id: string; name: string }[] }>({ ready: false, voices: [] });
+  const [voiceCatalog, setVoiceCatalog] = useState<{ ready: boolean; engine?: string; voices: { id: string; name: string }[] }>({ ready: false, voices: [] });
   const [chatPrompt, setChatPrompt] = useState("");
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: "user" | "assistant"; text: string }>>([]);
   const [promptImage, setPromptImage] = useState<{ name: string; image_data: string } | null>(null);
@@ -150,6 +153,11 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [importNotice, setImportNotice] = useState("");
   const [reviewComment, setReviewComment] = useState("");
+  const [effectPreset, setEffectPreset] = useState("wind");
+  const [effectCue, setEffectCue] = useState(8);
+  const [effectBusy, setEffectBusy] = useState(false);
+  const [visualReviewBusy, setVisualReviewBusy] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
@@ -198,20 +206,14 @@ export default function App() {
 
   useEffect(() => {
     if (!embedded) return;
-    void Promise.allSettled([
-      centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices"),
-      centralRequest<typeof voiceCatalog>("/api/motion/voices"),
-    ]).then((results) => {
-      const voices = results.filter((result): result is PromiseFulfilledResult<typeof voiceCatalog> => result.status === "fulfilled")
-        .map((result) => result.value).filter((catalog) => catalog.ready);
-      setVoiceCatalog({ ready: voices.length > 0, voices: voices.flatMap((catalog) => catalog.voices) });
-    });
+    void centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices")
+      .then((catalog) => setVoiceCatalog({ ready: catalog.ready, voices: catalog.voices.map((voice) => ({ ...voice, name: `VoiceStudio · ${voice.name}` })) }))
+      .catch(() => setVoiceCatalog({ ready: false, voices: [] }));
     let active = true;
     void centralRequest<MotionTools>("/api/motion/tools")
       .then((config) => {
         if (!active) return;
         const configured = Boolean(config.comfy_endpoint && config.comfy_root);
-        setWanConfigSaved(configured);
         setCapabilities((current) => current ? {
           ...current,
           comfyui: { ...current.comfyui, status: config.comfy_status === "running" ? "available" : "unavailable" },
@@ -222,7 +224,6 @@ export default function App() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setWanConfigSaved(false);
         setCapabilities((current) => current ? {
           ...current,
           comfyui: { ...current.comfyui, status: "unavailable" },
@@ -258,6 +259,10 @@ export default function App() {
     () => project?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClip),
     [project, selectedClip],
   );
+  const selectedScene = selected?.kind === "video" ? project?.timeline.storyboard?.scenes.find((scene) => scene.scene === selected.style.scene_number) : undefined;
+  const selectedReference = selectedScene ? findSceneReference(project?.timeline.storyboard?.references ?? [], selectedScene.scene) : undefined;
+  const selectedQualityReview = project?.timeline.storyboard?.quality_reviews?.find((review) =>
+    review.scene === selectedScene?.scene && review.reference_id === selectedReference?.id);
   const fps = project?.timeline.fps ?? 24;
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
@@ -267,6 +272,8 @@ export default function App() {
   const characterReferences = visualReferences.filter((reference) => reference.kind === "character" && reference.image_data);
   const characterReference = characterReferences.find((reference) => reference.id === characterReferenceId) ?? characterReferences[0];
   const plannedScenesComplete = !episodePlan.length || episodePlan.every((scene) => videoClips.some((clip) => clip.style.scene_number === scene.scene));
+  const hasContinuousNarration = project?.timeline.tracks.some((track) => track.kind === "audio" &&
+    track.clips.some((clip) => clip.style.continuous_narration)) ?? false;
 
   useEffect(() => {
     if (chatFeedRef.current) chatFeedRef.current.scrollTop = chatFeedRef.current.scrollHeight;
@@ -278,21 +285,26 @@ export default function App() {
     (selected?.kind === "video" ? selected : undefined)) : undefined;
   const activeAudioClip = project && activeVideoClip ? project.timeline.tracks
     .filter((track) => track.kind === "audio").flatMap((track) => track.clips)
-    .find((clip) => clip.style.source_video_clip_id === activeVideoClip.id) : undefined;
+    .find((clip) => clip.style.source_video_clip_id === activeVideoClip.id || clip.style.continuous_narration) : undefined;
   const activeAudioUrl = activeAudioClip ? (activeAudioClip.style.motion_speech_id
     ? standaloneSpeechPreviewUrl(activeAudioClip.style.motion_speech_id)
     : wanVideoPreviewUrl(activeAudioClip.style.motion_run_id, activeAudioClip.style.motion_artifact_id)) : null;
 
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
+    if (selected?.kind === "video") {
+      const direction = directScene(project?.timeline.storyboard?.scenes.find((scene) => scene.scene === selected.style.scene_number), project?.summary);
+      setEffectPreset(String(selected.style.effect_preset ?? direction.effect ?? "wind"));
+      setEffectCue(Number(selected.style.effect_cue ?? direction.cue));
+    }
   }, [selected?.id, selected?.kind, selected?.style.review_comment]);
 
   useEffect(() => {
     if (selected?.kind !== "video" || !project) return;
     const speech = project.timeline.tracks.filter((track) => track.kind === "audio")
       .flatMap((track) => track.clips).find((clip) => clip.style.source_video_clip_id === selected.id);
-    setSceneSpeechText(String(speech?.style.speech_text ?? ""));
     const planned = project.timeline.storyboard?.scenes.find((scene) => scene.scene === selected.style.scene_number);
+    setSceneSpeechText(String(speech?.style.speech_text ?? planned?.dialogue ?? ""));
     setSceneSpeaker(String(speech?.style.speaker ?? planned?.speaker ?? "Narradora"));
   }, [selected?.id, project?.id]);
 
@@ -315,7 +327,7 @@ export default function App() {
     const videos = [...runs].reverse()
       .filter((run) => wanRunMatchesProject(run.project_id, targetProjectId))
       .flatMap((run) => run.jobs.filter((job) =>
-        job.adapter === "comfyui_wan" && job.state === "completed" && job.artifact &&
+        (job.adapter === "comfyui_wan" || job.adapter === "photo_sequence") && job.state === "completed" && job.artifact &&
         Number.isInteger(job.frames) && Number.isInteger(job.fps),
       ).map((job) => ({
         runId: run.id, artifactId: job.artifact!.id,
@@ -327,6 +339,9 @@ export default function App() {
         speechText: job.speech_text ?? undefined,
         speaker: job.speaker ?? undefined,
         voiceProfile: job.voice_profile ?? undefined,
+        effectPreset: job.effect_preset ?? undefined,
+        effectCue: job.effect_cue ?? undefined,
+        cameraMotion: job.camera_motion ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
@@ -339,8 +354,8 @@ export default function App() {
         speaker: video.speaker ?? "Personagem", text: video.speechText ?? "",
         voiceProfile: video.voiceProfile ?? "", replaceClipId: video.replaceClipId,
       });
-      if (video.speechText) timeline = addSceneCaptionClip(timeline, {
-        runId: video.runId, videoArtifactId: video.artifactId, text: video.speechText,
+      if (timeline.storyboard?.captions_enabled !== false && !/sem legendas/i.test(timeline.storyboard?.theme ?? "") && (video.speechText || planned?.dialogue)) timeline = addSceneCaptionClip(timeline, {
+        runId: video.runId, videoArtifactId: video.artifactId, text: video.speechText ?? planned?.dialogue ?? "",
       });
     }
     if (timeline === fresh.timeline) return;
@@ -387,13 +402,14 @@ export default function App() {
     audioRef.current?.pause();
     setPlaying(false);
     setPlayheadFrame(next);
+    if (audioRef.current && activeAudioClip?.style.continuous_narration) audioRef.current.currentTime = next / fps;
     if (!project) return;
     const clip = clipAtFrame(project.timeline, Math.min(next, Math.max(0, projectLength - 1)), "video");
     if (clip) {
       setSelectedClip(clip.id);
       if (clip.id === activeVideoClip?.id && videoRef.current) {
         videoRef.current.currentTime = (next - clip.start_frame) / fps;
-        if (audioRef.current) audioRef.current.currentTime = (next - clip.start_frame) / fps;
+        if (audioRef.current) audioRef.current.currentTime = activeAudioClip?.style.continuous_narration ? next / fps : (next - clip.start_frame) / fps;
       }
     }
   }
@@ -405,7 +421,8 @@ export default function App() {
     try {
       await player.play();
       if (audioRef.current) {
-        audioRef.current.currentTime = player.currentTime;
+        audioRef.current.currentTime = activeAudioClip?.style.continuous_narration
+          ? (activeVideoClip.start_frame / fps + player.currentTime) : player.currentTime;
         await audioRef.current.play();
       }
       setPlaying(true);
@@ -431,9 +448,10 @@ export default function App() {
 
   function handleVideoEnded() {
     if (!project || !activeVideoClip) return;
-    audioRef.current?.pause();
+    if (!activeAudioClip?.style.continuous_narration) audioRef.current?.pause();
     const next = videoClips.find((clip) => clip.start_frame >= activeVideoClip.start_frame + activeVideoClip.duration_frames);
     if (!next) {
+      audioRef.current?.pause();
       pendingPlaybackClipRef.current = null;
       setPlaying(false);
       setPlayheadFrame(projectLength);
@@ -466,9 +484,68 @@ export default function App() {
     }
   }
 
+  async function reviewReference(projectId: string, scene: PlannedScene, force = false) {
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const reference = findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene);
+    if (!reference) throw new Error(`Falta a imagem da cena ${scene.scene}.`);
+    const existing = current.timeline.storyboard?.quality_reviews?.find((item) =>
+      item.scene === scene.scene && item.reference_id === reference.id);
+    if (existing?.status === "pass" && !force) return existing;
+    const result = await centralRequest<{ status: "pass" | "needs_revision"; findings: string[]; reviewer: string }>(
+      "/api/motion/photo/review", { method: "POST", body: JSON.stringify({ project_id: projectId, scene: scene.scene }) });
+    const review: VisualQualityReview = { scene: scene.scene, reference_id: reference.id, ...result };
+    const storyboard = current.timeline.storyboard!;
+    const updated = await request<Project>(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({
+      title: current.title, summary: current.summary, timeline: { ...current.timeline, storyboard: {
+        ...storyboard, quality_reviews: [...(storyboard.quality_reviews ?? []).filter((item) => item.scene !== scene.scene), review],
+      } },
+    }) });
+    setProject(updated);
+    return review;
+  }
+
+  async function correctReference(projectId: string, scene: PlannedScene, findings: string[]) {
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const storyboard = current.timeline.storyboard!;
+    const reference = findSceneReference(storyboard.references ?? [], scene.scene);
+    if (!reference?.image_data || (storyboard.references ?? []).length >= 32) throw new Error("Não há espaço para outra versão da imagem.");
+    const correction = findings.join('; ').slice(0, 600);
+    setAutoProgress(`Corrigindo somente a imagem da cena ${scene.scene}: ${correction}`);
+    const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+      method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", reference_image_data: reference.image_data,
+        prompt: `Edit the supplied image while preserving its architecture, camera angle and visual identity. Scene: ${scene.title}. Required visible state: ${scene.image_prompt ?? scene.prompt}. Correct only these verified issues: ${correction}. One coherent vertical 9:16 frame, no text.`.slice(0, 4096) }),
+    });
+    const revised: VisualReference = { id: makeId("ref"), kind: "setting", scene_number: scene.scene,
+      name: `Cena ${scene.scene} · revisão visual`, prompt: correction,
+      image_data: image.image_data, source: "generated_image" };
+    const updated = await request<Project>(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({
+      title: current.title, summary: current.summary, timeline: { ...current.timeline, storyboard: {
+        ...storyboard, references: [...(storyboard.references ?? []), revised], episode_status: "draft",
+      } },
+    }) });
+    setProject(updated);
+    return revised;
+  }
+
+  async function applyAutomaticSceneEffect(projectId: string, scene: PlannedScene, brief: string) {
+    const direction = directScene(scene, brief);
+    if (!direction.effect) return;
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const clip = current.timeline.tracks.find((track) => track.kind === "video")?.clips.find((item) => item.style.scene_number === scene.scene);
+    if (!clip || clip.style.effect_preset) return;
+    setAutoProgress(`Direção sonora: aplicando ${direction.effect} à cena ${scene.scene}…`);
+    const edited = await centralRequest<MotionRun>("/api/motion/photo/effects", { method: "POST", body: JSON.stringify({
+      project_id: projectId, clip_id: clip.id, preset: direction.effect, cue_seconds: direction.cue,
+    }) });
+    await syncCompletedVideos([edited], projectId);
+  }
+
   async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false, resumeProject?: Project) {
     const idea = (ideaOverride ?? chatPrompt).trim();
-    if (!idea || autoBusy || !embedded || !wanConfigSaved) return;
+    const directedScript = parseDirectedScript(idea);
+    const longEpisode = /(?:2\s*minutos|120\s*segundos)/i.test(idea);
+    const planningBrief = idea;
+    if (!idea || autoBusy || !embedded) return;
     addChatMessage("user", idea + (promptImage ? ` · Imagem: ${promptImage.name}` : ""));
     setAutoBusy(true);
     setError("");
@@ -476,7 +553,7 @@ export default function App() {
       let scenes: PlannedScene[];
       let planned: Project;
       const sourceProject = resumeProject ?? project;
-      if (!promptImage && sourceProject?.summary === idea && sourceProject.timeline.storyboard?.scenes.length === 8) {
+      if (!promptImage && sourceProject?.summary === idea && sourceProject.timeline.storyboard?.scenes.length) {
         scenes = sourceProject.timeline.storyboard.scenes;
         planned = sourceProject;
         setAutoProgress("Retomando imagens ou cenas pendentes deste projeto…");
@@ -486,10 +563,10 @@ export default function App() {
       const conversation = await centralRequest<{ id: string }>("/api/conversations", { method: "POST", body: JSON.stringify({ title: `Mini episódio · ${idea.slice(0, 60)}` }) });
       const planning = await centralRequest<{ id: string }>("/api/runs", { method: "POST", body: JSON.stringify({ conversation_id: conversation.id, mode: "auto", autonomous: false, prompt: [
         "Planejamento criativo de uma minissérie vertical animada original para Instagram. Resposta exclusivamente em JSON com história e instruções para imagem e vídeo; esta etapa é apenas texto.",
-        `Brief narrativo: "${idea.replace(/["\r\n]/g, " ")}"`,
+        `Brief narrativo: "${planningBrief.replace(/["\r\n]/g, " ")}"`,
         promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
-        "O roteiro tem exatamente 8 cenas consecutivas de cerca de 4 segundos. Cada ação decorre da anterior. Com imagem enviada, preserve exatamente sua linguagem visual, proporções e figurino; sem imagem, defina um estilo original. Composição vertical 9:16. Os mesmos personagens têm rosto, cabelo, acessórios, roupa e paleta invariantes em todas as imagens. Escreva a visual_bible com identidade do protagonista detalhada em inglês, incluindo idade aparente, forma do rosto, olhos, cabelo, acessórios, roupa e estilo de desenho; depois, em seção Locations:, enumere os cenários. Repita no image_prompt de cada cena os traços e o figurino definidos na visual_bible. image_prompt representa um único quadro estático em inglês, com cenário e ação visível específicos; prompt representa apenas a ação e o movimento de câmera que o vídeo LTX animará a partir desse quadro. Ambos são filmáveis, sem texto na imagem. Há uma fala narrativa de 7 a 9 palavras em português brasileiro natural em TODAS as cenas, formando uma história contínua, com variação de emoção e sem repetir a mesma estrutura. A narração é fora de cena, sem sincronização labial. Se o protagonista for Caio, o campo speaker será Caio e a narração será em primeira pessoa.",
-        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual, figurino e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês, personagens idênticos\",\"prompt\":\"movimento da cena em inglês\",\"speaker\":\"Narradora\",\"dialogue\":\"fala curta em português\"}]}. Não inclua explicações fora do JSON.",
+        `O roteiro tem exatamente ${directedScript?.length ?? 8} cenas consecutivas. Cada ação decorre da anterior. Determine a duração de CADA cena pelo tempo necessário para sua ação e fala, de 1 a 30 segundos. ${directedScript ? `Preserve as cinco cenas e seus intervalos: ${directedScript.map((scene) => `${scene.scene}: ${scene.duration_frames / 24}s`).join(', ')}. Não reescreva as falas do usuário; forneça apenas direção visual e ações.` : 'Se o pedido especificar duração total, distribua o tempo segundo o roteiro.'} Defina duration_frames em quadros a 24 FPS. Escolha pose_count entre 2 e 30. Composição vertical 9:16. Respeite personagens e ambiente. visual_bible descreve a identidade visual. image_prompt representa um quadro estático em inglês; prompt descreve ação progressiva. Mantenha a identidade visual dos personagens. ${directedScript ? 'As falas, pausas e emoções serão preservadas diretamente do roteiro enviado.' : 'Em cada cena, defina voice_direction conforme a emoção: neutral, whisper, breathless, fear, sad, excited, angry, calm ou suspense.'}`,
+        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês\",\"prompt\":\"movimento progressivo em inglês\",\"speaker\":\"Narrador\",\"dialogue\":\"\",\"voice_direction\":\"suspense\",\"duration_frames\":168,\"pose_count\":8}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
       for (let attempt = 0; attempt < 180 && ["queued", "running", "awaiting_approval"].includes(status); attempt += 1) {
@@ -500,40 +577,52 @@ export default function App() {
       const messages = await centralRequest<Array<{ role: string; content: string }>>(`/api/conversations/${conversation.id}/messages`);
       const raw = messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
       const plan = parseProductionPlan(raw);
-      scenes = plan.scenes;
-      addChatMessage("assistant", `História pronta: ${scenes.map((scene) => `${scene.scene}. ${scene.title}`).join(" · ")}. Agora vou gerar as oito imagens antes de animar.`);
+      if (directedScript && plan.scenes.length !== directedScript.length) throw new Error('O planejamento mudou o número de cenas do roteiro. Gere novamente sem alterar as cinco cenas.');
+      const timedScenes = directedScript ? plan.scenes.map((scene, index) => ({ ...scene, ...directedScript[index] })) : timeScenesFromScript(plan.scenes, idea);
+      scenes = timedScenes.map((scene) => ({ ...scene,
+        voice_direction: voiceDirectionFromScript(scene),
+        pose_count: longEpisode ? Math.max(8, scene.pose_count ?? 8) : (scene.pose_count ?? 4) }));
+      addChatMessage("assistant", `História pronta: ${scenes.map((scene) => `${scene.scene}. ${scene.title}`).join(" · ")}. Agora vou gerar os cenários e as poses de cada cena.`);
       setAutoProgress("Criando o projeto e preparando a produção…");
       const created = project?.summary === idea && !project.timeline.storyboard?.scenes.length ? project :
-        await request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ title: `${scenes[0].title.slice(0, 110)} | Episódio 1`, summary: idea }) });
+        await request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ title: `${(directedScript ? idea.match(/^#\s+(.+)$/m)?.[1] ?? scenes[0].title : scenes[0].title).slice(0, 110)} | Episódio 1`, summary: idea }) });
       const fresh = await request<Project>(`/api/projects/${created.id}`, { method: "PUT", body: JSON.stringify({ title: created.title, summary: idea, timeline: { ...initialTimeline(), fps: 24, width: 720, height: 1280 } }) });
       setProjects((current) => [fresh, ...current.filter((item) => item.id !== fresh.id)]);
       setProject(fresh);
-      const profiles = await centralRequest<typeof voiceCatalog>("/api/motion/voices");
-      const qwen = await centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices").catch(() => ({ ready: false, voices: [] }));
-      const allVoices = [...(qwen.ready ? qwen.voices : []), ...(profiles.ready ? profiles.voices : [])];
-      const voice = allVoices.find((item) => /pt-br|brasileir/i.test(item.name)) ?? allVoices[0];
-      if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Instale um motor de voz local antes de produzir falas.");
-      const cast = [...new Set(scenes.filter((scene) => scene.dialogue?.trim()).map((scene) => scene.speaker?.trim() || "Narradora"))];
+      const studio = await centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices");
+      const allVoices = studio.ready ? studio.voices.filter((item) => !/^minha voz$/i.test(item.name.trim())) : [];
+      const voice = allVoices.find((item) => /padr[aã]o|narrad/i.test(item.name)) ?? allVoices[0];
+      if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Crie ou ative uma voz no VoiceStudio antes de produzir falas.");
+      const cast = [...new Set(scenes.flatMap((scene) => scene.voice_beats?.length ? scene.voice_beats.filter((beat) => beat.text).map((beat) => beat.speaker) : scene.dialogue?.trim() ? [scene.speaker?.trim() || "Narradora"] : []))];
+      if (cast.length > allVoices.length) throw new Error(`O roteiro tem ${cast.length} personagens com fala. Crie ${cast.length - allVoices.length} voz(es) no VoiceStudio antes de continuar; sua voz pessoal não será escolhida automaticamente.`);
       const alternatives = allVoices.filter((item) => item.id !== voice?.id);
       const voiceProfiles = Object.fromEntries(cast.map((speaker, index) => [speaker,
+        (speaker === "Mãe" ? allVoices.find((item) => /lara|narradora|feminin|voz atrás da porta/i.test(item.name) && item.id !== voice?.id)?.id : undefined) ??
+        (/^narrad/i.test(speaker) ? allVoices.find((item) => /padr[aã]o|narrad/i.test(item.name))?.id : undefined) ??
         allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")) && /pt-br|brasil/i.test(item.name))?.id ??
         allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")))?.id ??
         (/narrad/i.test(speaker) ? allVoices.find((item) => /narrad/i.test(item.name))?.id : undefined) ??
         (index === 0 ? voice?.id : alternatives[(index - 1) % alternatives.length]?.id) ?? voice?.id ?? ""]));
+      if (new Set(Object.values(voiceProfiles)).size !== cast.length) throw new Error("Atribua uma voz diferente do VoiceStudio para cada personagem.");
       const masters: VisualReference[] = promptImage ? [{ id: makeId("ref"), kind: "character", name: promptImage.name,
         prompt: "Imagem mestra enviada no chat.", image_data: promptImage.image_data, source: "upload" }] : [];
-      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, visual_bible: plan.visual_bible, scenes, references: masters, voice_profiles: voiceProfiles, episode_status: "draft" } } }) });
+      planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, visual_bible: plan.visual_bible, scenes, references: masters, voice_profiles: voiceProfiles, captions_enabled: !/sem legendas/i.test(idea), episode_status: "draft" } } }) });
       setPromptImage(null);
       setProject(planned);
       setProjects((current) => current.map((item) => item.id === planned.id ? planned : item));
       setEpisodePlan(scenes);
       }
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
+      const cast = [...new Set(scenes.flatMap((scene) => scene.voice_beats?.length ? scene.voice_beats.filter((beat) => beat.text).map((beat) => beat.speaker) : [scene.speaker?.trim() || "Narradora"]))];
+      const continuousNarrator = scenes.every((scene) => scene.dialogue?.trim()) &&
+        cast.every((speaker) => /^[a-f0-9]{8}$/.test(voiceProfiles[speaker] ?? ""));
       if (!(planned.timeline.storyboard?.references ?? []).some((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number)) {
         setAutoProgress("Criando a imagem mestra do personagem antes dos cenários…");
         const status = await centralRequest<{ qwen_image_2_1: { available: boolean } }>("/api/motion/reference-providers");
         if (!status.qwen_image_2_1.available) throw new Error("O motor local Qwen Image 2.1 não está instalado. A produção aguarda o modelo de imagens.");
-        const masterPrompt = characterMasterPrompt(planned.timeline.storyboard?.visual_bible, idea);
+        const masterPrompt = longEpisode && /corredor/i.test(idea) ?
+          `Create a single dark, indistinct human SHADOW silhouette, isolated on a plain light background. No distinct face, no clothing details, no corridor, no text. Match this visual direction: ${planned.timeline.storyboard?.visual_bible ?? "psychological horror"}.` :
+          characterMasterPrompt(planned.timeline.storyboard?.visual_bible, idea);
         const master = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
           method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: masterPrompt }),
         });
@@ -545,19 +634,23 @@ export default function App() {
               name: "Imagem mestra do personagem", prompt: masterPrompt, image_data: master.image_data, source: "generated_image" }] } },
         }) });
         setProject(planned);
-        addChatMessage("assistant", "Imagem mestra salva. Vou usá-la para manter o personagem nas oito cenas.");
+        addChatMessage("assistant", `Imagem mestra salva. Vou usá-la para manter o personagem nas ${scenes.length} cenas.`);
       }
       for (const scene of scenes) {
         let current = await request<Project>(`/api/projects/${planned.id}`);
         if (findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene)) continue;
-        setAutoProgress(`Trabalhador de arte e motor de imagem: cena ${scene.scene}/8 com imagem mestra…`);
+        setAutoProgress(`Trabalhador de arte e motor de imagem: cena ${scene.scene}/${scenes.length} com imagem mestra…`);
         const references = current.timeline.storyboard?.references ?? [];
         const anchor = referenceAnchor(references);
         if (!anchor?.image_data || anchor.kind !== "character") throw new Error("Falta a imagem mestra do personagem para a cena.");
-        const imagePrompt = sceneImageEditPrompt(scene);
+        const imagePrompt = longEpisode && /corredor/i.test(idea) ?
+          `Photorealistic cinematic horror still, vertical 9:16. Same old dark corridor, same lamps and door at the far end. Scene ${scene.scene}: ${scene.image_prompt}. Preserve architecture and camera angle; show the requested change in lighting, door or shadow. No text, no subtitles, no collage.` :
+          sceneImageEditPrompt(scene);
+        const settingAnchor = longEpisode && /corredor/i.test(idea) && scene.scene > 1 ?
+          findSceneReference(references, 1)?.image_data : undefined;
         const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
           method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", prompt: imagePrompt,
-            reference_image_data: anchor.image_data }),
+            reference_image_data: settingAnchor ?? (longEpisode && /corredor/i.test(idea) ? undefined : anchor.image_data) }),
         });
         const generatedReference: VisualReference = { id: makeId("ref"), kind: "setting",
           name: `Cena ${scene.scene} · ${scene.title}`, prompt: imagePrompt,
@@ -571,30 +664,107 @@ export default function App() {
       }
       const ready = await request<Project>(`/api/projects/${planned.id}`);
       if (!allSceneImagesReady(scenes, ready.timeline.storyboard?.references ?? [])) {
-        throw new Error("A animação aguarda as oito imagens de referência.");
+        throw new Error(`A montagem aguarda as ${scenes.length} imagens de referência.`);
+      }
+      for (const scene of scenes) {
+        setAutoProgress(`Trabalhador de revisão visual: conferindo cena ${scene.scene}/${scenes.length} com roteiro e imagem mestra…`);
+        let review: VisualQualityReview;
+        try {
+          review = await reviewReference(planned.id, scene);
+        } catch (reason) {
+          if (!directedScript) throw reason;
+          addChatMessage("assistant", `Cena ${scene.scene}: revisor visual indisponível. O quadro permanece pendente de aprovação na timeline.`);
+          continue;
+        }
+        if (review.status === "needs_revision") {
+          if (directedScript) {
+            addChatMessage("assistant", `Cena ${scene.scene} marcada para revisão visual: ${review.findings.join("; ")}. Vou manter o quadro salvo no teste e deixar a correção disponível na timeline.`);
+            continue;
+          }
+          addChatMessage("assistant", `Cena ${scene.scene}: encontrei ${review.findings.join("; ")}. Vou corrigir esse quadro e conferir novamente.`);
+          await correctReference(planned.id, scene, review.findings);
+          review = await reviewReference(planned.id, scene);
+          if (review.status === "needs_revision") throw new Error(`A cena ${scene.scene} ainda precisa de revisão: ${review.findings.join("; ") || "verifique a imagem"}.`);
+        }
       }
       const imageSamples = await Promise.all(scenes.map(async (scene) => imagePixels(findSceneReference(ready.timeline.storyboard?.references ?? [], scene.scene)!.image_data!)));
       for (let index = 1; index < imageSamples.length; index += 1) {
         if (meanPixelDifference(imageSamples[index - 1], imageSamples[index]) < 10) {
-          throw new Error(`Os quadros ${index} e ${index + 1} ficaram parecidos demais para cenários diferentes. Revise as referências antes de animar; nenhum vídeo foi iniciado.`);
+          addChatMessage("assistant", `Os quadros ${index} e ${index + 1} têm aparência próxima. Vou manter a continuidade visual e conferir se as poses mostram ações diferentes na revisão.`);
         }
       }
       if (reviewAfterImages || !ideaOverride) {
-        setAutoProgress("Revise os oito quadros. A identidade do personagem precisa de aprovação antes de gastar tempo renderizando os vídeos.");
+        setAutoProgress(`Revise os ${scenes.length} quadros. A identidade do personagem precisa de aprovação antes de renderizar os vídeos.`);
         addChatMessage("assistant", "As imagens estão salvas. Confira rosto, cabelo, roupa e cenários. Se estiverem fiéis, use Continuar produção; caso contrário, refaça as referências.");
         return;
       }
-      addChatMessage("assistant", "As oito imagens estão prontas e salvas no projeto. Vou animar cada cena e colocar o resultado na timeline.");
+      addChatMessage("assistant", `As ${scenes.length} imagens estão prontas. Vou montar cada cena na timeline.`);
       for (const scene of scenes) {
         const current = await request<Project>(`/api/projects/${planned.id}`);
-        if (current.timeline.tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.style.scene_number === scene.scene))) continue;
+        const existingSceneClip = current.timeline.tracks.find((track) => track.kind === "video")?.clips.find((clip) => clip.style.scene_number === scene.scene);
+        const keyframeCount = referenceKeyframeCount(scene.pose_count);
+        const needsReferenceUpgrade = (directedScript || longEpisode && /corredor/i.test(idea)) && existingSceneClip?.style.version === 1 &&
+          (scene.scene === 1 || keyframeCount > 2);
+        if (existingSceneClip && !needsReferenceUpgrade) {
+          if (!directedScript || !/sem m[uú]sica ou efeitos/i.test(idea)) await applyAutomaticSceneEffect(planned.id, scene, idea);
+          continue;
+        }
         const sceneReference = findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene);
         if (!sceneReference?.image_data) throw new Error(`Falta a imagem da cena ${scene.scene}.`);
-        setAutoProgress(`Produzindo cena ${scene.scene}/8 com vídeo${scene.dialogue?.trim() ? " e voz" : ""}…`);
-        const generated = await centralRequest<MotionRun>("/api/motion/ltx/scenes", { method: "POST", body: JSON.stringify({
-          project_id: planned.id, episode: 1, scene: scene.scene, prompt: scene.prompt.slice(0, 1024), ...sceneTimingForSpeech(scene.dialogue),
-          image_data: sceneReference.image_data, width: 480, height: 832,
-          ...(scene.dialogue?.trim() ? { speech_text: scene.dialogue.trim().slice(0, 300), speaker: scene.speaker?.trim() || "Narradora", voice_profile: voiceProfiles[scene.speaker?.trim() || "Narradora"] } : {}),
+        const anchor = referenceAnchor(current.timeline.storyboard?.references ?? []);
+        if (!anchor?.image_data) throw new Error("Falta a imagem mestra do personagem.");
+        if (directedScript || longEpisode && /corredor/i.test(idea)) {
+          const previous = scene.scene > 1
+            ? findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene - 1)
+            : sceneReference;
+          const keyframes = [previous?.image_data ?? sceneReference.image_data];
+          for (let index = 1; index < keyframeCount - 1; index += 1) {
+            setAutoProgress(`Criando quadro de ação ${index + 1}/${keyframeCount} da cena ${scene.scene}/${scenes.length}…`);
+            const intermediate = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+              method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1",
+                prompt: `Cinematic psychological suspense, vertical 9:16. Preserve the EXACT room architecture, door, lighting and Lucas's face and clothing from the supplied reference. Scene ${scene.scene}: ${scene.title}. Action: ${scene.prompt}. This is intermediate keyframe ${index + 1} of ${keyframeCount}, ${Math.round(index / (keyframeCount - 1) * 100)} percent through the action. Show a small, physically plausible progression. No text, no magenta background, no collage.`,
+                reference_image_data: sceneReference.image_data }),
+            });
+            keyframes.push(intermediate.image_data);
+          }
+          keyframes.push(sceneReference.image_data);
+          setAutoProgress(`Montando cena ${scene.scene}/${scenes.length} com ${keyframes.length} quadros e movimento de câmera…`);
+          const generated = await centralRequest<MotionRun>("/api/motion/photo/scenes", { method: "POST", body: JSON.stringify({
+            project_id: planned.id, scene: scene.scene, mode: "reference",
+            replace_clip_id: existingSceneClip?.id,
+            background_data: sceneReference.image_data,
+            poses: keyframes,
+            frames: scene.duration_frames ?? 360,
+            camera_motion: directScene(scene, idea).camera,
+          }) });
+          await syncCompletedVideos([generated], planned.id);
+          if (!directedScript || !/sem m[uú]sica ou efeitos/i.test(idea)) await applyAutomaticSceneEffect(planned.id, scene, idea);
+          addChatMessage("assistant", `Cena ${scene.scene}/${scenes.length} pronta na timeline.`);
+          continue;
+        }
+        setAutoProgress(`Criando cenário fixo da cena ${scene.scene}/${scenes.length}…`);
+        const background = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+          method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1",
+            prompt: `Empty location plate for this story scene, ${longEpisode ? "photorealistic cinematic horror" : "2D illustrated style"}, vertical 9:16. Scene: ${scene.title}. Setting details: ${scene.image_prompt}. Draw ONLY architecture, scenery, lighting and stationary props. Absolutely no person, human figure, silhouette, face, hand, clothing, magenta or pink backdrop, or text. Leave the central foreground clear for a character to be composited later.` }),
+        });
+        const poseCount = Math.max(longEpisode ? 8 : 2, Math.min(30, scene.pose_count ?? (longEpisode ? 8 : 4)));
+        const phases = Array.from({ length: poseCount }, (_, index) => `step ${index + 1} of ${poseCount}, ${Math.round(index / (poseCount - 1) * 100)} percent through the action`);
+        const poses: string[] = [];
+        for (let index = 0; index < phases.length; index += 1) {
+          setAutoProgress(`Gerando pose ${index + 1}/${phases.length} da cena ${scene.scene}/${scenes.length}…`);
+          const pose = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+            method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1",
+              prompt: longEpisode && /corredor/i.test(idea) ?
+                `ONE vague dark human SHADOW silhouette isolated on perfectly uniform solid bright magenta (#FF00FF) background. No corridor, no door, no floor, no text, no face, no clothing details. Preserve the shadow shape of the supplied reference. Scene action: ${scene.prompt}. This is pose ${index + 1} of ${poseCount}, ${phases[index]}. Small progressive movement only.` :
+                `ONE full-body character, isolated on perfectly uniform solid bright magenta (#FF00FF) background. No scenery, no floor, no gradients, no text, no collage. Preserve exactly the face, hair, accessories, outfit, colors and art style of the supplied character reference. Character identity: ${current.timeline.storyboard?.visual_bible ?? "Use the supplied reference exactly."}. Scene action: ${scene.prompt}. This is pose ${index + 1} of ${poseCount}, ${phases[index]}. Change only the character pose and any small object held by the character. Keep body proportions and clothing stable.`,
+              reference_image_data: anchor.image_data }),
+          });
+          poses.push(pose.image_data);
+        }
+        setAutoProgress(`Montando cena ${scene.scene}/${scenes.length} por fotos sobre cenário fixo…`);
+        const generated = await centralRequest<MotionRun>("/api/motion/photo/scenes", { method: "POST", body: JSON.stringify({
+          project_id: planned.id, scene: scene.scene, background_data: background.image_data,
+          poses, frames: scene.duration_frames ?? 96,
         }) });
         setWanRun(generated);
         let latest = generated;
@@ -605,9 +775,27 @@ export default function App() {
         }
         if (latest.state !== "completed") throw new Error(`Cena ${scene.scene}: ${latest.error || latest.state}. As cenas prontas permanecem na timeline.`);
         await syncCompletedVideos([latest], planned.id);
-        addChatMessage("assistant", `Cena ${scene.scene}/8 pronta na timeline.`);
+        if (!directedScript || !/sem m[uú]sica ou efeitos/i.test(idea)) await applyAutomaticSceneEffect(planned.id, scene, idea);
+        addChatMessage("assistant", `Cena ${scene.scene}/${scenes.length} pronta na timeline.`);
       }
-      setAutoProgress("Montando o MP4 final com as falas das oito cenas…");
+      if (continuousNarrator) {
+        const current = await request<Project>(`/api/projects/${planned.id}`);
+        const hasNarration = current.timeline.tracks.some((track) => track.kind === "audio" &&
+          track.clips.some((clip) => clip.style.continuous_narration));
+        if (!hasNarration) {
+          setAutoProgress("Gerando uma única narração com a voz brasileira escolhida…");
+          const narrated = await centralRequest<{ id: string; speaker: string; text: string; voice_profile: string }>(`/api/motion/projects/${planned.id}/narration`, { method: "POST", body: "{}" });
+          const timeline = addContinuousNarrationClip(current.timeline, {
+            audioId: narrated.id, speaker: narrated.speaker, text: narrated.text, voiceProfile: narrated.voice_profile,
+          });
+          const updated = await request<Project>(`/api/projects/${planned.id}`, { method: "PUT", body: JSON.stringify({
+            title: current.title, summary: current.summary, timeline,
+          }) });
+          setProject(updated);
+          addChatMessage("assistant", "Narração contínua pronta e visível na trilha de áudio. Vou montar a prévia do episódio.");
+        }
+      }
+      setAutoProgress("Montando o MP4 final com a narração e as cenas…");
       await exportCurrentEpisode(planned.id);
       setAutoProgress("Mini episódio pronto. Assista ao MP4 e revise cada cena e fala na timeline.");
       addChatMessage("assistant", "O episódio está montado. Você pode assistir, revisar cada trecho e baixar o MP4.");
@@ -628,8 +816,36 @@ export default function App() {
         storyboard: { ...storyboard, references: (storyboard.references ?? []).filter((reference) => !reference.scene_number && (!resetGeneratedMaster || reference.source === "upload")) } },
     }) });
     setProject(updated);
-    addChatMessage("assistant", resetGeneratedMaster ? "Vou criar uma nova imagem mestra de um único personagem e refazer os oito quadros." : "Vou refazer os oito quadros a partir da imagem mestra atual.");
+    addChatMessage("assistant", resetGeneratedMaster ? `Vou criar uma nova imagem mestra e refazer os ${storyboard.scenes.length} quadros.` : `Vou refazer os ${storyboard.scenes.length} quadros a partir da imagem mestra atual.`);
     await createEpisodeFromChat(updated.summary, true, updated);
+  }
+
+  async function regenerateNarration() {
+    if (!project || !plannedScenesComplete || autoBusy || !hasContinuousNarration) return;
+    setAutoBusy(true);
+    setError("");
+    setAutoProgress("Refazendo a narração para começar cada fala junto da cena…");
+    try {
+      const narrated = await centralRequest<{ id: string; speaker: string; text: string; voice_profile: string }>(`/api/motion/projects/${project.id}/narration`, { method: "POST", body: "{}" });
+      const current = await request<Project>(`/api/projects/${project.id}`);
+      const timeline = addContinuousNarrationClip(current.timeline, {
+        audioId: narrated.id, speaker: narrated.speaker, text: narrated.text, voiceProfile: narrated.voice_profile,
+      });
+      const updated = await request<Project>(`/api/projects/${project.id}`, { method: "PUT", body: JSON.stringify({
+        title: current.title, summary: current.summary, timeline,
+      }) });
+      setProject(updated);
+      setFinalExport(null);
+      setAutoProgress("Montando o MP4 com a narração alinhada…");
+      await exportCurrentEpisode(project.id);
+      setAutoProgress("Narração alinhada e MP4 atualizado. Revise o episódio na timeline.");
+      addChatMessage("assistant", "Refiz a narração para cada fala começar na cena correspondente e atualizei o MP4.");
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Não foi possível refazer a narração.";
+      setError(message);
+      setAutoProgress("A narração anterior permanece salva.");
+      addChatMessage("assistant", `A narração não foi alterada: ${message}`);
+    } finally { setAutoBusy(false); }
   }
 
   async function exportCurrentEpisode(projectId = project?.id) {
@@ -688,7 +904,7 @@ export default function App() {
           ...(videoModel === "ltxv" ? sceneTimingForSpeech(sceneSpeechText) : { frames: 121, fps: 16 }),
           ...(videoModel === "ltxv" ? { image_data: sceneImage, width: 480, height: 832 } : {}),
           replace_clip_id: replaceClipId ?? null,
-          ...(sceneSpeechText.trim() ? { speech_text: sceneSpeechText.trim(), speaker: sceneSpeaker,
+          ...(sceneSpeechText.trim() && !(/^[a-f0-9]{8}$/.test(project.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? "") && /^narrad/i.test(sceneSpeaker)) ? { speech_text: sceneSpeechText.trim(), speaker: sceneSpeaker,
             voice_profile: project.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? null } : {}),
         }),
       });
@@ -707,6 +923,28 @@ export default function App() {
     if (!profile) { setError(`Escolha uma voz para ${sceneSpeaker}.`); return; }
     setSceneSpeechBusy(true);
     try {
+      if (/^[a-f0-9]{8}$/.test(profile) && /^narrad/i.test(sceneSpeaker)) {
+        const storyboard = project.timeline.storyboard;
+        const scenes = storyboard?.scenes.map((scene) => scene.scene === Number(selected.style.scene_number)
+          ? { ...scene, dialogue: sceneSpeechText.trim(), speaker: sceneSpeaker } : scene) ?? [];
+        if (storyboard && scenes.every((scene) => scene.dialogue?.trim() && /^narrad/i.test(scene.speaker?.trim() || ""))) {
+          const saved = await request<Project>(`/api/projects/${project.id}`, { method: "PUT", body: JSON.stringify({
+            title: project.title, summary: project.summary, timeline: { ...project.timeline,
+              storyboard: { ...storyboard, scenes, episode_status: "draft" } },
+          }) });
+          const narrated = await centralRequest<{ id: string; speaker: string; text: string; voice_profile: string }>(`/api/motion/projects/${project.id}/narration`, { method: "POST", body: "{}" });
+          const timeline = addContinuousNarrationClip(saved.timeline, { audioId: narrated.id,
+            speaker: narrated.speaker, text: narrated.text, voiceProfile: narrated.voice_profile });
+          const updated = await request<Project>(`/api/projects/${project.id}`, { method: "PUT", body: JSON.stringify({
+            title: saved.title, summary: saved.summary, timeline,
+          }) });
+          setProject(updated);
+          setProjects((current) => current.map((item) => item.id === updated.id ? updated : item));
+          setFinalExport(null);
+          setImportNotice("Narração contínua atualizada na trilha de áudio. Atualize o MP4 final após a revisão.");
+          return;
+        }
+      }
       const result = await centralRequest<{ id: string; speaker: string; text: string; voice_profile: string }>("/api/motion/scene-speech", {
         method: "POST", body: JSON.stringify({
           run_id: selected.style.motion_run_id, video_artifact_id: selected.style.motion_artifact_id,
@@ -733,7 +971,7 @@ export default function App() {
   async function importBrazilianVoice(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !sceneSpeaker.trim() || !voiceReferenceText.trim() || voiceReferenceBusy) return;
+    if (!file || !newVoiceName.trim() || !voiceReferenceText.trim() || voiceReferenceBusy) return;
     if (file.type !== "audio/wav" && !file.name.toLowerCase().endsWith(".wav")) {
       setError("Envie uma gravação WAV da voz do personagem."); return;
     }
@@ -746,12 +984,13 @@ export default function App() {
         reader.onerror = () => reject(new Error("Não foi possível ler a gravação."));
         reader.readAsDataURL(file);
       });
-      const imported = await centralRequest<{ id: string; name: string }>("/api/motion/qwen/voices/import", {
-        method: "POST", body: JSON.stringify({ name: `${sceneSpeaker.trim()} · Brasil`,
+      const imported = await centralRequest<{ id: string; name: string }>("/api/motion/voicestudio/voices/import", {
+        method: "POST", body: JSON.stringify({ name: newVoiceName.trim(),
           transcript: voiceReferenceText.trim(), audio_data }),
       });
-      setVoiceCatalog((current) => ({ ready: true, voices: [imported, ...current.voices] }));
-      setSceneVoice(imported.id);
+      setVoiceCatalog((current) => ({ ready: true, voices: [{ ...imported, name: `VoiceStudio · ${imported.name}` }, ...current.voices] }));
+      setImportNotice(`Voz ${imported.name} criada no VoiceStudio. Agora você pode atribuí-la a um personagem.`);
+      if (selected?.kind === "video") setSceneVoice(imported.id);
       setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível importar a voz."); }
     finally { setVoiceReferenceBusy(false); }
@@ -764,6 +1003,63 @@ export default function App() {
     const revisedPrompt = revision ? `${direction} Revision requested: ${revision}`.slice(0, 1024) : direction;
     setScenePrompt(revisedPrompt);
     await renderWanScene(selected.id, revisedPrompt);
+  }
+
+  async function applySelectedSceneEffect() {
+    if (!project || selected?.kind !== "video" || effectBusy) return;
+    setEffectBusy(true);
+    setError("");
+    try {
+      const result = await centralRequest<MotionRun>("/api/motion/photo/effects", {
+        method: "POST", body: JSON.stringify({ project_id: project.id, clip_id: selected.id,
+          preset: effectPreset, cue_seconds: effectCue }),
+      });
+      await syncCompletedVideos([result], project.id);
+      await exportCurrentEpisode(project.id);
+      addChatMessage("assistant", `Edição de som e movimento aplicada à cena ${selected.style.scene_number}. A versão anterior permanece disponível na revisão.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível aplicar o efeito à cena.");
+    } finally { setEffectBusy(false); }
+  }
+
+  async function reviewSelectedSceneImage() {
+    if (!project || !selectedScene || visualReviewBusy) return;
+    setVisualReviewBusy(true);
+    setError("");
+    try {
+      const result = await reviewReference(project.id, selectedScene, true);
+      addChatMessage("assistant", `Revisor visual · cena ${selectedScene.scene}: ${result.status === "pass" ? "sem falha evidente" : "precisa de revisão"}${result.findings.length ? ` — ${result.findings.join("; ")}` : ""}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha na revisão visual.");
+    } finally { setVisualReviewBusy(false); }
+  }
+
+  async function correctSelectedSceneImage() {
+    if (!project || !selectedScene || !selectedQualityReview?.findings.length || visualReviewBusy) return;
+    setVisualReviewBusy(true);
+    setError("");
+    try {
+      await correctReference(project.id, selectedScene, selectedQualityReview.findings);
+      const result = await reviewReference(project.id, selectedScene);
+      addChatMessage("assistant", `Imagem da cena ${selectedScene.scene} corrigida e reavaliada: ${result.status === "pass" ? "sem falha evidente" : result.findings.join("; ")}. A cena de vídeo anterior permanece até ser refeita.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao corrigir a imagem.");
+    } finally { setVisualReviewBusy(false); }
+  }
+
+  async function pushSelectedCamera() {
+    if (!project || selected?.kind !== "video" || cameraBusy) return;
+    setCameraBusy(true);
+    setError("");
+    try {
+      const generated = await centralRequest<MotionRun>("/api/motion/photo/camera-push", { method: "POST",
+        body: JSON.stringify({ project_id: project.id, clip_id: selected.id }) });
+      await syncCompletedVideos([generated], project.id);
+      await exportCurrentEpisode(project.id);
+      addChatMessage("assistant", `Movimento de avanço aplicado à cena ${selected.style.scene_number}; a versão anterior foi preservada.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha no movimento de câmera.");
+    } finally { setCameraBusy(false); }
   }
 
   async function regenerateSelectedSceneImage() {
@@ -855,20 +1151,31 @@ export default function App() {
           <div className="motion-chat-feed" ref={chatFeedRef} aria-live="polite">
             {!chatMessages.length && !episodePlan.length && <div className="motion-chat-welcome"><span className="motion-chat-orbit">✧</span><h2>Qual é a história?</h2><p>Conte o tema em uma mensagem. Você pode anexar uma imagem ou deixar a Central criar todas as referências.</p><button onClick={() => setChatPrompt("Um inventor descobre que uma gota muda a cor de todo o laboratório. Mini série vertical, humor e suspense, com Caio como protagonista.")}>Experimentar um tema</button></div>}
             {chatMessages.map((message) => <div key={message.id} className={`motion-chat-message ${message.role}`}><span>{message.role === "user" ? "Você" : "✦ Central IA"}</span><p>{message.text}</p></div>)}
-            {episodePlan.length > 0 && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && !plannedScenesComplete && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy || !wanConfigSaved || Boolean(promptImage)}>{imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}</div>}
-            {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <><button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os oito quadros</button>{characterReference?.source === "generated_image" && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue(true)}>Refazer personagem e quadros</button>}</>}
+            {episodePlan.length > 0 && <div className="motion-chat-message assistant"><span>✦ Central IA</span><p>Roteiro de {episodePlan.length} cenas salvo. {sceneImages.length}/{episodePlan.length} imagens prontas. {videoClips.length}/{episodePlan.length} vídeos na timeline.</p>{project?.summary && (!plannedScenesComplete || !finalExport?.url) && <button className="motion-chat-continue" onClick={() => void (plannedScenesComplete ? exportCurrentEpisode() : createEpisodeFromChat(project.summary))} disabled={autoBusy || Boolean(promptImage)}>{plannedScenesComplete ? "Montar MP4 final →" : imageStageReady ? "Continuar produção →" : "Continuar este episódio →"}</button>}{project?.summary && plannedScenesComplete && /corredor/i.test(project.summary) && episodePlan.some((scene) => referenceKeyframeCount(scene.pose_count) > 2 && videoClips.some((clip) => clip.style.scene_number === scene.scene && clip.style.version === 1)) && <button className="motion-chat-continue" onClick={() => void createEpisodeFromChat(project.summary)} disabled={autoBusy}>Aprimorar movimentos das cenas →</button>}{plannedScenesComplete && hasContinuousNarration && <button className="motion-chat-continue" onClick={() => void regenerateNarration()} disabled={autoBusy}>Refazer narração e MP4 →</button>}</div>}
+            {episodePlan.length > 0 && imageStageReady && !videoClips.length && !autoBusy && <><button className="motion-chat-continue" onClick={() => void redoImagesAndContinue()}>Refazer os {episodePlan.length} quadros</button>{characterReference?.source === "generated_image" && <button className="motion-chat-continue" onClick={() => void redoImagesAndContinue(true)}>Refazer personagem e quadros</button>}</>}
             {characterReference?.image_data && <div className="motion-chat-images"><strong>Imagem mestra do personagem</strong><div><figure><img src={characterReference.image_data} alt="Imagem mestra do personagem" /><figcaption>{characterReference.name}</figcaption></figure></div></div>}
             {sceneImages.length > 0 && <div className="motion-chat-images"><strong>Quadros de referência · {sceneImages.length}/{episodePlan.length || 8}</strong><div>{sceneImages.map((reference) => <figure key={reference.id}><img src={reference.image_data} alt={reference.name} /><figcaption>{reference.name}</figcaption></figure>)}</div></div>}
             {autoProgress && <p className="motion-chat-progress" role="status">✦ {autoProgress}</p>}
             {wanRun && <p className="motion-chat-run">Cena em andamento: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}
           </div>
           <div className="motion-chat-composer">
+            <details className="chat-references"><summary>VoiceStudio · criar voz</summary>
+              <p className="helper-text">Gravação WAV PCM com 3 a 20 segundos de fala clara. A transcrição deve corresponder exatamente ao áudio.</p>
+              <label className="field-label" htmlFor="chat-voice-name">NOME DA VOZ</label>
+              <input id="chat-voice-name" value={newVoiceName} maxLength={80} onChange={(event) => setNewVoiceName(event.target.value)} />
+              <label className="field-label" htmlFor="chat-voice-text">TEXTO DA GRAVAÇÃO</label>
+              <input id="chat-voice-text" value={voiceReferenceText} maxLength={300} onChange={(event) => setVoiceReferenceText(event.target.value)} />
+              <label className="reference-upload">{voiceReferenceBusy ? "CRIANDO VOZ…" : "ENVIAR GRAVAÇÃO WAV"}
+                <input type="file" accept="audio/wav,.wav" onChange={(event) => void importBrazilianVoice(event)} disabled={voiceReferenceBusy || !newVoiceName.trim() || !voiceReferenceText.trim()} />
+              </label>
+              <p className="helper-text">{voiceCatalog.ready ? `${voiceCatalog.voices.length} vozes disponíveis` : "VoiceStudio indisponível"}</p>
+            </details>
             {promptImage && <div className="motion-chat-attachment"><img src={promptImage.image_data} alt="Imagem anexada ao pedido" /><span>{promptImage.name}</span><button onClick={() => setPromptImage(null)} aria-label="Remover imagem anexada">×</button></div>}
             <div className="motion-chat-input-row"><button className="motion-attach" onClick={() => promptImageInputRef.current?.click()} disabled={autoBusy} aria-label="Anexar imagem de referência">＋</button>
               <input ref={promptImageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadPromptImage} />
               <textarea aria-label="Mensagem para a Central IA" value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} maxLength={2000} rows={3} placeholder="Conte um tema ou peça para continuar…" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void createEpisodeFromChat(); } }} />
-              <button className="motion-send" onClick={() => void createEpisodeFromChat()} disabled={!embedded || !wanConfigSaved || autoBusy || !chatPrompt.trim()} aria-label="Enviar pedido para criar episódio">➤</button></div>
-            <small>Roteiro → imagens → vídeo → revisão na timeline</small>
+              <button className="motion-send" onClick={() => void createEpisodeFromChat()} disabled={!embedded || autoBusy || !chatPrompt.trim()} aria-label="Enviar pedido para criar episódio">➤</button></div>
+            <small>Roteiro → cenário fixo e poses → montagem por fotos → narração → revisão na timeline</small>
           </div>
         </aside>
         <section className="center-column">
@@ -881,7 +1188,9 @@ export default function App() {
               onVideoTime={(seconds) => {
                 if (activeVideoClip) {
                   setPlayheadFrame(Math.min(projectLength, activeVideoClip.start_frame + Math.round(seconds * fps)));
-                  if (audioRef.current && Math.abs(audioRef.current.currentTime - seconds) > .12) audioRef.current.currentTime = seconds;
+                  const audioSeconds = activeAudioClip?.style.continuous_narration
+                    ? activeVideoClip.start_frame / fps + seconds : seconds;
+                  if (audioRef.current && Math.abs(audioRef.current.currentTime - audioSeconds) > .12) audioRef.current.currentTime = audioSeconds;
                 }
               }}
               onVideoEnded={handleVideoEnded}
@@ -893,7 +1202,11 @@ export default function App() {
                     player.currentTime = 0;
                     void player.play().then(() => {
                       setPlaying(true);
-                      if (audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); }
+                      if (audioRef.current) {
+                        const target = activeAudioClip?.style.continuous_narration ? activeVideoClip.start_frame / fps : 0;
+                        if (Math.abs(audioRef.current.currentTime - target) > .12) audioRef.current.currentTime = target;
+                        if (audioRef.current.paused) void audioRef.current.play();
+                      }
                     }).catch(() => {
                       setPlaying(false);
                       setError("O navegador não conseguiu reproduzir a próxima cena Wan.");
@@ -908,7 +1221,8 @@ export default function App() {
               src={activeAudioUrl ?? undefined}
               preload="metadata" aria-label={`Fala de ${activeAudioClip.style.speaker}`}
               onLoadedMetadata={(event) => {
-                const seconds = videoRef.current?.currentTime ?? Math.max(0, (playheadFrame - activeAudioClip.start_frame) / fps);
+                const seconds = activeAudioClip.style.continuous_narration ? playheadFrame / fps :
+                  (videoRef.current?.currentTime ?? Math.max(0, (playheadFrame - activeAudioClip.start_frame) / fps));
                 event.currentTarget.currentTime = seconds;
                 if (videoRef.current && !videoRef.current.paused) void event.currentTarget.play();
               }} />}
@@ -956,6 +1270,21 @@ export default function App() {
             <p className="helper-text">Selecione uma cena na timeline, descreva a alteração e gere somente essa parte.</p>
             <textarea aria-label="Alteração desejada na cena" value={reviewComment} maxLength={2000} placeholder="O que deve mudar nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
             <div className="review-actions"><button className="quiet-button" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR REVISÃO</button><button className="quiet-button" onClick={() => void regenerateSelectedSceneImage()} disabled={!embedded || sceneImageBusy}>↻ {sceneImageBusy ? "GERANDO IMAGEM…" : "REFAZER IMAGEM"}</button><button className="quiet-button" onClick={() => void regenerateSelectedScene()} disabled={!embedded || wanBusy || sceneImageBusy}>↻ REFAZER CENA</button></div>
+            <button className="quiet-button" onClick={() => void reviewSelectedSceneImage()} disabled={!embedded || visualReviewBusy || !selectedReference}>{visualReviewBusy ? "REVISANDO IMAGEM…" : "REVISAR IMAGEM COM IA"}</button>
+            {selectedQualityReview && <p className="helper-text" role="status">Revisor visual: {selectedQualityReview.status === "pass" ? "sem falha evidente" : "revisão necessária"}{selectedQualityReview.findings.length ? ` · ${selectedQualityReview.findings.join("; ")}` : ""}</p>}
+            {selectedQualityReview?.status === "needs_revision" && <button className="quiet-button" onClick={() => void correctSelectedSceneImage()} disabled={visualReviewBusy}>CORRIGIR IMAGEM SINALIZADA</button>}
+            <button className="quiet-button" onClick={() => void pushSelectedCamera()} disabled={!embedded || cameraBusy || effectBusy}>{cameraBusy ? "MOVENDO CÂMERA…" : "AVANÇAR CÂMERA PELA CENA"}</button>
+            <label className="field-label" htmlFor="scene-effect">MOVIMENTO E EFEITO SONORO</label>
+            <select id="scene-effect" value={effectPreset} onChange={(event) => setEffectPreset(event.target.value)}>
+              <option value="footsteps">Passos com movimento suave</option>
+              <option value="lamp_clicks">Lâmpadas estalando</option>
+              <option value="door_slam">Porta batendo · corte e tremor</option>
+              <option value="wind">Vento ambiente</option>
+              <option value="metal_creak">Metal rangendo</option>
+            </select>
+            <label className="field-label" htmlFor="effect-cue">INSTANTE DA AÇÃO NA CENA (SEGUNDOS)</label>
+            <input id="effect-cue" type="number" min="0.5" max={Math.max(.5, selected.duration_frames / (project?.timeline.fps ?? 24) - .5)} step="0.1" value={effectCue} onChange={(event) => setEffectCue(Number(event.target.value))} />
+            <button className="quiet-button" onClick={() => void applySelectedSceneEffect()} disabled={!embedded || effectBusy || autoBusy}>{effectBusy ? "APLICANDO EDIÇÃO…" : "APLICAR EDIÇÃO À CENA"}</button>
             {Array.isArray(selected.style.previous_versions) && selected.style.previous_versions.map((version: any) => <button className="quiet-button" key={version.version} onClick={() => restoreSelectedVersion(Number(version.version))}>RESTAURAR VERSÃO {version.version}</button>)}
             <label className="field-label" htmlFor="review-speech">FALA DESTA CENA</label>
             <textarea id="review-speech" value={sceneSpeechText} maxLength={300} onChange={(event) => setSceneSpeechText(event.target.value)} />
@@ -965,15 +1294,7 @@ export default function App() {
             <select id="review-voice" value={project?.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? ""} onChange={(event) => setSceneVoice(event.target.value)}>
               <option value="">Selecione uma voz</option>{voiceCatalog.voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
             </select>
-            <details className="chat-references"><summary>Usar gravação brasileira para {sceneSpeaker}</summary>
-              <p className="helper-text">Envie 3 a 30 segundos de fala clara em WAV mono e escreva exatamente o que foi dito. A voz fica salva neste computador para as próximas cenas.</p>
-              <label className="field-label" htmlFor="voice-reference-text">TEXTO DA GRAVAÇÃO</label>
-              <input id="voice-reference-text" value={voiceReferenceText} maxLength={300} onChange={(event) => setVoiceReferenceText(event.target.value)} />
-              <label className="reference-upload">{voiceReferenceBusy ? "IMPORTANDO VOZ…" : "ENVIAR GRAVAÇÃO WAV"}
-                <input type="file" accept="audio/wav,.wav" onChange={(event) => void importBrazilianVoice(event)} disabled={voiceReferenceBusy || !voiceReferenceText.trim()} />
-              </label>
-            </details>
-            <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()} disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim()}>{sceneSpeechBusy ? "GERANDO FALA…" : "↻ REFAZER FALA"}</button>
+            <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()} disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim()}>{sceneSpeechBusy ? "GERANDO FALA…" : /^[a-f0-9]{8}$/.test(project?.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? "") && /^narrad/i.test(sceneSpeaker) ? "↻ REFAZER NARRAÇÃO" : "↻ REFAZER FALA"}</button>
           </> : <><p className="helper-text">Selecione um clipe de vídeo na timeline para aprovar ou solicitar uma alteração.</p><button className="quiet-button" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved")}>APROVAR EPISÓDIO</button></>}
           {[2, 8].includes(episodePlan.length) && videoClips.length === episodePlan.length && <button className="quiet-button" onClick={() => void exportCurrentEpisode().catch((reason) => setError(reason instanceof Error ? reason.message : "Falha na montagem."))} disabled={autoBusy}>ATUALIZAR MP4 FINAL</button>}
         </section>      </section>

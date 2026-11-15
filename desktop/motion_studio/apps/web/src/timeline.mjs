@@ -60,7 +60,7 @@ export function wanVideoPreviewUrl(runId, artifactId) {
 }
 
 /** Preserve generated scenes on the project video track without duplicate imports. */
-export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle }) {
+export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle, effectPreset, effectCue, cameraMotion }) {
   if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error("Invalid generated video reference");
   if (!Number.isInteger(frames) || frames < 1 || frames > 3600 ||
       !Number.isInteger(fps) || fps < 1 || fps > 120) {
@@ -71,7 +71,8 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
   if (track.clips.some((clip) =>
       (clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === artifactId) ||
       clip.style?.previous_versions?.some((version) => version.run_id === runId && version.artifact_id === artifactId))) return timeline;
-  const replaced = replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null;
+  const replaced = (replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null) ??
+    (sceneNumber ? track.clips.find((clip) => clip.style?.scene_number === sceneNumber) : null);
   const start = replaced?.start_frame ?? track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
   const priorVersions = replaced ? [...(replaced.style?.previous_versions ?? []), {
     clip_id: replaced.id,
@@ -97,6 +98,11 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       scene_number: sceneNumber ?? null,
       planned_prompt: plannedPrompt ?? "",
       planned_title: plannedTitle ?? String(name || "Cena Wan"),
+      ...((effectPreset ?? replaced?.style?.effect_preset) ? {
+        effect_preset: effectPreset ?? replaced?.style?.effect_preset,
+        effect_cue: effectCue ?? replaced?.style?.effect_cue,
+      } : {}),
+      ...((cameraMotion ?? replaced?.style?.camera_motion) ? { camera_motion: cameraMotion ?? replaced?.style?.camera_motion } : {}),
       version: Number(replaced?.style?.version ?? 0) + 1,
       previous_versions: priorVersions,
       review_status: "pending",
@@ -181,6 +187,23 @@ export function addSceneSpeechClip(timeline, { audioId, videoClipId, speaker, te
   return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id ? { ...track, clips } : track) };
 }
 
+export function addContinuousNarrationClip(timeline, { audioId, speaker, text, voiceProfile }) {
+  if (!standaloneSpeechPreviewUrl(audioId)) throw new Error('Invalid narration reference');
+  const audioTrack = timeline.tracks.find((track) => track.kind === 'audio');
+  if (!audioTrack) throw new Error('A timeline precisa ter uma trilha de áudio.');
+  const totalFrames = Math.max(0, ...timeline.tracks.filter((track) => track.kind === 'video')
+    .flatMap((track) => track.clips.map((clip) => clip.start_frame + clip.duration_frames)));
+  if (!totalFrames) throw new Error('Adicione as cenas antes da narração.');
+  const previous = audioTrack.clips.find((clip) => clip.style?.continuous_narration);
+  const clip = { id: previous?.id ?? makeId('narration'), kind: 'audio', name: `${speaker} · narração contínua`,
+    start_frame: 0, duration_frames: totalFrames,
+    style: { motion_speech_id: audioId, continuous_narration: true,
+      speaker, speech_text: text, voice_profile: voiceProfile } };
+  return { ...timeline, tracks: timeline.tracks.map((track) => track.id === audioTrack.id
+    ? { ...track, clips: [...track.clips.filter((item) => !item.style?.continuous_narration), clip] }
+    : track) };
+}
+
 /** Update review metadata for one scene without touching other clips or artifacts. */
 export function updateClipReview(timeline, clipId, patch) {
   const allowed = new Set(["pending", "approved", "needs_revision"]);
@@ -207,8 +230,13 @@ export function restoreClipVersion(timeline, clipId, version) {
     .find((clip) => clip.id === clipId);
   const snapshot = target?.style?.previous_versions?.find((item) => item.version === version);
   if (!target || !snapshot || !snapshot.style) throw new Error("Scene version not found");
-  const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: (target.style.previous_versions ?? [])
-    .filter((item) => item.version !== snapshot.version) };
+  const currentVersion = { clip_id: target.id, run_id: target.style.motion_run_id,
+    artifact_id: target.style.motion_artifact_id, version: target.style.version,
+    name: target.name, start_frame: target.start_frame, duration_frames: target.duration_frames,
+    style: { ...target.style, previous_versions: undefined } };
+  const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: [
+    ...(target.style.previous_versions ?? []).filter((item) => item.version !== snapshot.version), currentVersion,
+  ] };
   const oldEnd = target.start_frame + target.duration_frames;
   const shift = snapshot.duration_frames - target.duration_frames;
   return {

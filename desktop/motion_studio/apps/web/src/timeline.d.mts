@@ -24,7 +24,7 @@ export function updateGraphemeStyle<T extends TimelineShape>(
 export function wanVideoPreviewUrl(runId: string, artifactId: string): string | null;
 export function addWanVideoClip<T extends TimelineShape>(
   timeline: T,
-  video: { runId: string; artifactId: string; name: string; frames: number; fps: number; replaceClipId?: string; sceneNumber?: number; plannedPrompt?: string; plannedTitle?: string },
+  video: { runId: string; artifactId: string; name: string; frames: number; fps: number; replaceClipId?: string; sceneNumber?: number; plannedPrompt?: string; plannedTitle?: string; effectPreset?: string; effectCue?: number; cameraMotion?: string },
 ): T;
 export function addWanSpeechClip<T extends TimelineShape>(
   timeline: T,
@@ -39,6 +39,10 @@ export function standaloneSpeechPreviewUrl(audioId: string): string | null;
 export function addSceneSpeechClip<T extends TimelineShape>(
   timeline: T,
   speech: { audioId: string; videoClipId: string; speaker: string; text: string; voiceProfile: string },
+): T;
+export function addContinuousNarrationClip<T extends TimelineShape>(
+  timeline: T,
+  narration: { audioId: string; speaker: string; text: string; voiceProfile: string },
 ): T;
 
 export function wanRunMatchesProject(runProjectId: string | undefined, projectId: string): boolean;

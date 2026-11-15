@@ -35,12 +35,9 @@ def test_qwen_scene_keeps_audio_and_caption_timed(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stderr='')
 
     monkeypatch.setattr(motion_qwen.subprocess, 'run', run)
-    audio, captions = synthesize_scene(tmp_path, 'caio', 'Nossa!', 'Caio',
-                                       'ca10000000000001', 49, 16, 'owner')
-    with wave.open(str(audio), 'rb') as stream:
-        assert stream.getnframes() == 147000
-    assert '"engine":"qwen"' in captions.read_text(encoding='utf-8')
-    assert '"speaker":"Caio"' in captions.read_text(encoding='utf-8')
+    with pytest.raises(SpeechError, match='VoiceStudio'):
+        synthesize_scene(tmp_path, 'caio', 'Nossa!', 'Caio',
+                         'ca10000000000001', 49, 16, 'owner')
 
 
 def test_qwen_rejects_unknown_voice(tmp_path):

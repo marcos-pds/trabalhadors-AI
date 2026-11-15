@@ -42,8 +42,9 @@ def test_expressive_ptbr_profile_preserves_generation_settings(tmp_path, monkeyp
     calls = []
     monkeypatch.setattr(chatterbox, 'synthesize_lines',
                         lambda lines, owner, **settings: calls.append(settings) or [b'\x01\x00' * 4800])
-    synthesize_scene(tmp_path, 'ptbr', 'Nossa!', 'Caio', profile['id'], 49, 16, 'owner')
-    assert calls == [{'exaggeration': 0.7, 'cfg_weight': 0.35}]
+    with pytest.raises(SpeechError, match='VoiceStudio'):
+        synthesize_scene(tmp_path, 'ptbr', 'Nossa!', 'Caio', profile['id'], 49, 16, 'owner')
+    assert calls == []
 
 
 def test_episode_batches_lines_and_preserves_character_voice(tmp_path, monkeypatch):
@@ -66,20 +67,21 @@ def test_episode_batches_lines_and_preserves_character_voice(tmp_path, monkeypat
 
 
 def test_scene_speech_uses_selected_voice_and_exact_frame_duration(tmp_path, monkeypatch):
-    monkeypatch.setattr(chatterbox, 'available_voices', lambda owner: [{'id': 'lara', 'name': 'Lara'}] if owner == 'owner' else [])
+    from central import motion_voicestudio as studio
+    monkeypatch.setattr(studio, 'available_voices', lambda: [{'id': '443b36e2', 'name': 'Lara'}])
     calls = []
-    monkeypatch.setattr(chatterbox, 'synthesize_lines', lambda lines, owner: calls.append((lines, owner)) or [b'\x01\x00' * 4800])
-    audio, captions = synthesize_scene(tmp_path, 'one', 'Oi Lara.', 'Lara', 'lara', 81, 16, 'owner')
-    assert calls == [([('Oi Lara.', 'lara')], 'owner')]
+    monkeypatch.setattr(studio, 'synthesize_line', lambda text, profile: calls.append((text, profile)) or b'\x01\x00' * 4800)
+    audio, captions = synthesize_scene(tmp_path, 'one', 'Oi Lara.', 'Lara', '443b36e2', 81, 16, 'owner')
+    assert calls == [('Oi Lara.', '443b36e2')]
     with wave.open(str(audio), 'rb') as stream:
         assert stream.getframerate() == 48000
         assert stream.getnframes() == 243000
-    assert json.loads(captions.read_text(encoding='utf-8'))['segments'][0]['voice_profile'] == 'lara'
-    with pytest.raises(SpeechError, match='Escolha uma voz'):
+    assert json.loads(captions.read_text(encoding='utf-8'))['segments'][0]['voice_profile'] == '443b36e2'
+    with pytest.raises(SpeechError, match='VoiceStudio'):
         synthesize_scene(tmp_path, 'other', 'Oi', 'Lara', 'lara', 81, 16, 'other')
-    monkeypatch.setattr(chatterbox, 'synthesize_lines', lambda lines, owner: [b'\x01\x00' * 300000])
+    monkeypatch.setattr(studio, 'synthesize_line', lambda text, profile: b'\x01\x00' * 300000)
     with pytest.raises(SpeechError, match='excede'):
-        synthesize_scene(tmp_path, 'long', 'Fala longa', 'Lara', 'lara', 81, 16, 'owner')
+        synthesize_scene(tmp_path, 'long', 'Fala longa', 'Lara', '443b36e2', 81, 16, 'owner')
 
 
 def test_scene_manifest_keeps_audio_and_captions_as_scoped_artifacts(tmp_path, monkeypatch):

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -156,10 +157,19 @@ FRONTEND_BUILD = ROOT/'static'/'build'
 app.mount('/assets', StaticFiles(directory=ROOT/'static'), name='assets')
 os.environ['MOTION_STUDIO_DATA'] = str(DATA_DIR/'motion-studio')
 from desktop.motion_studio.apps.api.main import app as motion_studio_api
+with sqlite3.connect(motion_studio_api.state.database) as motion_connection:
+    legacy=motion_connection.execute('SELECT COUNT(*) FROM projects WHERE owner_id IS NULL').fetchone()[0]
+    if legacy:
+        owners=DB.all('SELECT DISTINCT user_id FROM motion_tool_settings')
+        if not owners:
+            owners=DB.all('SELECT id AS user_id FROM users')
+        if len(owners)==1:
+            motion_connection.execute('UPDATE projects SET owner_id=? WHERE owner_id IS NULL',
+                                      (owners[0]['user_id'],))
 @motion_studio_api.middleware('http')
 async def authenticate_motion_studio(request: Request, call_next):
     try:
-        SEC.user(request)
+        request.state.motion_owner=SEC.user(request)['id']
     except HTTPException as error:
         return JSONResponse({'detail': error.detail}, status_code=error.status_code,
                             headers=error.headers)
@@ -189,6 +199,10 @@ def require_csrf(request: Request):
         o = urlparse(origin)
         if o.hostname != request.url.hostname or o.scheme != request.url.scheme:
             raise HTTPException(403,'Origem não autorizada.')
+
+
+from .voice_studio import attach_voice_studio
+attach_voice_studio(app, current_user, require_csrf)
 
 
 class Credentials(BaseModel):
@@ -1840,13 +1854,41 @@ class MotionWanSceneIn(BaseModel):
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
     speech_text: str | None = Field(default=None, max_length=300)
     speaker: str | None = Field(default=None, max_length=64)
-    voice_profile: str | None = Field(default=None, pattern=r'^[a-f0-9]{16}$')
+    voice_profile: str | None = Field(default=None, pattern=r'^(?:[a-f0-9]{8}|[a-f0-9]{16})$')
 
 
 class MotionLtxSceneIn(MotionWanSceneIn):
     image_data: str = Field(min_length=32, max_length=8_400_000)
     width: int = Field(default=288, ge=288, le=480)
     height: int = Field(default=512, ge=512, le=832)
+
+
+class MotionPhotoSceneIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    scene: int = Field(ge=1, le=64)
+    background_data: str = Field(min_length=32, max_length=8_400_000)
+    poses: list[str] = Field(min_length=2, max_length=30)
+    frames: int = Field(default=96, ge=24, le=720)
+    mode: Literal['isolated', 'reference'] = 'isolated'
+    camera_motion: Literal['gentle', 'push_in'] = 'gentle'
+    replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
+
+
+class MotionSceneEffectIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    clip_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    preset: Literal['footsteps', 'lamp_clicks', 'door_slam', 'wind', 'metal_creak']
+    cue_seconds: float = Field(ge=.5, le=29.5)
+
+
+class MotionVisualReviewIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    scene: int = Field(ge=1, le=64)
+
+
+class MotionCameraPushIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    clip_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -1876,7 +1918,7 @@ class MotionSceneSpeechIn(BaseModel):
     video_artifact_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
     text: str = Field(min_length=1,max_length=300)
     speaker: str = Field(min_length=1,max_length=64)
-    voice_profile: str = Field(pattern=r'^[a-f0-9]{16}$')
+    voice_profile: str = Field(pattern=r'^(?:[a-f0-9]{8}|[a-f0-9]{16})$')
 
 
 class MotionVoiceImportIn(BaseModel):
@@ -1899,6 +1941,20 @@ def motion_qwen_voices(request:Request,user=Depends(current_user)):
     return {'engine':'qwen','ready':bool(voices),'voices':voices}
 
 
+@app.get('/api/motion/voicestudio/voices')
+def motion_voicestudio_voices(request:Request,user=Depends(current_user)):
+    local_only(request)
+    from .motion_voicestudio import available_voices, engine_ready, VoiceStudioError
+    if not engine_ready():
+        return {'engine':'omnivoice','ready':False,'voices':[]}
+    try:
+        voices=[voice for voice in available_voices() if
+                re.fullmatch(r'[a-f0-9]{8}',voice['id'])]
+    except VoiceStudioError:
+        return {'engine':'omnivoice','ready':False,'voices':[]}
+    return {'engine':'omnivoice','ready':True,'voices':voices}
+
+
 class MotionQwenVoiceImportIn(BaseModel):
     name: str = Field(min_length=1,max_length=80)
     transcript: str = Field(min_length=1,max_length=300)
@@ -1917,6 +1973,20 @@ def motion_qwen_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=D
     try:
         return import_voice(user['id'],data.name,data.transcript,base64.b64decode(raw,validate=True))
     except (QwenVoiceError,binascii.Error) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/motion/voicestudio/voices/import')
+def motion_voicestudio_voice_import(data:MotionQwenVoiceImportIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    import binascii
+    from .motion_voicestudio import VoiceStudioError, import_voice
+    header,sep,encoded=data.audio_data.partition(',')
+    if sep and header not in ('data:audio/wav;base64','data:audio/x-wav;base64','data:audio/wave;base64'):
+        raise HTTPException(422,'Envie um WAV válido.')
+    try:
+        return import_voice(data.name,data.transcript,base64.b64decode(encoded if sep else data.audio_data,validate=True))
+    except (VoiceStudioError,binascii.Error) as exc:
         raise HTTPException(422,str(exc)) from None
 
 
@@ -2171,6 +2241,177 @@ def motion_wan_scene(data:MotionWanSceneIn,request:Request,user=Depends(current_
     return motion_call(lambda:MOTION.enqueue(user['id'],manifest,f'wan-{run_id}','MotionStudio'))
 
 
+@app.post('/api/motion/photo/scenes')
+def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(current_user)):
+    """Render isolated image poses over one immutable scene background."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .photo_sequence import PhotoSequenceError, render_photo_scene, render_reference_scene
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    if not any(scene.get('scene')==data.scene for scene in
+               (timeline.get('storyboard') or {}).get('scenes',[])):
+        raise HTTPException(422,'A cena não está no roteiro deste projeto.')
+    if data.frames < len(data.poses):
+        raise HTTPException(422,'A duração precisa comportar todas as poses.')
+    total=0
+    def decode_image(value):
+        nonlocal total
+        header,sep,encoded=value.partition(',')
+        formats={'data:image/png;base64':('.png',b'\x89PNG\r\n\x1a\n'),
+                 'data:image/jpeg;base64':('.jpg',b'\xff\xd8\xff'),
+                 'data:image/webp;base64':('.webp',b'RIFF')}
+        if not sep or header not in formats:
+            raise HTTPException(422,'Use imagens PNG, JPEG ou WebP para a sequência.')
+        try:raw=base64.b64decode(encoded,validate=True)
+        except (ValueError,base64.binascii.Error):
+            raise HTTPException(422,'Uma imagem da sequência está corrompida.') from None
+        extension,signature=formats[header]
+        total+=len(raw)
+        if not 128<=len(raw)<=6*1024*1024 or total>36*1024*1024 or not raw.startswith(signature):
+            raise HTTPException(422,'Uma imagem é inválida ou o conjunto excede 36 MB.')
+        if extension=='.webp' and raw[8:12]!=b'WEBP':
+            raise HTTPException(422,'Uma imagem WebP é inválida.')
+        return extension,raw
+    images=[decode_image(data.background_data),*(decode_image(pose) for pose in data.poses)]
+    _,grant=authorized_root(DB,user['id'])
+    run_id=uid()
+    folder=f'MotionStudio/photos/{data.project_id}/scene_{data.scene:02d}_{run_id}'
+    output_dir=f'MotionStudio/episodes/{data.project_id}/episode_01'
+    for parent in ('MotionStudio','MotionStudio/photos',f'MotionStudio/photos/{data.project_id}',
+                   folder,'MotionStudio/episodes',f'MotionStudio/episodes/{data.project_id}',output_dir):
+        try:target(grant,parent,directory=True)
+        except HTTPException as exc:
+            if exc.status_code!=404:raise
+            target(grant,parent,creating=True).mkdir()
+    sources=[]
+    for index,(extension,raw) in enumerate(images):
+        relative=f'{folder}/{"background" if index==0 else f"pose_{index:02d}"}{extension}'
+        path=target(grant,relative,creating=True)
+        with path.open('xb') as stream:stream.write(raw)
+        sources.append(path)
+    relative_video=f'episodes/{data.project_id}/episode_01/photo_scene_{data.scene:02d}_{run_id}.mp4'
+    video=target(grant,'MotionStudio/'+relative_video,creating=True)
+    try:
+        if data.mode == 'reference':
+            render_reference_scene(sources[1:],video,frames=data.frames,camera_motion=data.camera_motion)
+        else:
+            render_photo_scene(sources[0],sources[1:],video,frames=data.frames)
+    except PhotoSequenceError as exc:
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative_video,
+                                      data.scene,data.frames,24,data.replace_clip_id)
+
+
+@app.post('/api/motion/photo/effects')
+def motion_photo_effect(data:MotionSceneEffectIn,request:Request,user=Depends(current_user)):
+    """Replace one owned scene with a reversible, synchronized visual and audio edit."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .motion_effects import MotionEffectError, render_effect_scene
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                   for clip in track['clips']),key=lambda clip:clip['start_frame'])
+    clip=next((item for item in videos if item['id']==data.clip_id),None)
+    if not clip:
+        raise HTTPException(404,'Cena não encontrada neste projeto.')
+    style=clip['style']
+    scene=int(style.get('scene_number') or 0)
+    if not scene or not any(item.get('scene')==scene for item in
+                            (timeline.get('storyboard') or {}).get('scenes',[])):
+        raise HTTPException(422,'A cena editada precisa estar no roteiro.')
+    duration=clip['duration_frames']/timeline['fps']
+    if not .5<=data.cue_seconds<=duration-.5:
+        raise HTTPException(422,'O instante do efeito precisa estar dentro da cena.')
+    run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+    if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{data.project_id}':
+        raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+    source=MOTION.artifact_path(user['id'],run_id,artifact_id)
+    if source.suffix.lower()!='.mp4':
+        raise HTTPException(422,'A cena precisa ser MP4.')
+    after_source=None
+    if data.preset=='door_slam' and scene>1 and videos:
+        first=videos[0]['style']
+        if MOTION.get(user['id'],first['motion_run_id'])['project_id']!=f'motion-{data.project_id}':
+            raise HTTPException(403,'O quadro final não pertence a este projeto.')
+        after_source=MOTION.artifact_path(user['id'],first['motion_run_id'],first['motion_artifact_id'])
+    _,grant=authorized_root(DB,user['id'])
+    output_dir=f'MotionStudio/episodes/{data.project_id}/episode_01'
+    target(grant,output_dir,directory=True)
+    relative=f'episodes/{data.project_id}/episode_01/effect_scene_{scene:02d}_{uid()}.mp4'
+    output=target(grant,'MotionStudio/'+relative,creating=True)
+    try:
+        render_effect_scene(source,output,data.preset,data.cue_seconds,
+                            frames=clip['duration_frames'],after_source=after_source)
+    except MotionEffectError as exc:
+        output.unlink(missing_ok=True)
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative,scene,
+                                      clip['duration_frames'],timeline['fps'],clip['id'],
+                                      data.preset,data.cue_seconds)
+
+
+@app.post('/api/motion/photo/review')
+def motion_photo_review(data:MotionVisualReviewIn,request:Request,user=Depends(current_user)):
+    """Inspect an owned scene reference with the user's configured vision provider."""
+    require_csrf(request);local_only(request)
+    from .motion_visual_review import VisualReviewError, review_scene
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    storyboard=timeline.get('storyboard') or {}
+    scene=next((item for item in storyboard.get('scenes',[]) if item.get('scene')==data.scene),None)
+    references=storyboard.get('references') or []
+    image=next((item.get('image_data') for item in reversed(references)
+                if item.get('scene_number')==data.scene and item.get('image_data')),None)
+    master=next((item.get('image_data') for item in references
+                 if item.get('kind')=='character' and not item.get('scene_number') and item.get('image_data')),None)
+    previous=next((item.get('image_data') for item in reversed(references)
+                   if item.get('scene_number')==data.scene-1 and item.get('image_data')),None)
+    if not scene or not image or not master:
+        raise HTTPException(422,'A revisão exige roteiro, imagem da cena e imagem mestra.')
+    provider=DB.one("SELECT model,api_key_enc FROM providers WHERE user_id=? AND kind='gemini' AND enabled=1 AND api_key_enc IS NOT NULL ORDER BY CASE WHEN model='gemini-3.1-flash-lite' THEN 0 ELSE 1 END,priority LIMIT 1",(user['id'],))
+    if not provider:
+        raise HTTPException(503,'Configure um provedor Gemini visual para revisar as imagens.')
+    try:
+        return review_scene(image,master,previous,title=scene.get('title') or '',
+                            action=scene.get('image_prompt') or scene.get('prompt') or '',visual_bible=storyboard.get('visual_bible') or '',
+                            api_key=SEC.decrypt(provider['api_key_enc']),model=provider['model'])
+    except VisualReviewError as exc:
+        raise HTTPException(503,str(exc)) from None
+
+
+@app.post('/api/motion/photo/camera-push')
+def motion_photo_camera_push(data:MotionCameraPushIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .photo_sequence import PhotoSequenceError, render_camera_push
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    clip=next((item for track in timeline['tracks'] if track['kind']=='video'
+               for item in track['clips'] if item['id']==data.clip_id),None)
+    if not clip or not clip['style'].get('scene_number'):
+        raise HTTPException(404,'Cena não encontrada neste projeto.')
+    style=clip['style']
+    run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+    if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{data.project_id}':
+        raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+    source=MOTION.artifact_path(user['id'],run_id,artifact_id)
+    if source.suffix.lower()!='.mp4':
+        raise HTTPException(422,'A cena precisa ser MP4.')
+    _,grant=authorized_root(DB,user['id'])
+    scene=int(style['scene_number'])
+    relative=f'episodes/{data.project_id}/episode_01/camera_scene_{scene:02d}_{uid()}.mp4'
+    output=target(grant,'MotionStudio/'+relative,creating=True)
+    try:
+        render_camera_push(source,output,frames=clip['duration_frames'],fps=timeline['fps'])
+    except PhotoSequenceError as exc:
+        output.unlink(missing_ok=True)
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative,scene,
+                                      clip['duration_frames'],timeline['fps'],clip['id'],
+                                      camera_motion='push_in')
+
+
 @app.post('/api/motion/ltx/scenes')
 def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
@@ -2345,12 +2586,12 @@ def motion_video_preview(rid:str,aid:str,request:Request,user=Depends(current_us
                         headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 
 
-def _motion_project_timeline(project_id):
-    import sqlite3
+def _motion_project_timeline(project_id,user_id):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', project_id):
         raise HTTPException(404, 'Projeto não encontrado.')
     with sqlite3.connect(motion_studio_api.state.database) as connection:
-        row = connection.execute('SELECT timeline_json FROM projects WHERE id=?', (project_id,)).fetchone()
+        row = connection.execute('SELECT timeline_json FROM projects WHERE id=? AND owner_id=?',
+                                 (project_id,user_id)).fetchone()
     if not row:
         raise HTTPException(404, 'Projeto não encontrado.')
     return row[0], json.loads(row[0])
@@ -2362,6 +2603,8 @@ def _motion_export_digest(timeline):
                      for clip in track['clips']), key=lambda clip: clip['start_frame'])
     audio = {clip.get('style', {}).get('source_video_clip_id'): clip
              for track in timeline['tracks'] if track['kind'] == 'audio' for clip in track['clips']}
+    continuous = next((clip for track in timeline['tracks'] if track['kind'] == 'audio'
+                       for clip in track['clips'] if clip.get('style',{}).get('continuous_narration')), None)
     media = []
     for clip in videos:
         style = clip.get('style', {})
@@ -2370,12 +2613,92 @@ def _motion_export_digest(timeline):
                       style.get('motion_run_id'), style.get('motion_artifact_id'),
                       speech.get('motion_speech_id'), speech.get('motion_run_id'),
                       speech.get('motion_artifact_id'), speech.get('speech_text')))
-    return hashlib.sha256(json.dumps((timeline['fps'], media), ensure_ascii=False,
+    narrator = (continuous['style'].get('motion_speech_id'),
+                continuous['style'].get('speech_text'),
+                continuous['style'].get('voice_profile')) if continuous else None
+    digest_input=(timeline['fps'],media,narrator) if continuous else (timeline['fps'],media)
+    return hashlib.sha256(json.dumps(digest_input, ensure_ascii=False,
                                      separators=(',', ':')).encode()).hexdigest()
 
 
+@app.post('/api/motion/projects/{project_id}/narration')
+def motion_project_narration(project_id:str,request:Request,user=Depends(current_user)):
+    """Persist one continuous OmniVoice take for the owner's complete scene sequence."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root, digest_file
+    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_aligned_narration, synthesize_directed_scenes
+    from .workspace_tools import target
+    import wave
+    _,timeline=_motion_project_timeline(project_id,user['id'])
+    videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                   for clip in track['clips']),key=lambda clip:clip['start_frame'])
+    planned=(timeline.get('storyboard') or {}).get('scenes') or []
+    if not 1 <= len(videos) <= 8 or len(videos)!=len(planned) or any(
+        clip['start_frame']!=sum(previous['duration_frames'] for previous in videos[:index])
+        for index,clip in enumerate(videos)):
+        raise HTTPException(422,'Conclua as cenas consecutivas na timeline antes da narração.')
+    for clip in videos:
+        style=clip['style']
+        run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+        if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{project_id}':
+            raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+        MOTION.artifact_path(user['id'],run_id,artifact_id)
+    directed=any(scene.get('voice_beats') for scene in planned)
+    profiles=(timeline.get('storyboard') or {}).get('voice_profiles',{})
+    speakers=({str(beat.get('speaker') or '').strip() for scene in planned for beat in scene.get('voice_beats',[]) if beat.get('text')}
+              if directed else {str(scene.get('speaker') or 'Narrador').strip() for scene in planned})
+    if not directed and (len(speakers)!=1 or not next(iter(speakers)).lower().startswith('narrad')):
+        raise HTTPException(422,'A narração contínua exige fala do narrador em todas as cenas.')
+    if any(not str(scene.get('dialogue') or '').strip() for scene in planned):
+        raise HTTPException(422,'Todas as cenas precisam de fala para a narração contínua.')
+    if any(not isinstance(profiles.get(name),str) or not re.fullmatch(r'[a-f0-9]{8}',profiles[name]) for name in speakers):
+        raise HTTPException(422,'Selecione um perfil do VoiceStudio para cada personagem do roteiro.')
+    speaker='Elenco' if directed else next(iter(speakers))
+    profile=profiles['Narrador'] if directed and 'Narrador' in profiles else profiles[next(iter(speakers))]
+    root,grant=authorized_root(DB,user['id'])
+    for relative_dir in ('MotionStudio','MotionStudio/narrations',f'MotionStudio/narrations/{project_id}'):
+        try:
+            target(grant,relative_dir,directory=True)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            target(grant,relative_dir,creating=True).mkdir()
+    try:
+        available={voice['id'] for voice in available_voices()}
+        if any(profiles[name] not in available for name in speakers):
+            raise HTTPException(422,'Um perfil do roteiro não está disponível na Central.')
+        script=' '.join(str(scene['dialogue']).strip() for scene in planned)
+        audio=(synthesize_directed_scenes([{'scene':scene['scene'], 'seconds':clip['duration_frames']/timeline['fps'],
+            'beats':scene['voice_beats']} for scene,clip in zip(planned,videos)],profiles,user['id']) if directed else
+            synthesize_aligned_narration([(str(scene['dialogue']).strip(),
+            clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile,
+            directions=[scene.get('voice_direction') for scene in planned])
+            )
+    except VoiceStudioError as exc:
+        raise HTTPException(503,str(exc)) from None
+    duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']
+    if len(audio)/96000>duration:
+        raise HTTPException(422,'A narração dura mais que o vídeo. Reduza o texto ou aumente as cenas.')
+    speech_id=uid()
+    relative=f'MotionStudio/narrations/{project_id}/narration_{speech_id}.wav'
+    audio_path=target(grant,relative,creating=True)
+    with audio_path.open('xb') as stream, wave.open(stream,'wb') as output:
+        output.setnchannels(1);output.setsampwidth(2);output.setframerate(48000)
+        output.writeframes(audio)
+    captions_path=audio_path.with_suffix('.json')
+    captions_path.write_text(json.dumps({'language':'pt-BR','engine':'omnivoice',
+        'speaker':speaker,'voice_profile':profile,'script':script},ensure_ascii=False),encoding='utf-8')
+    first=videos[0]['style']
+    DB.execute('INSERT INTO motion_scene_speech(id,user_id,video_run_id,video_artifact_id,grant_root,audio_path,captions_path,audio_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        (speech_id,user['id'],first['motion_run_id'],first['motion_artifact_id'],grant,
+         audio_path.relative_to(grant).as_posix(),captions_path.relative_to(grant).as_posix(),
+         digest_file(audio_path),utcnow()))
+    return {'id':speech_id,'url':f'/api/motion/scene-speech/{speech_id}/preview',
+            'speaker':speaker,'voice_profile':profile,'text':script,'duration':len(audio)/96000}
+
+
 def _motion_export_record(user_id, project_id):
-    _, timeline = _motion_project_timeline(project_id)
+    _, timeline = _motion_project_timeline(project_id,user_id)
     digest = _motion_export_digest(timeline)
     row = DB.one('SELECT * FROM motion_episode_exports WHERE user_id=? AND project_id=? '
                  'AND timeline_sha256=? ORDER BY created_at DESC LIMIT 1', (user_id,project_id,digest))
@@ -2404,15 +2727,20 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     from .motion_queue import authorized_root, digest_file
     from .workspace_tools import target
     from .motion_export import assemble_episode, MotionExportError
-    _,timeline = _motion_project_timeline(project_id)
+    _,timeline = _motion_project_timeline(project_id,user['id'])
     videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                      for clip in track['clips']), key=lambda clip:clip['start_frame'])
     expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8
-    if expected not in (2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+    if not 1 <= expected <= 8 or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
                              for index,clip in enumerate(videos)):
-        raise HTTPException(422,'A montagem precisa de duas ou oito cenas consecutivas na timeline.')
+        raise HTTPException(422,'A montagem precisa das cenas consecutivas do roteiro na timeline.')
     audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
                       for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
+    continuous_clips=[clip for track in timeline['tracks'] if track['kind']=='audio'
+                      for clip in track['clips'] if clip.get('style',{}).get('continuous_narration')]
+    if len(continuous_clips)>1:
+        raise HTTPException(422,'Há mais de uma narração contínua na timeline.')
+    continuous_clip=continuous_clips[0] if continuous_clips else None
     root,grant = authorized_root(DB,user['id'])
     scenes=[]
     captions=[]
@@ -2436,14 +2764,67 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
                 raise HTTPException(422,'A fala da cena não corresponde ao vídeo.')
             if audio.suffix.lower()!='.wav':
                 raise HTTPException(422,'A fala precisa ser WAV.')
-        captions.append(str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+        planned_scene=next((scene for scene in (timeline.get('storyboard') or {}).get('scenes',[])
+                            if scene.get('scene')==style.get('scene_number')),None)
+        captions.append((str((planned_scene or {}).get('dialogue') or '') if continuous_clip else
+                         str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+                        if ((timeline.get('storyboard') or {}).get('captions_enabled', True)
+                            and 'sem legendas' not in str((timeline.get('storyboard') or {}).get('theme','')).lower()) else '')
         scenes.append((video,audio,clip['duration_frames']/timeline['fps']))
     export_id=uid()
     relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'
     output=target(grant,relative,creating=True)
     try:
-        result=assemble_episode(scenes,output,captions=captions)
+        import tempfile
+        import wave
+        from .motion_chatterbox import available_voices, synthesize_lines, voice_settings, ChatterboxError
+        if continuous_clip:
+            speech_style=continuous_clip['style']
+            planned=(timeline.get('storyboard') or {}).get('scenes') or []
+            script=' '.join(str(scene.get('dialogue') or '').strip() for scene in planned)
+            speaker=str(planned[0].get('speaker') or 'Narrador').strip() if planned else ''
+            if (continuous_clip['start_frame']!=0 or
+                    continuous_clip['duration_frames']!=sum(clip['duration_frames'] for clip in videos) or
+                    speech_style.get('speech_text')!=script or
+                    (speech_style.get('speaker')!='Elenco' and speech_style.get('voice_profile')!=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker)) or
+                    not speech_style.get('motion_speech_id')):
+                raise HTTPException(422,'A narração da timeline está desatualizada; gere a voz novamente.')
+            saved_speech=DB.one('SELECT video_run_id,video_artifact_id FROM motion_scene_speech WHERE id=? AND user_id=?',
+                                (speech_style['motion_speech_id'],user['id']))
+            first_style=videos[0]['style']
+            first_versions=[first_style,*[item.get('style',{}) for item in first_style.get('previous_versions',[])]]
+            if (not saved_speech or not any(saved_speech['video_run_id']==item.get('motion_run_id') and
+                    saved_speech['video_artifact_id']==item.get('motion_artifact_id') for item in first_versions)):
+                raise HTTPException(422,'A narração não pertence a esta sequência de vídeo.')
+            narration=_scene_speech_path(user['id'],speech_style['motion_speech_id'])
+            with wave.open(str(narration),'rb') as source:
+                if source.getnframes()/source.getframerate()>sum(scene[2] for scene in scenes):
+                    raise HTTPException(422,'A narração excede o episódio.')
+            result=assemble_episode(scenes,output,captions=captions,narration=narration)
+        else:
+            narration_clips=[audio_by_video.get(clip['id']) for clip in videos]
+            profiles={clip['style'].get('voice_profile') for clip in narration_clips if clip}
+            continuous=(all(clip and clip['style'].get('speaker')=='Narrador' and
+                            clip['style'].get('speech_text') for clip in narration_clips)
+                        and len(profiles)==1 and next(iter(profiles)) in
+                        {voice['id'] for voice in available_voices(user['id'])})
+            if continuous:
+                profile=next(iter(profiles))
+                script=' '.join(clip['style']['speech_text'].strip() for clip in narration_clips)
+                expression,pace=voice_settings(user['id'],profile)
+                with tempfile.TemporaryDirectory(prefix='motion-narration-') as folder:
+                    narration=Path(folder)/'narration.wav'
+                    audio=synthesize_lines([(script,profile)],user['id'],exaggeration=expression,cfg_weight=pace)[0]
+                    if len(audio)/96000 > sum(scene[2] for scene in scenes):
+                        raise HTTPException(422,'A narração contínua excede o episódio; encurte o texto ou aumente a duração das cenas.')
+                    with wave.open(str(narration),'wb') as stream:
+                        stream.setnchannels(1);stream.setsampwidth(2);stream.setframerate(48000);stream.writeframes(audio)
+                    result=assemble_episode(scenes,output,captions=captions,narration=narration)
+            else:
+                result=assemble_episode(scenes,output,captions=captions)
     except MotionExportError as exc:
+        raise HTTPException(422,str(exc)) from None
+    except ChatterboxError as exc:
         raise HTTPException(422,str(exc)) from None
     if not result['path'].is_relative_to(root):
         raise HTTPException(403,'Destino de exportação inválido.')

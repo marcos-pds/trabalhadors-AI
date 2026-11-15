@@ -17,7 +17,7 @@ def _srt_time(seconds):
     return f'{hours:02d}:{minutes:02d}:{whole:02d},{remainder:03d}'
 
 
-def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', captions=None):
+def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', captions=None, narration=None):
     """Each scene is (video_path, optional_audio_path, duration_seconds)."""
     if not scenes or len(scenes) > 64:
         raise MotionExportError('O episódio precisa de cenas para montagem.')
@@ -28,16 +28,30 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
     filters = []
     concat = []
     total = 0.0
+    input_index = 0
     for index, (video, audio, duration) in enumerate(scenes):
         if not 0 < duration <= 600:
             raise MotionExportError('Duração de cena inválida.')
         total += duration
+        video_input = input_index
         args += ['-i', str(video)]
+        input_index += 1
         if audio:
+            audio_input = input_index
             args += ['-i', str(audio)]
+            input_index += 1
         else:
-            args += ['-f', 'lavfi', '-t', f'{duration:.6f}', '-i', 'anullsrc=channel_layout=mono:sample_rate=48000']
-        video_input, audio_input = index * 2, index * 2 + 1
+            probe = subprocess.run([str(ffprobe), '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=index', '-of', 'csv=p=0', str(video)],
+                capture_output=True, text=True, timeout=30, check=False)
+            if probe.returncode:
+                raise MotionExportError('Não foi possível inspecionar o áudio da cena.')
+            if probe.stdout.strip():
+                audio_input = video_input
+            else:
+                audio_input = input_index
+                args += ['-f', 'lavfi', '-t', f'{duration:.6f}', '-i', 'anullsrc=channel_layout=mono:sample_rate=48000']
+                input_index += 1
         filters.append(f'[{video_input}:v]trim=duration={duration:.6f},setpts=PTS-STARTPTS,'
                        'scale=720:1280:force_original_aspect_ratio=decrease,'
                        'pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,format=yuv420p'
@@ -46,6 +60,8 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
                        f'atrim=duration={duration:.6f},asetpts=PTS-STARTPTS,'
                        f'apad=whole_dur={duration:.6f},atrim=duration={duration:.6f}[a{index}]')
         concat.append(f'[v{index}][a{index}]')
+    if narration is not None:
+        args += ['-i', str(narration)]
     if captions is not None and len(captions) != len(scenes):
         raise MotionExportError('Legendas e cenas não correspondem.')
     visible = captions is not None and any(str(line).strip() for line in captions)
@@ -58,10 +74,19 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
                 entries.append(f'{index}\n{_srt_time(clock)} --> {_srt_time(clock + duration)}\n{clean}\n')
             clock += duration
         subtitle.write_text('\n'.join(entries), encoding='utf-8')
-        filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[joined][a]')
+        filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[joined][scene_audio]')
         filters.append(f'[joined]subtitles=filename={subtitle.name}[v]')
     else:
-        filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[v][a]')
+        filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[v][scene_audio]')
+    if narration is not None:
+        filters.append(f'[{input_index}:a]aresample=48000,aformat=channel_layouts=mono,'
+                       f'atrim=duration={total:.6f},asetpts=PTS-STARTPTS,'
+                       f'apad=whole_dur={total:.6f},atrim=duration={total:.6f}[voice]')
+        filters.append('[scene_audio]volume=0.55[sfx]')
+        filters.append('[voice][sfx]amix=inputs=2:duration=first:dropout_transition=0,'
+                       'alimiter=limit=0.9[a]')
+    else:
+        filters.append('[scene_audio]anull[a]')
     args += ['-filter_complex', ';'.join(filters), '-map', '[v]', '-map', '[a]',
              '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
              '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-threads', '2', str(temporary)]

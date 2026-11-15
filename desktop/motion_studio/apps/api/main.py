@@ -13,7 +13,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +68,14 @@ class Track(BaseModel):
     clips: list[Clip] = Field(default_factory=list, max_length=256)
 
 
+class VoiceBeat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    speaker: str = Field(default="", max_length=64)
+    text: str = Field(default="", max_length=300)
+    direction: Literal["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"] = "neutral"
+    pause_ms: int = Field(default=0, ge=0, le=30000)
+
+
 class PlannedScene(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scene: int = Field(ge=1, le=64)
@@ -78,6 +86,10 @@ class PlannedScene(BaseModel):
     cliffhanger: str = Field(default="", max_length=250)
     speaker: str = Field(default="", max_length=64)
     dialogue: str = Field(default="", max_length=300)
+    voice_direction: Literal["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"] = "neutral"
+    voice_beats: list[VoiceBeat] = Field(default_factory=list, max_length=32)
+    duration_frames: int = Field(default=96, ge=24, le=720)
+    pose_count: int = Field(default=4, ge=2, le=30)
 
 
 class VisualReference(BaseModel):
@@ -98,15 +110,26 @@ class Publication(BaseModel):
     hashtags: str = Field(default="", max_length=500)
 
 
+class VisualQualityReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scene: int = Field(ge=1, le=64)
+    reference_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    status: Literal["pass", "needs_revision"]
+    findings: list[str] = Field(default_factory=list, max_length=4)
+    reviewer: str = Field(max_length=80)
+
+
 class Storyboard(BaseModel):
     model_config = ConfigDict(extra="forbid")
     theme: str = Field(max_length=2000)
     visual_bible: str = Field(default="", max_length=2000)
     scenes: list[PlannedScene] = Field(default_factory=list, max_length=64)
     references: list[VisualReference] = Field(default_factory=list, max_length=32)
+    quality_reviews: list[VisualQualityReview] = Field(default_factory=list, max_length=64)
     episode_status: Literal["draft", "approved"] = "draft"
     publication: Publication | None = None
     voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
+    captions_enabled: bool = True
 
 
 class Timeline(BaseModel):
@@ -158,6 +181,10 @@ def initialize(database: Path) -> None:
             )
             """
         )
+        columns={row['name'] for row in connection.execute('PRAGMA table_info(projects)')}
+        if 'owner_id' not in columns:
+            connection.execute('ALTER TABLE projects ADD COLUMN owner_id TEXT')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id,updated_at)')
         connection.commit()
 
 
@@ -233,21 +260,24 @@ def create_app(
         }
 
     @app.get("/api/projects")
-    def list_projects() -> list[dict]:
+    def list_projects(request: Request) -> list[dict]:
+        owner=getattr(request.state,'motion_owner',None)
         with closing(connect(db_path)) as connection:
             rows = connection.execute(
-                "SELECT * FROM projects ORDER BY updated_at DESC, id"
+                'SELECT * FROM projects WHERE owner_id=? ORDER BY updated_at DESC, id' if owner else
+                'SELECT * FROM projects ORDER BY updated_at DESC, id', (owner,) if owner else ()
             ).fetchall()
         return [serialize(row) for row in rows]
 
     @app.post("/api/projects", status_code=201)
-    def create_project(data: ProjectCreate) -> dict:
+    def create_project(data: ProjectCreate, request: Request) -> dict:
+        owner=getattr(request.state,'motion_owner',None)
         project_id = uuid.uuid4().hex
         timestamp = now()
         timeline = Timeline().model_dump(mode="json")
         with closing(connect(db_path)) as connection:
             connection.execute(
-                "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO projects(id,title,summary,timeline_json,created_at,updated_at,owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     project_id,
                     data.title.strip(),
@@ -255,6 +285,7 @@ def create_app(
                     json.dumps(timeline, ensure_ascii=False),
                     timestamp,
                     timestamp,
+                    owner,
                 ),
             )
             connection.commit()
@@ -264,19 +295,21 @@ def create_app(
         return serialize(row)
 
     @app.get("/api/projects/{project_id}")
-    def get_project(project_id: str) -> dict:
+    def get_project(project_id: str, request: Request) -> dict:
         if not ID_PATTERN.fullmatch(project_id):
             raise HTTPException(404, "Project not found.")
         with closing(connect(db_path)) as connection:
             row = connection.execute(
-                "SELECT * FROM projects WHERE id=?", (project_id,)
+                'SELECT * FROM projects WHERE id=? AND owner_id=?' if getattr(request.state,'motion_owner',None) else
+                'SELECT * FROM projects WHERE id=?',
+                (project_id,request.state.motion_owner) if getattr(request.state,'motion_owner',None) else (project_id,),
             ).fetchone()
         if row is None:
             raise HTTPException(404, "Project not found.")
         return serialize(row)
 
     @app.put("/api/projects/{project_id}")
-    def update_project(project_id: str, data: ProjectUpdate) -> dict:
+    def update_project(project_id: str, data: ProjectUpdate, request: Request) -> dict:
         if not ID_PATTERN.fullmatch(project_id):
             raise HTTPException(404, "Project not found.")
         track_ids = [track.id for track in data.timeline.tracks]
@@ -292,7 +325,7 @@ def create_app(
                 """
                 UPDATE projects
                 SET title=?, summary=?, timeline_json=?, updated_at=?
-                WHERE id=?
+                WHERE id=? AND (? IS NULL OR owner_id=?)
                 """,
                 (
                     data.title.strip(),
@@ -300,6 +333,8 @@ def create_app(
                     data.timeline.model_dump_json(),
                     timestamp,
                     project_id,
+                    getattr(request.state,'motion_owner',None),
+                    getattr(request.state,'motion_owner',None),
                 ),
             )
             connection.commit()

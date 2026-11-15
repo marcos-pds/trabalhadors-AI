@@ -1,8 +1,15 @@
-export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string };
+export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string; voice_direction?: "neutral" | "whisper" | "breathless" | "fear" | "sad" | "excited" | "angry" | "calm" | "suspense"; duration_frames?: number; pose_count?: number };
+export type VoiceBeat = { speaker: string; text: string; direction: NonNullable<Scene['voice_direction']>; pause_ms: number };
+export type DirectedScene = Pick<Scene, 'scene' | 'title' | 'dialogue'> & { duration_frames: number; speaker: string; voice_beats: VoiceBeat[] };
+export function parseDirectedScript(brief: string, fps?: number): DirectedScene[] | null;
 export type Reference = { scene_number?: number; kind: string; image_data?: string };
 export function parseProductionPlan(raw: string): { visual_bible: string; scenes: Scene[] };
+export function requestedDurationFrames(brief: string, fps?: number): number | null;
+export function voiceDirectionFromScript(scene: Scene): NonNullable<Scene['voice_direction']>;
+export function timeScenesFromScript<T extends Scene>(scenes: T[], brief: string, fps?: number): (T & { duration_frames: number })[];
 export function sceneReference<T extends Reference>(references: T[], number: number): T | undefined;
 export function allSceneImagesReady(scenes: Scene[], references: Reference[]): boolean;
+export function referenceKeyframeCount(poseCount?: number): number;
 export function meanPixelDifference(left: Uint8ClampedArray, right: Uint8ClampedArray): number;
 export function sceneTimingForSpeech(dialogue?: string): { frames: number; fps: number };
 export function referenceAnchor<T extends Reference>(references: T[]): T | undefined;
