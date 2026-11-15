@@ -67,3 +67,22 @@ def test_export_preserves_embedded_audio_in_single_scene(tmp_path):
         '-i', str(result['path']), '-f', 's16le', '-ac', '1', '-ar', '48000', '-'])
     assert result['scenes'] == 1
     assert any(decoded)
+
+
+@pytest.mark.skipif(not shutil.which('ffmpeg') or not shutil.which('ffprobe'), reason='FFmpeg indisponível')
+def test_export_mixes_scene_effect_under_continuous_narration(tmp_path):
+    source = tmp_path / 'effect.mp4'
+    subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-f', 'lavfi', '-i', 'color=c=black:s=160x240:r=24:d=1',
+                    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1',
+                    '-c:v', 'libx264', '-c:a', 'aac', '-shortest', str(source)], check=True)
+    silence = tmp_path / 'narration.wav'
+    with wave.open(str(silence), 'wb') as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(48000)
+        output.writeframes(b'\x00\x00' * 48000)
+    result = assemble_episode([(source, None, 1)], tmp_path / 'mix.mp4', narration=silence)
+    decoded = subprocess.check_output(['ffmpeg', '-hide_banner', '-loglevel', 'error',
+        '-i', str(result['path']), '-f', 's16le', '-ac', '1', '-ar', '48000', '-'])
+    assert any(decoded)

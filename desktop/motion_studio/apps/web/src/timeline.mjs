@@ -60,7 +60,7 @@ export function wanVideoPreviewUrl(runId, artifactId) {
 }
 
 /** Preserve generated scenes on the project video track without duplicate imports. */
-export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle }) {
+export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle, effectPreset, effectCue }) {
   if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error("Invalid generated video reference");
   if (!Number.isInteger(frames) || frames < 1 || frames > 3600 ||
       !Number.isInteger(fps) || fps < 1 || fps > 120) {
@@ -97,6 +97,7 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       scene_number: sceneNumber ?? null,
       planned_prompt: plannedPrompt ?? "",
       planned_title: plannedTitle ?? String(name || "Cena Wan"),
+      ...(effectPreset ? { effect_preset: effectPreset, effect_cue: effectCue } : {}),
       version: Number(replaced?.style?.version ?? 0) + 1,
       previous_versions: priorVersions,
       review_status: "pending",

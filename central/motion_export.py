@@ -79,10 +79,12 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
     else:
         filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[v][scene_audio]')
     if narration is not None:
-        filters.append('[scene_audio]anullsink')
         filters.append(f'[{input_index}:a]aresample=48000,aformat=channel_layouts=mono,'
                        f'atrim=duration={total:.6f},asetpts=PTS-STARTPTS,'
-                       f'apad=whole_dur={total:.6f},atrim=duration={total:.6f}[a]')
+                       f'apad=whole_dur={total:.6f},atrim=duration={total:.6f}[voice]')
+        filters.append('[scene_audio]volume=0.55[sfx]')
+        filters.append('[voice][sfx]amix=inputs=2:duration=first:dropout_transition=0,'
+                       'alimiter=limit=0.9[a]')
     else:
         filters.append('[scene_audio]anull[a]')
     args += ['-filter_complex', ';'.join(filters), '-map', '[v]', '-map', '[a]',

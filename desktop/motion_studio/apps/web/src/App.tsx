@@ -18,7 +18,7 @@ type VoiceProfile = string;
 type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; captions_enabled?: boolean; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; effect_preset?: string | null; effect_cue?: number | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
 type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; duration_frames?: number; pose_count?: number };
 
@@ -149,6 +149,9 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [importNotice, setImportNotice] = useState("");
   const [reviewComment, setReviewComment] = useState("");
+  const [effectPreset, setEffectPreset] = useState("wind");
+  const [effectCue, setEffectCue] = useState(8);
+  const [effectBusy, setEffectBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
@@ -287,6 +290,11 @@ export default function App() {
 
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
+    if (selected?.kind === "video") {
+      const defaults: Record<number, string> = { 1: "footsteps", 2: "footsteps", 4: "door_slam", 5: "lamp_clicks", 6: "metal_creak", 7: "wind" };
+      setEffectPreset(String(selected.style.effect_preset ?? defaults[Number(selected.style.scene_number)] ?? "wind"));
+      setEffectCue(Number(selected.style.effect_cue ?? Math.min(8, selected.duration_frames / (project?.timeline.fps ?? 24) / 2)));
+    }
   }, [selected?.id, selected?.kind, selected?.style.review_comment]);
 
   useEffect(() => {
@@ -329,6 +337,8 @@ export default function App() {
         speechText: job.speech_text ?? undefined,
         speaker: job.speaker ?? undefined,
         voiceProfile: job.voice_profile ?? undefined,
+        effectPreset: job.effect_preset ?? undefined,
+        effectCue: job.effect_cue ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
@@ -906,6 +916,23 @@ export default function App() {
     await renderWanScene(selected.id, revisedPrompt);
   }
 
+  async function applySelectedSceneEffect() {
+    if (!project || selected?.kind !== "video" || effectBusy) return;
+    setEffectBusy(true);
+    setError("");
+    try {
+      const result = await centralRequest<MotionRun>("/api/motion/photo/effects", {
+        method: "POST", body: JSON.stringify({ project_id: project.id, clip_id: selected.id,
+          preset: effectPreset, cue_seconds: effectCue }),
+      });
+      await syncCompletedVideos([result], project.id);
+      await exportCurrentEpisode(project.id);
+      addChatMessage("assistant", `Edição de som e movimento aplicada à cena ${selected.style.scene_number}. A versão anterior permanece disponível na revisão.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível aplicar o efeito à cena.");
+    } finally { setEffectBusy(false); }
+  }
+
   async function regenerateSelectedSceneImage() {
     if (!project || selected?.kind !== "video" || sceneImageBusy) return;
     const sceneNumber = Number(selected.style.scene_number);
@@ -1103,6 +1130,17 @@ export default function App() {
             <p className="helper-text">Selecione uma cena na timeline, descreva a alteração e gere somente essa parte.</p>
             <textarea aria-label="Alteração desejada na cena" value={reviewComment} maxLength={2000} placeholder="O que deve mudar nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
             <div className="review-actions"><button className="quiet-button" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR REVISÃO</button><button className="quiet-button" onClick={() => void regenerateSelectedSceneImage()} disabled={!embedded || sceneImageBusy}>↻ {sceneImageBusy ? "GERANDO IMAGEM…" : "REFAZER IMAGEM"}</button><button className="quiet-button" onClick={() => void regenerateSelectedScene()} disabled={!embedded || wanBusy || sceneImageBusy}>↻ REFAZER CENA</button></div>
+            <label className="field-label" htmlFor="scene-effect">MOVIMENTO E EFEITO SONORO</label>
+            <select id="scene-effect" value={effectPreset} onChange={(event) => setEffectPreset(event.target.value)}>
+              <option value="footsteps">Passos com movimento suave</option>
+              <option value="lamp_clicks">Lâmpadas estalando</option>
+              <option value="door_slam">Porta batendo · corte e tremor</option>
+              <option value="wind">Vento ambiente</option>
+              <option value="metal_creak">Metal rangendo</option>
+            </select>
+            <label className="field-label" htmlFor="effect-cue">INSTANTE DA AÇÃO NA CENA (SEGUNDOS)</label>
+            <input id="effect-cue" type="number" min="0.5" max={Math.max(.5, selected.duration_frames / (project?.timeline.fps ?? 24) - .5)} step="0.1" value={effectCue} onChange={(event) => setEffectCue(Number(event.target.value))} />
+            <button className="quiet-button" onClick={() => void applySelectedSceneEffect()} disabled={!embedded || effectBusy || autoBusy}>{effectBusy ? "APLICANDO EDIÇÃO…" : "APLICAR EDIÇÃO À CENA"}</button>
             {Array.isArray(selected.style.previous_versions) && selected.style.previous_versions.map((version: any) => <button className="quiet-button" key={version.version} onClick={() => restoreSelectedVersion(Number(version.version))}>RESTAURAR VERSÃO {version.version}</button>)}
             <label className="field-label" htmlFor="review-speech">FALA DESTA CENA</label>
             <textarea id="review-speech" value={sceneSpeechText} maxLength={300} onChange={(event) => setSceneSpeechText(event.target.value)} />

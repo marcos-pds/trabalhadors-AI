@@ -167,7 +167,7 @@ class MotionQueue:
                 self.db.conn.execute('ROLLBACK');raise
         return self.get(user,rid)
 
-    def register_photo_video(self,user,project_id,relative_video,scene_number,frames,fps,replace_clip_id=None):
+    def register_photo_video(self,user,project_id,relative_video,scene_number,frames,fps,replace_clip_id=None,effect_preset=None,effect_cue=None):
         """Register an already validated local photo montage as an owned Motion run."""
         root,grant=authorized_root(self.db,user,'MotionStudio')
         video=scoped_path(root,relative_video)
@@ -181,7 +181,8 @@ class MotionQueue:
                   'jobs':[{'id':'generate','adapter':'photo_sequence','stage':'generate',
                            'inputs':[],'outputs':['video'],
                            'params':{'frames':frames,'fps':fps,'scene_number':scene_number,
-                                     'replace_clip_id':replace_clip_id}}]}
+                                     'replace_clip_id':replace_clip_id,
+                                     'effect_preset':effect_preset,'effect_cue':effect_cue}}]}
         serialized=json.dumps(manifest,sort_keys=True,separators=(',',':'))
         with self.db.lock:
             self.db.conn.execute('BEGIN IMMEDIATE')
@@ -214,6 +215,8 @@ class MotionQueue:
             job['speech_text']=params.get('speech_text')
             job['speaker']=params.get('speaker')
             job['voice_profile']=params.get('voice_profile')
+            job['effect_preset']=params.get('effect_preset')
+            job['effect_cue']=params.get('effect_cue')
         return dict(run,project_id=manifest.get('project_id'),jobs=jobs)
 
     def list(self,user):

@@ -1873,6 +1873,13 @@ class MotionPhotoSceneIn(BaseModel):
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
+class MotionSceneEffectIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    clip_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    preset: Literal['footsteps', 'lamp_clicks', 'door_slam', 'wind', 'metal_creak']
+    cue_seconds: float = Field(ge=.5, le=29.5)
+
+
 class MotionWanDialogueIn(BaseModel):
     start: float = Field(ge=0, lt=60)
     speaker: str = Field(min_length=1, max_length=64)
@@ -2285,6 +2292,55 @@ def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(curr
                                       data.scene,data.frames,24,data.replace_clip_id)
 
 
+@app.post('/api/motion/photo/effects')
+def motion_photo_effect(data:MotionSceneEffectIn,request:Request,user=Depends(current_user)):
+    """Replace one owned scene with a reversible, synchronized visual and audio edit."""
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .motion_effects import MotionEffectError, render_effect_scene
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
+                   for clip in track['clips']),key=lambda clip:clip['start_frame'])
+    clip=next((item for item in videos if item['id']==data.clip_id),None)
+    if not clip:
+        raise HTTPException(404,'Cena não encontrada neste projeto.')
+    style=clip['style']
+    scene=int(style.get('scene_number') or 0)
+    if not scene or not any(item.get('scene')==scene for item in
+                            (timeline.get('storyboard') or {}).get('scenes',[])):
+        raise HTTPException(422,'A cena editada precisa estar no roteiro.')
+    duration=clip['duration_frames']/timeline['fps']
+    if not .5<=data.cue_seconds<=duration-.5:
+        raise HTTPException(422,'O instante do efeito precisa estar dentro da cena.')
+    run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+    if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{data.project_id}':
+        raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+    source=MOTION.artifact_path(user['id'],run_id,artifact_id)
+    if source.suffix.lower()!='.mp4':
+        raise HTTPException(422,'A cena precisa ser MP4.')
+    after_source=None
+    if data.preset=='door_slam' and scene>1 and videos:
+        first=videos[0]['style']
+        if MOTION.get(user['id'],first['motion_run_id'])['project_id']!=f'motion-{data.project_id}':
+            raise HTTPException(403,'O quadro final não pertence a este projeto.')
+        after_source=MOTION.artifact_path(user['id'],first['motion_run_id'],first['motion_artifact_id'])
+    _,grant=authorized_root(DB,user['id'])
+    output_dir=f'MotionStudio/episodes/{data.project_id}/episode_01'
+    target(grant,output_dir,directory=True)
+    relative=f'episodes/{data.project_id}/episode_01/effect_scene_{scene:02d}_{uid()}.mp4'
+    output=target(grant,'MotionStudio/'+relative,creating=True)
+    try:
+        render_effect_scene(source,output,data.preset,data.cue_seconds,
+                            frames=clip['duration_frames'],after_source=after_source)
+    except MotionEffectError as exc:
+        output.unlink(missing_ok=True)
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative,scene,
+                                      clip['duration_frames'],timeline['fps'],clip['id'],
+                                      data.preset,data.cue_seconds)
+
+
 @app.post('/api/motion/ltx/scenes')
 def motion_ltx_scene(data:MotionLtxSceneIn,request:Request,user=Depends(current_user)):
     require_csrf(request);local_only(request)
@@ -2656,8 +2712,9 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
             saved_speech=DB.one('SELECT video_run_id,video_artifact_id FROM motion_scene_speech WHERE id=? AND user_id=?',
                                 (speech_style['motion_speech_id'],user['id']))
             first_style=videos[0]['style']
-            if (not saved_speech or saved_speech['video_run_id']!=first_style.get('motion_run_id') or
-                    saved_speech['video_artifact_id']!=first_style.get('motion_artifact_id')):
+            first_versions=[first_style,*[item.get('style',{}) for item in first_style.get('previous_versions',[])]]
+            if (not saved_speech or not any(saved_speech['video_run_id']==item.get('motion_run_id') and
+                    saved_speech['video_artifact_id']==item.get('motion_artifact_id') for item in first_versions)):
                 raise HTTPException(422,'A narração não pertence a esta sequência de vídeo.')
             narration=_scene_speech_path(user['id'],speech_style['motion_speech_id'])
             with wave.open(str(narration),'rb') as source:
