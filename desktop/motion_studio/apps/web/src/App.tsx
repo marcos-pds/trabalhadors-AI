@@ -590,11 +590,11 @@ export default function App() {
       setProjects((current) => [fresh, ...current.filter((item) => item.id !== fresh.id)]);
       setProject(fresh);
       const studio = await centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices");
-      const allVoices = studio.ready ? studio.voices : [];
+      const allVoices = studio.ready ? studio.voices.filter((item) => !/^minha voz$/i.test(item.name.trim())) : [];
       const voice = allVoices.find((item) => /padr[aã]o|narrad/i.test(item.name)) ?? allVoices[0];
       if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Crie ou ative uma voz no VoiceStudio antes de produzir falas.");
       const cast = [...new Set(scenes.flatMap((scene) => scene.voice_beats?.length ? scene.voice_beats.filter((beat) => beat.text).map((beat) => beat.speaker) : scene.dialogue?.trim() ? [scene.speaker?.trim() || "Narradora"] : []))];
-      if (cast.length > allVoices.length) throw new Error(`O roteiro tem ${cast.length} personagens com fala. Crie ${cast.length - allVoices.length} voz(es) no VoiceStudio antes de continuar.`);
+      if (cast.length > allVoices.length) throw new Error(`O roteiro tem ${cast.length} personagens com fala. Crie ${cast.length - allVoices.length} voz(es) no VoiceStudio antes de continuar; sua voz pessoal não será escolhida automaticamente.`);
       const alternatives = allVoices.filter((item) => item.id !== voice?.id);
       const voiceProfiles = Object.fromEntries(cast.map((speaker, index) => [speaker,
         (speaker === "Mãe" ? allVoices.find((item) => /lara|narradora|feminin|voz atrás da porta/i.test(item.name) && item.id !== voice?.id)?.id : undefined) ??
