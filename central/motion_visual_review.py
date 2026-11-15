@@ -50,12 +50,18 @@ def review_scene(image, master, previous, *, title, action, visual_bible, api_ke
         text = ''.join(part.get('text', '') for part in
                        response.json()['candidates'][0]['content']['parts'])
         answer = json.loads(text)
+        if isinstance(answer, list) and len(answer) == 1 and isinstance(answer[0], dict):
+            answer = answer[0]
+        if not isinstance(answer, dict):
+            raise ValueError('invalid review object')
         status = answer.get('status')
         findings = answer.get('findings')
         if status not in ('pass', 'needs_revision') or not isinstance(findings, list) or any(
                 not isinstance(item, str) for item in findings):
             raise ValueError('invalid review')
         visible_findings = [item.strip()[:240] for item in findings[:4] if item.strip()]
+        visible_findings = [item for item in visible_findings if not re.search(
+            r'(c[aâ]mera|camera).{0,40}(movimento|motion|avan[çc]|executad)|(?:movimento|motion|avan[çc]).{0,40}(c[aâ]mera|camera)', item, re.I)]
         if not re.search(r'\b(shadow|sombra|silhouette|silhueta|person|personagem|human|humano)\b', action, re.I):
             visible_findings = [item for item in visible_findings if not re.search(
                 r'(aus[êe]ncia|falta|missing|n[aã]o aparece).{0,45}(sombra|silhueta|personagem)', item, re.I)]

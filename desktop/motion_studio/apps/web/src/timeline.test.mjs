@@ -159,6 +159,7 @@ test("regenerating a scene replaces it in place and keeps its previous version r
   const restored = restoreClipVersion(next, clip.id, 1).tracks[0].clips[0];
   assert.equal(restored.style.motion_artifact_id, "video-old");
   assert.equal(restored.style.version, 1);
+  assert.equal(restored.style.previous_versions[0].artifact_id, "video-new");
 });
 
 test("stale replacement ID still replaces the same planned scene", () => {

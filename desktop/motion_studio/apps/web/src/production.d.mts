@@ -1,4 +1,7 @@
 export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string; voice_direction?: "neutral" | "whisper" | "breathless" | "fear" | "sad" | "excited" | "angry" | "calm" | "suspense"; duration_frames?: number; pose_count?: number };
+export type VoiceBeat = { speaker: string; text: string; direction: NonNullable<Scene['voice_direction']>; pause_ms: number };
+export type DirectedScene = Pick<Scene, 'scene' | 'title' | 'dialogue'> & { duration_frames: number; speaker: string; voice_beats: VoiceBeat[] };
+export function parseDirectedScript(brief: string, fps?: number): DirectedScene[] | null;
 export type Reference = { scene_number?: number; kind: string; image_data?: string };
 export function parseProductionPlan(raw: string): { visual_bible: string; scenes: Scene[] };
 export function requestedDurationFrames(brief: string, fps?: number): number | null;

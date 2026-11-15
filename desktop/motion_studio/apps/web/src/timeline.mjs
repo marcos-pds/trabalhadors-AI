@@ -230,8 +230,13 @@ export function restoreClipVersion(timeline, clipId, version) {
     .find((clip) => clip.id === clipId);
   const snapshot = target?.style?.previous_versions?.find((item) => item.version === version);
   if (!target || !snapshot || !snapshot.style) throw new Error("Scene version not found");
-  const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: (target.style.previous_versions ?? [])
-    .filter((item) => item.version !== snapshot.version) };
+  const currentVersion = { clip_id: target.id, run_id: target.style.motion_run_id,
+    artifact_id: target.style.motion_artifact_id, version: target.style.version,
+    name: target.name, start_frame: target.start_frame, duration_frames: target.duration_frames,
+    style: { ...target.style, previous_versions: undefined } };
+  const restoredStyle = { ...snapshot.style, version: snapshot.version, previous_versions: [
+    ...(target.style.previous_versions ?? []).filter((item) => item.version !== snapshot.version), currentVersion,
+  ] };
   const oldEnd = target.start_frame + target.duration_frames;
   const shift = snapshot.duration_frames - target.duration_frames;
   return {

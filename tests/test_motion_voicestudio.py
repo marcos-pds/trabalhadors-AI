@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from central.motion_speech import SpeechError, synthesize_episode
-from central.motion_voicestudio import VoiceStudioError, available_voices, engine_ready, import_voice, synthesize_aligned_narration, synthesize_line, synthesize_narration
+from central.motion_voicestudio import VoiceStudioError, available_voices, engine_ready, import_voice, synthesize_aligned_narration, synthesize_directed_scenes, synthesize_line, synthesize_narration
 
 
 def test_catalog_only_exposes_saved_voice_profiles(monkeypatch):
@@ -102,6 +102,55 @@ def test_script_emotions_reach_same_voice_profile(monkeypatch):
     assert calls[0][0] == calls[1][0] == 'narrador-id'
     assert 'tension' in calls[0][1]
     assert 'fear' in calls[1][1]
+
+
+def test_directed_scene_keeps_distinct_voices_and_scripted_silence(monkeypatch):
+    calls = []
+    def fake_line(text, voice_id, *, instructions=None):
+        calls.append((text, voice_id, instructions))
+        return b'\x01\x00' * 4800
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line', fake_line)
+    audio = synthesize_directed_scenes([{'scene': 1, 'seconds': 2, 'beats': [
+        {'speaker': 'Narrador', 'text': 'A porta abriu.', 'direction': 'calm', 'pause_ms': 0},
+        {'speaker': '', 'text': '', 'direction': 'neutral', 'pause_ms': 800},
+        {'speaker': 'Mãe', 'text': 'Lucas...', 'direction': 'whisper', 'pause_ms': 0},
+    ]}], {'Narrador': 'narrator-id', 'Mãe': 'mother-id'})
+    assert [call[1] for call in calls] == ['narrator-id', 'mother-id']
+    assert calls[0][0] == 'A porta abriu.'
+    assert 'Whisper' in calls[1][2]
+    assert audio[4800*2:4800*2+2] == b'\0\0'
+    assert len(audio) == 2*48000*2
+
+
+def test_directed_scene_combines_local_voice_engines(monkeypatch):
+    calls = []
+    def studio(text, voice_id, *, instructions=None):
+        calls.append(('studio', voice_id, instructions))
+        return b'\x01\x00' * 4800
+    def qwen(text, voice_id, user_id=None, *, instructions=None):
+        calls.append(('qwen', voice_id, instructions))
+        return b'\x01\x00' * 4800
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line', studio)
+    monkeypatch.setattr('central.motion_qwen.synthesize_line', qwen)
+    synthesize_directed_scenes([{'scene': 1, 'seconds': 2, 'beats': [
+        {'speaker': 'Narrador', 'text': 'Ela chamou.', 'direction': 'calm'},
+        {'speaker': 'Mãe', 'text': 'Lucas.', 'direction': 'fear'},
+    ]}], {'Narrador': '669da35a', 'Mãe': '1a2a000000000002'}, 'owner')
+    assert calls[0][0] == 'studio'
+    assert calls[1][0] == 'qwen'
+    assert 'fear' in calls[1][2]
+
+
+def test_final_scripted_silence_stays_at_end_of_scene(monkeypatch):
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line',
+                        lambda text, voice_id, *, instructions=None: b'\x01\x00' * 4800)
+    audio = synthesize_directed_scenes([{'scene': 5, 'seconds': 3, 'beats': [
+        {'speaker': 'Narrador', 'text': 'A gravação dizia.', 'direction': 'suspense'},
+        {'speaker': 'Mãe', 'text': 'Lucas.', 'direction': 'fear'},
+        {'speaker': '', 'text': '', 'pause_ms': 1000},
+    ]}], {'Narrador': '669da35a', 'Mãe': '669da35a'})
+    assert audio[-48000*2:] == b'\0\0' * 48000
+    assert audio[-48000*2-2:-48000*2] == b'\x01\x00'
 
 
 def test_import_creates_a_local_profile_from_short_pcm_reference(monkeypatch):

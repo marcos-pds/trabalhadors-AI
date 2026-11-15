@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech, timeScenesFromScript, voiceDirectionFromScript } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseDirectedScript, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech, timeScenesFromScript, voiceDirectionFromScript } from "./production.mjs";
 
 test("workers choose different numbers of full-scene keyframes", () => {
   assert.equal(referenceKeyframeCount(8), 2);
@@ -28,6 +28,32 @@ test("scene lengths follow the script and exact requested total", () => {
 test("explicit emotion in a scene guides its narration", () => {
   assert.equal(voiceDirectionFromScript({ ...scenes[0], dialogue: 'Ela sussurra: alguém está aqui.', voice_direction: 'neutral' }), 'whisper');
   assert.equal(voiceDirectionFromScript({ ...scenes[0], prompt: 'Narrador fala com medo.', voice_direction: 'neutral' }), 'fear');
+});
+
+test("five timed scenes preserve speakers, exact speech and silent beats", () => {
+  const script = `### CENA 1 — O INÍCIO (0–10s)
+[EMOÇÃO: Calma.] "Era quase meia-noite." [PAUSA: 0,8 segundo.]
+### CENA 2 — O PRIMEIRO SINAL (10–20s)
+[EMOÇÃO: Desconfiança.] "Ele morava sozinho."
+[EMOÇÃO: Voz feminina suave, distante.] "Lucas... abre a porta. Sou eu, sua mãe."
+### CENA 3 — O MEDO (20–31s)
+[EMOÇÃO: Choque contido.] "Lucas congelou."
+[PAUSA: 1 segundo.] [EMOÇÃO: Voz feminina insistente.] "Filho... por favor."
+### CENA 4 — A REVELAÇÃO (31–46s)
+[EMOÇÃO: Ansiedade intensa.] "Lucas se aproximou."
+[PAUSA: 0,6 segundo.] [EMOÇÃO: Voz masculina em sussurro.] "Não abre!"
+### CENA 5 — O FINAL (46–60s)
+[EMOÇÃO: Terror silencioso.] "A gravação dizia apenas..."
+[EMOÇÃO: Voz feminina urgente.] "Lucas... eu também estou ouvindo essa voz."
+[SILÊNCIO FINAL: 1 segundo.]`;
+  const parsed = parseDirectedScript(script);
+  assert.deepEqual(parsed.map((scene) => scene.duration_frames), [240, 240, 264, 360, 336]);
+  assert.equal(parsed[1].voice_beats[1].speaker, 'Mãe');
+  assert.equal(parsed[3].voice_beats.at(-1).speaker, 'Lucas');
+  assert.equal(parsed[0].voice_beats[1].pause_ms, 800);
+  assert.equal(parsed[4].voice_beats.at(-1).pause_ms, 1000);
+  assert.equal(parsed.map((scene) => scene.duration_frames).reduce((a, b) => a + b), 1440);
+  assert.ok(!parsed.some((scene) => /EMOÇÃO|PAUSA/.test(scene.dialogue)));
 });
 
 test("planning requires a visual direction and separate image and video prompts", () => {

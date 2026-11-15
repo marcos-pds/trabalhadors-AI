@@ -131,6 +131,58 @@ def synthesize_aligned_narration(lines, voice_id, directions=None):
     return bytes(output)
 
 
+def synthesize_directed_scenes(scenes, profiles, user_id=None):
+    """Render the exact spoken beats and scripted silences inside each scene slot."""
+    output = bytearray()
+    for scene in scenes:
+        slot_samples = round(scene['seconds'] * 48000)
+        segments = []
+        for beat in scene['beats']:
+            if beat.get('pause_ms'):
+                segments.append(('pause', b'\0\0' * round(int(beat['pause_ms']) * 48)))
+            elif beat.get('text'):
+                speaker = beat['speaker']
+                if speaker not in profiles:
+                    raise VoiceStudioError(f'Falta uma voz para {speaker}.')
+                direction = beat.get('direction')
+                instruction = {
+                    'whisper': 'Whisper naturally in Brazilian Portuguese. Keep every word clear.',
+                    'breathless': 'Speak breathlessly in Brazilian Portuguese, with clear words.',
+                    'fear': 'Speak with restrained fear in Brazilian Portuguese, with clear words.',
+                    'sad': 'Speak with subtle sadness in Brazilian Portuguese, with clear words.',
+                    'excited': 'Speak with natural excitement in Brazilian Portuguese, with clear words.',
+                    'angry': 'Speak with controlled anger in Brazilian Portuguese, with clear words.',
+                    'calm': 'Speak calmly in Brazilian Portuguese, with clear words.',
+                    'suspense': 'Speak with growing tension in Brazilian Portuguese, with clear words.',
+                }.get(direction)
+                profile = profiles[speaker]
+                if len(profile) == 16:
+                    from .motion_qwen import QwenVoiceError, synthesize_line as qwen_line
+                    try:
+                        spoken = qwen_line(beat['text'], profile, user_id, instructions=instruction)
+                    except QwenVoiceError as exc:
+                        raise VoiceStudioError(str(exc)) from exc
+                else:
+                    spoken = synthesize_line(beat['text'], profile, instructions=instruction) if instruction else synthesize_line(beat['text'], profile)
+                segments.append(('speech', spoken))
+        used_samples = sum(len(segment) // 2 for _, segment in segments)
+        if used_samples > slot_samples:
+            raise VoiceStudioError(f"A fala da cena {scene['scene']} excede {scene['seconds']:.1f}s. Ajuste o ritmo ou a duração sem cortar palavras.")
+        surplus = slot_samples - used_samples
+        trailing_pause = bool(segments and segments[-1][0] == 'pause')
+        last_speech = max((index for index, (kind, _) in enumerate(segments) if kind == 'speech'), default=0)
+        if last_speech > 0:
+            tail = 0 if trailing_pause else min(surplus, 2 * 48000)
+            segments.insert(last_speech, ('pause', b'\0\0' * (surplus - tail)))
+            surplus = tail
+        audio = b''.join(segment for _, segment in segments)
+        if len(audio) // 2 > slot_samples:
+            raise VoiceStudioError(f"A fala da cena {scene['scene']} excede {scene['seconds']:.1f}s. Ajuste o ritmo ou a duração sem cortar palavras.")
+        output.extend(audio)
+        output.extend(b'\0\0' * (slot_samples - len(audio) // 2))
+    return bytes(output)
+
+
 def import_voice(name, transcript, wav):
     """Save a short, authorized reference only in the local VoiceStudio profile store."""
     if len(wav) > 7_000_000 or not wav.startswith(b'RIFF') or wav[8:12] != b'WAVE':

@@ -9,7 +9,7 @@ from central.database import Database, utcnow
 from desktop.motion_studio.apps.api.main import Timeline, initialize, now
 
 
-@pytest.mark.parametrize('scene_count', [1, 2, 8])
+@pytest.mark.parametrize('scene_count', [1, 2, 5, 8])
 def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypatch, scene_count):
     db = Database(tmp_path / 'central.sqlite3')
     db.execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',

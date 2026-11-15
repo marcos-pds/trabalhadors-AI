@@ -68,6 +68,14 @@ class Track(BaseModel):
     clips: list[Clip] = Field(default_factory=list, max_length=256)
 
 
+class VoiceBeat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    speaker: str = Field(default="", max_length=64)
+    text: str = Field(default="", max_length=300)
+    direction: Literal["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"] = "neutral"
+    pause_ms: int = Field(default=0, ge=0, le=30000)
+
+
 class PlannedScene(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scene: int = Field(ge=1, le=64)
@@ -79,6 +87,7 @@ class PlannedScene(BaseModel):
     speaker: str = Field(default="", max_length=64)
     dialogue: str = Field(default="", max_length=300)
     voice_direction: Literal["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"] = "neutral"
+    voice_beats: list[VoiceBeat] = Field(default_factory=list, max_length=32)
     duration_frames: int = Field(default=96, ge=24, le=720)
     pose_count: int = Field(default=4, ge=2, le=30)
 

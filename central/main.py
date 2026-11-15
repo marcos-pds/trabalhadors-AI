@@ -2374,7 +2374,7 @@ def motion_photo_review(data:MotionVisualReviewIn,request:Request,user=Depends(c
         raise HTTPException(503,'Configure um provedor Gemini visual para revisar as imagens.')
     try:
         return review_scene(image,master,previous,title=scene.get('title') or '',
-                            action=scene.get('prompt') or '',visual_bible=storyboard.get('visual_bible') or '',
+                            action=scene.get('image_prompt') or scene.get('prompt') or '',visual_bible=storyboard.get('visual_bible') or '',
                             api_key=SEC.decrypt(provider['api_key_enc']),model=provider['model'])
     except VisualReviewError as exc:
         raise HTTPException(503,str(exc)) from None
@@ -2626,14 +2626,14 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
     """Persist one continuous OmniVoice take for the owner's complete scene sequence."""
     require_csrf(request);local_only(request)
     from .motion_queue import authorized_root, digest_file
-    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_aligned_narration
+    from .motion_voicestudio import VoiceStudioError, available_voices, synthesize_aligned_narration, synthesize_directed_scenes
     from .workspace_tools import target
     import wave
     _,timeline=_motion_project_timeline(project_id,user['id'])
     videos=sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                    for clip in track['clips']),key=lambda clip:clip['start_frame'])
     planned=(timeline.get('storyboard') or {}).get('scenes') or []
-    if len(videos) not in (2,8) or len(videos)!=len(planned) or any(
+    if not 1 <= len(videos) <= 8 or len(videos)!=len(planned) or any(
         clip['start_frame']!=sum(previous['duration_frames'] for previous in videos[:index])
         for index,clip in enumerate(videos)):
         raise HTTPException(422,'Conclua as cenas consecutivas na timeline antes da narração.')
@@ -2643,14 +2643,18 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
         if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{project_id}':
             raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
         MOTION.artifact_path(user['id'],run_id,artifact_id)
-    speakers={str(scene.get('speaker') or 'Narrador').strip() for scene in planned}
-    if len(speakers)!=1 or not next(iter(speakers)).lower().startswith('narrad') or any(
-            not str(scene.get('dialogue') or '').strip() for scene in planned):
+    directed=any(scene.get('voice_beats') for scene in planned)
+    profiles=(timeline.get('storyboard') or {}).get('voice_profiles',{})
+    speakers=({str(beat.get('speaker') or '').strip() for scene in planned for beat in scene.get('voice_beats',[]) if beat.get('text')}
+              if directed else {str(scene.get('speaker') or 'Narrador').strip() for scene in planned})
+    if not directed and (len(speakers)!=1 or not next(iter(speakers)).lower().startswith('narrad')):
         raise HTTPException(422,'A narração contínua exige fala do narrador em todas as cenas.')
-    speaker=next(iter(speakers))
-    profile=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker)
-    if not isinstance(profile,str) or not re.fullmatch(r'[a-f0-9]{8}',profile):
-        raise HTTPException(422,'Selecione um perfil OmniVoice para o narrador.')
+    if any(not str(scene.get('dialogue') or '').strip() for scene in planned):
+        raise HTTPException(422,'Todas as cenas precisam de fala para a narração contínua.')
+    if any(not isinstance(profiles.get(name),str) or not re.fullmatch(r'(?:[a-f0-9]{8}|[a-f0-9]{16})',profiles[name]) for name in speakers):
+        raise HTTPException(422,'Selecione um perfil de voz local para cada personagem do roteiro.')
+    speaker='Elenco' if directed else next(iter(speakers))
+    profile=profiles['Narrador'] if directed and 'Narrador' in profiles else profiles[next(iter(speakers))]
     root,grant=authorized_root(DB,user['id'])
     for relative_dir in ('MotionStudio','MotionStudio/narrations',f'MotionStudio/narrations/{project_id}'):
         try:
@@ -2660,12 +2664,17 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
                 raise
             target(grant,relative_dir,creating=True).mkdir()
     try:
-        if profile not in {voice['id'] for voice in available_voices()}:
-            raise HTTPException(422,'O perfil do narrador não está disponível no VoiceStudio.')
+        from .motion_qwen import available_voices as qwen_voices
+        available={voice['id'] for voice in available_voices()} | {voice['id'] for voice in qwen_voices(user['id'])}
+        if any(profiles[name] not in available for name in speakers):
+            raise HTTPException(422,'Um perfil do roteiro não está disponível na Central.')
         script=' '.join(str(scene['dialogue']).strip() for scene in planned)
-        audio=synthesize_aligned_narration([(str(scene['dialogue']).strip(),
+        audio=(synthesize_directed_scenes([{'scene':scene['scene'], 'seconds':clip['duration_frames']/timeline['fps'],
+            'beats':scene['voice_beats']} for scene,clip in zip(planned,videos)],profiles,user['id']) if directed else
+            synthesize_aligned_narration([(str(scene['dialogue']).strip(),
             clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile,
             directions=[scene.get('voice_direction') for scene in planned])
+            )
     except VoiceStudioError as exc:
         raise HTTPException(503,str(exc)) from None
     duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']
@@ -2723,9 +2732,9 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                      for clip in track['clips']), key=lambda clip:clip['start_frame'])
     expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8
-    if expected not in (1,2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+    if not 1 <= expected <= 8 or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
                              for index,clip in enumerate(videos)):
-        raise HTTPException(422,'A montagem precisa de uma, duas ou oito cenas consecutivas na timeline.')
+        raise HTTPException(422,'A montagem precisa das cenas consecutivas do roteiro na timeline.')
     audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
                       for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
     continuous_clips=[clip for track in timeline['tracks'] if track['kind']=='audio'
@@ -2778,7 +2787,7 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
             if (continuous_clip['start_frame']!=0 or
                     continuous_clip['duration_frames']!=sum(clip['duration_frames'] for clip in videos) or
                     speech_style.get('speech_text')!=script or
-                    speech_style.get('voice_profile')!=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker) or
+                    (speech_style.get('speaker')!='Elenco' and speech_style.get('voice_profile')!=(timeline.get('storyboard') or {}).get('voice_profiles',{}).get(speaker)) or
                     not speech_style.get('motion_speech_id')):
                 raise HTTPException(422,'A narração da timeline está desatualizada; gere a voz novamente.')
             saved_speech=DB.one('SELECT video_run_id,video_artifact_id FROM motion_scene_speech WHERE id=? AND user_id=?',
