@@ -78,7 +78,7 @@ class PlannedScene(BaseModel):
     cliffhanger: str = Field(default="", max_length=250)
     speaker: str = Field(default="", max_length=64)
     dialogue: str = Field(default="", max_length=300)
-    voice_direction: Literal["neutral", "whisper", "breathless"] = "neutral"
+    voice_direction: Literal["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"] = "neutral"
     duration_frames: int = Field(default=96, ge=24, le=720)
     pose_count: int = Field(default=4, ge=2, le=30)
 

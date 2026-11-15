@@ -18,12 +18,58 @@ export function parseProductionPlan(raw) {
         typeof scene.image_prompt !== "string" || !scene.image_prompt.trim() || scene.image_prompt.length > 1024 ||
         typeof scene.prompt !== "string" || !scene.prompt.trim() || scene.prompt.length > 1024 ||
         (scene.pose_count !== undefined && (!Number.isInteger(scene.pose_count) || scene.pose_count < 2 || scene.pose_count > 30)) ||
-        (scene.voice_direction !== undefined && !["neutral", "whisper", "breathless"].includes(scene.voice_direction)) ||
+        (scene.voice_direction !== undefined && !["neutral", "whisper", "breathless", "fear", "sad", "excited", "angry", "calm", "suspense"].includes(scene.voice_direction)) ||
         (scene.duration_frames !== undefined && (!Number.isInteger(scene.duration_frames) || scene.duration_frames < 24 || scene.duration_frames > 720)) ||
         (scene.dialogue && (typeof scene.dialogue !== "string" || scene.dialogue.length > 300)))) {
     throw new Error("O roteiro precisa trazer oito cenas com direção visual e ação para o vídeo.");
   }
   return plan;
+}
+
+export function requestedDurationFrames(brief, fps = 24) {
+  const match = String(brief).match(/(?:dura(?:ç|c)[aã]o\s*:?\s*|durar\s+|epis[oó]dio\s+de\s+|v[ií]deo\s+de\s+|exatamente\s+)(\d+(?:[.,]\d+)?)\s*(minutos?|mins?|segundos?|segs?|s\b)/i);
+  if (!match) return null;
+  return Math.round(Number(match[1].replace(',', '.')) * (/^m/i.test(match[2]) ? 60 : 1) * fps);
+}
+
+export function voiceDirectionFromScript(scene) {
+  const text = [scene.dialogue, scene.title, scene.prompt].filter(Boolean).join(' ');
+  const cues = [
+    [/sussurr|whisper/i, 'whisper'],
+    [/ofegant|sem f[oô]lego|breathless/i, 'breathless'],
+    [/com medo|assustad|aterroriz|fearful|terrified/i, 'fear'],
+    [/trist|choros|sadly|sorrow/i, 'sad'],
+    [/empolgad|euf[oó]ric|excited/i, 'excited'],
+    [/irad|furios|com raiva|angrily/i, 'angry'],
+    [/com calma|seren|calmly/i, 'calm'],
+    [/suspense|tens[aã]o|misterios|ominous/i, 'suspense'],
+  ];
+  return cues.find(([pattern]) => pattern.test(text))?.[1] ?? scene.voice_direction ?? 'neutral';
+}
+
+export function timeScenesFromScript(scenes, brief, fps = 24) {
+  const minimum = scenes.map((scene) => {
+    const words = String(scene.dialogue ?? '').trim().split(/\s+/).filter(Boolean).length;
+    return Math.max(fps, Math.ceil((words / 2.5 + (words ? 1 : 0)) * fps));
+  });
+  const preferred = scenes.map((scene, index) => Math.max(minimum[index], scene.duration_frames ?? Math.max(3 * fps, minimum[index])));
+  if (minimum.some((frames) => frames > 30 * fps)) throw new Error('Uma fala excede 30 segundos. Divida essa fala em mais cenas.');
+  const target = requestedDurationFrames(brief, fps);
+  const total = target ?? preferred.reduce((sum, frames) => sum + frames, 0);
+  if (total < minimum.reduce((sum, frames) => sum + frames, 0) || total > scenes.length * 30 * fps) {
+    throw new Error('A duração solicitada não comporta as falas e ações do roteiro. Ajuste o texto ou o tempo do episódio.');
+  }
+  const result = [...minimum];
+  let remaining = total - result.reduce((sum, frames) => sum + frames, 0);
+  while (remaining > 0) {
+    const eligible = result.map((frames, index) => frames < 30 * fps ? index : -1).filter((index) => index >= 0);
+    if (!eligible.length) throw new Error('Cada cena pode durar até 30 segundos. Divida o roteiro em mais cenas.');
+    const index = eligible.reduce((best, current) =>
+      preferred[current] / result[current] > preferred[best] / result[best] ? current : best);
+    result[index] += 1;
+    remaining -= 1;
+  }
+  return scenes.map((scene, index) => ({ ...scene, duration_frames: result[index] }));
 }
 
 export function sceneReference(references, number) {

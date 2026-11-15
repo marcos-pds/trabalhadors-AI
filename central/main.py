@@ -2665,8 +2665,7 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
         script=' '.join(str(scene['dialogue']).strip() for scene in planned)
         audio=synthesize_aligned_narration([(str(scene['dialogue']).strip(),
             clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile,
-            directions=[scene.get('voice_direction') if scene.get('voice_direction') in ('whisper','breathless') else None
-                        for scene in planned])
+            directions=[scene.get('voice_direction') for scene in planned])
     except VoiceStudioError as exc:
         raise HTTPException(503,str(exc)) from None
     duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']

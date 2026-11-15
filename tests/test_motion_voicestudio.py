@@ -91,6 +91,19 @@ def test_requested_whisper_and_breathlessness_reach_voice_engine(monkeypatch):
     assert 'breathless' in calls[1][2]
 
 
+def test_script_emotions_reach_same_voice_profile(monkeypatch):
+    calls = []
+    def fake_line(text, voice_id, *, instructions=None):
+        calls.append((voice_id, instructions))
+        return b'\x01\x00' * 4800
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line', fake_line)
+    synthesize_aligned_narration([('Ele abriu a porta.', 2), ('Ela recuou.', 3)], 'narrador-id',
+                                 directions=['suspense', 'fear'])
+    assert calls[0][0] == calls[1][0] == 'narrador-id'
+    assert 'tension' in calls[0][1]
+    assert 'fear' in calls[1][1]
+
+
 def test_import_creates_a_local_profile_from_short_pcm_reference(monkeypatch):
     source=BytesIO()
     with wave.open(source,'wb') as stream:

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech, timeScenesFromScript, voiceDirectionFromScript } from "./production.mjs";
 
 test("workers choose different numbers of full-scene keyframes", () => {
   assert.equal(referenceKeyframeCount(8), 2);
@@ -11,6 +11,24 @@ test("workers choose different numbers of full-scene keyframes", () => {
 
 const scenes = Array.from({ length: 8 }, (_, index) => ({ scene: index + 1, title: `Cena ${index + 1}`,
   image_prompt: "Caio at the laboratory bench", prompt: "Caio lifts the flask" }));
+
+test("scene lengths follow the script and exact requested total", () => {
+  const scripted = scenes.map((scene, index) => ({ ...scene, duration_frames: index === 0 ? 240 : 96,
+    dialogue: index === 1 ? 'Esta frase precisa de mais tempo para ser narrada com clareza e emoção.' : '' }));
+  const natural = timeScenesFromScript(scripted, 'Uma história');
+  assert.equal(natural[0].duration_frames, 240);
+  assert.ok(natural[1].duration_frames > 96);
+  const exact = timeScenesFromScript(scripted, 'Vídeo de 2 minutos');
+  assert.equal(exact.reduce((sum, scene) => sum + scene.duration_frames, 0), 120 * 24);
+  assert.ok(exact[0].duration_frames > exact[2].duration_frames);
+  assert.throws(() => timeScenesFromScript(scripted, 'Duração: 8 segundos'), /não comporta/);
+  assert.equal(timeScenesFromScript(scripted, 'O episódio deve durar 2 minutos').reduce((sum, scene) => sum + scene.duration_frames, 0), 2880);
+});
+
+test("explicit emotion in a scene guides its narration", () => {
+  assert.equal(voiceDirectionFromScript({ ...scenes[0], dialogue: 'Ela sussurra: alguém está aqui.', voice_direction: 'neutral' }), 'whisper');
+  assert.equal(voiceDirectionFromScript({ ...scenes[0], prompt: 'Narrador fala com medo.', voice_direction: 'neutral' }), 'fear');
+});
 
 test("planning requires a visual direction and separate image and video prompts", () => {
   const plan = parseProductionPlan('```json\n' + JSON.stringify({ visual_bible: "Caio wears blue and white", scenes }) + '\n```');

@@ -112,8 +112,16 @@ def synthesize_aligned_narration(lines, voice_id, directions=None):
     for index, (text, seconds) in enumerate(lines):
         slot_samples = round(seconds * 48000)
         direction = directions[index] if directions else None
-        instructions = {'whisper': 'Speak in a low, intimate whisper in Brazilian Portuguese, with natural suspense and clear words.',
-                        'breathless': 'Speak in Brazilian Portuguese with audible urgency and breathless emotion, keeping every word clear.'}.get(direction)
+        instructions = {
+            'whisper': 'Speak in a low, intimate whisper in Brazilian Portuguese, with natural suspense and clear words.',
+            'breathless': 'Speak in Brazilian Portuguese with audible urgency and breathless emotion, keeping every word clear.',
+            'fear': 'Speak in Brazilian Portuguese with believable fear and a slightly trembling voice. Articulate every word clearly.',
+            'sad': 'Speak in Brazilian Portuguese with restrained sadness and gentle pauses. Articulate every word clearly.',
+            'excited': 'Speak in Brazilian Portuguese with lively excitement and natural energy. Articulate every word clearly.',
+            'angry': 'Speak in Brazilian Portuguese with controlled anger and firm emphasis. Articulate every word clearly.',
+            'calm': 'Speak in Brazilian Portuguese calmly, warmly and naturally. Articulate every word clearly.',
+            'suspense': 'Speak in Brazilian Portuguese with quiet tension and deliberate pacing. Articulate every word clearly.',
+        }.get(direction)
         spoken = synthesize_line(text, voice_id, instructions=instructions) if instructions else synthesize_line(text, voice_id)
         spoken_samples = len(spoken) // 2
         if slot_samples <= 0 or spoken_samples > slot_samples:

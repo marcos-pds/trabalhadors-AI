@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type RefObject } from "react";
 
 import { addContinuousNarrationClip, addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneTimingForSpeech, timeScenesFromScript, voiceDirectionFromScript, sceneReference as findSceneReference } from "./production.mjs";
 import { directScene } from "./scene_direction.mjs";
 
 type Clip = {
@@ -22,7 +22,7 @@ type Project = { id: string; title: string; summary: string; timeline: Timeline;
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
 type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; effect_preset?: string | null; effect_cue?: number | null; camera_motion?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
-type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; voice_direction?: "neutral" | "whisper" | "breathless"; duration_frames?: number; pose_count?: number };
+type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; voice_direction?: "neutral" | "whisper" | "breathless" | "fear" | "sad" | "excited" | "angry" | "calm" | "suspense"; duration_frames?: number; pose_count?: number };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -549,7 +549,7 @@ export default function App() {
   async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false, resumeProject?: Project) {
     const idea = (ideaOverride ?? chatPrompt).trim();
     const longEpisode = /(?:2\s*minutos|120\s*segundos)/i.test(idea);
-    const planningBrief = longEpisode ? (idea.match(/História:\s*([\s\S]*?)(?:\n\nEstilo:|$)/i)?.[1] ?? idea) : idea;
+    const planningBrief = idea;
     if (!idea || autoBusy || !embedded) return;
     addChatMessage("user", idea + (promptImage ? ` · Imagem: ${promptImage.name}` : ""));
     setAutoBusy(true);
@@ -570,8 +570,8 @@ export default function App() {
         "Planejamento criativo de uma minissérie vertical animada original para Instagram. Resposta exclusivamente em JSON com história e instruções para imagem e vídeo; esta etapa é apenas texto.",
         `Brief narrativo: "${planningBrief.replace(/["\r\n]/g, " ")}"`,
         promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
-        `O roteiro tem exatamente 8 cenas consecutivas de ${longEpisode ? "15" : "4"} segundos, total ${longEpisode ? "120" : "32"} segundos. Cada ação decorre da anterior. Em cada cena, escolha pose_count entre 2 e 30 conforme a complexidade e as mudanças de movimento, sem repetir quadros quase idênticos. Defina duration_frames=${longEpisode ? "360" : "96"} em todas as cenas (24 FPS). Composição vertical 9:16. Respeite a cena e os personagens do pedido; não invente um protagonista quando o pedido mostra somente ambiente e sombra. visual_bible descreve a identidade visual e os cenários. image_prompt representa um quadro estático em inglês; prompt descreve a ação em etapas progressivas e fisicamente plausíveis, incluindo passos, porta, lâmpadas ou vento quando pedidos. Defina voice_direction como neutral, whisper ou breathless somente quando a interpretação for pedida no tema ou na cena. ${longEpisode ? "Escreva narração direta em português brasileiro, uma fala de cerca de 20 palavras por cena, mantendo uma história contínua ao longo dos dois minutos. Use speaker Narrador e a voz padrão." : "Escreva narração apenas quando o pedido exigir; caso contrário dialogue deve ser vazio."}`,
-        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês\",\"prompt\":\"movimento progressivo em inglês\",\"speaker\":\"Narrador\",\"dialogue\":\"\",\"voice_direction\":\"neutral\",\"duration_frames\":360,\"pose_count\":8}]}. Não inclua explicações fora do JSON.",
+        `O roteiro tem exatamente 8 cenas consecutivas. Cada ação decorre da anterior. Determine a duração de CADA cena pelo tempo necessário para sua ação e fala, de 1 a 30 segundos, sem repetir um tempo fixo. Se o pedido especificar duração total, distribua o tempo segundo o roteiro. Defina duration_frames em quadros a 24 FPS. Escolha pose_count entre 2 e 30 conforme a complexidade. Composição vertical 9:16. Respeite personagens e ambiente do pedido. visual_bible descreve a identidade visual. image_prompt representa um quadro estático em inglês; prompt descreve ação progressiva e fisicamente plausível. Em cada cena, defina voice_direction conforme a emoção da fala e do roteiro: neutral, whisper, breathless, fear, sad, excited, angry, calm ou suspense. Mantenha a identidade da voz do personagem. ${longEpisode ? "Escreva narração direta em português brasileiro, contínua entre cenas. Use speaker Narrador e a voz padrão." : "Escreva narração somente quando o pedido exigir; caso contrário dialogue deve ser vazio."}`,
+        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês\",\"prompt\":\"movimento progressivo em inglês\",\"speaker\":\"Narrador\",\"dialogue\":\"\",\"voice_direction\":\"suspense\",\"duration_frames\":168,\"pose_count\":8}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
       for (let attempt = 0; attempt < 180 && ["queued", "running", "awaiting_approval"].includes(status); attempt += 1) {
@@ -582,8 +582,8 @@ export default function App() {
       const messages = await centralRequest<Array<{ role: string; content: string }>>(`/api/conversations/${conversation.id}/messages`);
       const raw = messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
       const plan = parseProductionPlan(raw);
-      scenes = plan.scenes.map((scene) => ({ ...scene, duration_frames: longEpisode ? 360 : 96,
-        voice_direction: scene.voice_direction ?? (directScene(scene, idea).expressive ?? "neutral"),
+      scenes = timeScenesFromScript(plan.scenes, idea).map((scene) => ({ ...scene,
+        voice_direction: voiceDirectionFromScript(scene),
         pose_count: longEpisode ? Math.max(8, scene.pose_count ?? 8) : (scene.pose_count ?? 4) }));
       addChatMessage("assistant", `História pronta: ${scenes.map((scene) => `${scene.scene}. ${scene.title}`).join(" · ")}. Agora vou gerar os cenários e as poses de cada cena.`);
       setAutoProgress("Criando o projeto e preparando a produção…");
