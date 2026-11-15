@@ -9,7 +9,7 @@ from central.database import Database, utcnow
 from desktop.motion_studio.apps.api.main import Timeline, initialize, now
 
 
-@pytest.mark.parametrize('scene_count', [2, 8])
+@pytest.mark.parametrize('scene_count', [1, 2, 8])
 def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypatch, scene_count):
     db = Database(tmp_path / 'central.sqlite3')
     db.execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',
@@ -28,8 +28,8 @@ def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypat
             {'scene': index + 1, 'title': f'Cena {index+1}', 'prompt': 'Test'}
             for index in range(scene_count)]}})
     with sqlite3.connect(studio_db) as connection:
-        connection.execute('INSERT INTO projects VALUES (?,?,?,?,?,?)',
-                           ('pilot', 'Episódio', '', timeline.model_dump_json(), now(), now()))
+        connection.execute('INSERT INTO projects(id,title,summary,timeline_json,created_at,updated_at,owner_id) VALUES (?,?,?,?,?,?,?)',
+                           ('pilot', 'Episódio', '', timeline.model_dump_json(), now(), now(), 'owner'))
     root = tmp_path / 'MotionStudio'
     folder = root / 'episodes' / 'pilot' / 'episode_01'
     folder.mkdir(parents=True)
@@ -64,7 +64,9 @@ def test_export_is_scoped_to_owned_runs_and_current_timeline(tmp_path, monkeypat
     monkeypatch.setattr('central.motion_export.assemble_episode', fake_assemble)
     result = motion_main.motion_export_episode('pilot', object(), {'id': 'owner'})
     assert motion_main._motion_export_record('owner', 'pilot')['id'] == result['id']
-    assert motion_main._motion_export_record('other', 'pilot') is None
+    with pytest.raises(HTTPException) as forbidden:
+        motion_main._motion_export_record('other', 'pilot')
+    assert forbidden.value.status_code == 404
     with sqlite3.connect(studio_db) as connection:
         changed = json.loads(timeline.model_dump_json())
         changed['tracks'][0]['clips'][0]['name'] = 'Revisada'

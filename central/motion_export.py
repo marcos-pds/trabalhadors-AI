@@ -28,16 +28,30 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
     filters = []
     concat = []
     total = 0.0
+    input_index = 0
     for index, (video, audio, duration) in enumerate(scenes):
         if not 0 < duration <= 600:
             raise MotionExportError('Duração de cena inválida.')
         total += duration
+        video_input = input_index
         args += ['-i', str(video)]
+        input_index += 1
         if audio:
+            audio_input = input_index
             args += ['-i', str(audio)]
+            input_index += 1
         else:
-            args += ['-f', 'lavfi', '-t', f'{duration:.6f}', '-i', 'anullsrc=channel_layout=mono:sample_rate=48000']
-        video_input, audio_input = index * 2, index * 2 + 1
+            probe = subprocess.run([str(ffprobe), '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=index', '-of', 'csv=p=0', str(video)],
+                capture_output=True, text=True, timeout=30, check=False)
+            if probe.returncode:
+                raise MotionExportError('Não foi possível inspecionar o áudio da cena.')
+            if probe.stdout.strip():
+                audio_input = video_input
+            else:
+                audio_input = input_index
+                args += ['-f', 'lavfi', '-t', f'{duration:.6f}', '-i', 'anullsrc=channel_layout=mono:sample_rate=48000']
+                input_index += 1
         filters.append(f'[{video_input}:v]trim=duration={duration:.6f},setpts=PTS-STARTPTS,'
                        'scale=720:1280:force_original_aspect_ratio=decrease,'
                        'pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,format=yuv420p'
@@ -66,7 +80,7 @@ def assemble_episode(scenes, output, ffmpeg='ffmpeg', ffprobe='ffprobe', caption
         filters.append(''.join(concat) + f'concat=n={len(scenes)}:v=1:a=1[v][scene_audio]')
     if narration is not None:
         filters.append('[scene_audio]anullsink')
-        filters.append(f'[{len(scenes) * 2}:a]aresample=48000,aformat=channel_layouts=mono,'
+        filters.append(f'[{input_index}:a]aresample=48000,aformat=channel_layouts=mono,'
                        f'atrim=duration={total:.6f},asetpts=PTS-STARTPTS,'
                        f'apad=whole_dur={total:.6f},atrim=duration={total:.6f}[a]')
     else:

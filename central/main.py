@@ -2590,9 +2590,9 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
     videos = sorted((clip for track in timeline['tracks'] if track['kind']=='video'
                      for clip in track['clips']), key=lambda clip:clip['start_frame'])
     expected=len((timeline.get('storyboard') or {}).get('scenes',[])) or 8
-    if expected not in (2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
+    if expected not in (1,2,8) or len(videos)!=expected or any(clip['start_frame'] != sum(previous['duration_frames'] for previous in videos[:index])
                              for index,clip in enumerate(videos)):
-        raise HTTPException(422,'A montagem precisa de duas ou oito cenas consecutivas na timeline.')
+        raise HTTPException(422,'A montagem precisa de uma, duas ou oito cenas consecutivas na timeline.')
     audio_by_video = {clip.get('style',{}).get('source_video_clip_id'):clip
                       for track in timeline['tracks'] if track['kind']=='audio' for clip in track['clips']}
     continuous_clips=[clip for track in timeline['tracks'] if track['kind']=='audio'
