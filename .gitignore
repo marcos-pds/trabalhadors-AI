@@ -57,3 +57,9 @@ build/
 
 # Git worktrees locais de trabalhadores (nunca empacotar no ZIP)
 /.central-worker-worktrees/
+
+# Artefatos da distribuicao desktop
+/desktop/dist/
+/desktop/dist-installer/
+/desktop/.pyinstaller-build/
+/desktop/*.spec
