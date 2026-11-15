@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from central.photo_sequence import PhotoSequenceError, render_photo_scene
+from central.photo_sequence import PhotoSequenceError, render_photo_scene, render_reference_scene
 
 
 def run(*args):
@@ -52,3 +52,15 @@ def test_rejects_magenta_character_plate_as_background(tmp_path):
     run('-f', 'lavfi', '-i', 'color=c=magenta:s=512x1024', '-frames:v', '1', pose)
     with pytest.raises(PhotoSequenceError, match='cenário recebeu fundo magenta'):
         render_photo_scene(background, [pose, pose], tmp_path / 'scene.mp4')
+
+
+def test_full_scene_references_keep_exact_fifteen_second_timing(tmp_path):
+    first, last = tmp_path / 'first.png', tmp_path / 'last.png'
+    run('-f', 'lavfi', '-i', 'color=c=blue:s=720x1280', '-frames:v', '1', first)
+    run('-f', 'lavfi', '-i', 'color=c=green:s=720x1280', '-frames:v', '1', last)
+    output = tmp_path / 'reference.mp4'
+    result = render_reference_scene([first, last], output, frames=360)
+    assert result['references'] == 2
+    probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=nb_frames,r_frame_rate,width,height', '-of', 'json', output], text=True))['streams'][0]
+    assert probe == {'width': 720, 'height': 1280, 'r_frame_rate': '24/1', 'nb_frames': '360'}

@@ -1,8 +1,9 @@
-export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string };
+export type Scene = { scene: number; title: string; image_prompt?: string; prompt: string; dialogue?: string; duration_frames?: number; pose_count?: number };
 export type Reference = { scene_number?: number; kind: string; image_data?: string };
 export function parseProductionPlan(raw: string): { visual_bible: string; scenes: Scene[] };
 export function sceneReference<T extends Reference>(references: T[], number: number): T | undefined;
 export function allSceneImagesReady(scenes: Scene[], references: Reference[]): boolean;
+export function referenceKeyframeCount(poseCount?: number): number;
 export function meanPixelDifference(left: Uint8ClampedArray, right: Uint8ClampedArray): number;
 export function sceneTimingForSpeech(dialogue?: string): { frames: number; fps: number };
 export function referenceAnchor<T extends Reference>(references: T[]): T | undefined;

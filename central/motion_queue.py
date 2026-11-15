@@ -167,7 +167,7 @@ class MotionQueue:
                 self.db.conn.execute('ROLLBACK');raise
         return self.get(user,rid)
 
-    def register_photo_video(self,user,project_id,relative_video,scene_number,frames,fps):
+    def register_photo_video(self,user,project_id,relative_video,scene_number,frames,fps,replace_clip_id=None):
         """Register an already validated local photo montage as an owned Motion run."""
         root,grant=authorized_root(self.db,user,'MotionStudio')
         video=scoped_path(root,relative_video)
@@ -180,7 +180,8 @@ class MotionQueue:
                                 'provenance':{'source':'local','sha256':digest}}],
                   'jobs':[{'id':'generate','adapter':'photo_sequence','stage':'generate',
                            'inputs':[],'outputs':['video'],
-                           'params':{'frames':frames,'fps':fps,'scene_number':scene_number}}]}
+                           'params':{'frames':frames,'fps':fps,'scene_number':scene_number,
+                                     'replace_clip_id':replace_clip_id}}]}
         serialized=json.dumps(manifest,sort_keys=True,separators=(',',':'))
         with self.db.lock:
             self.db.conn.execute('BEGIN IMMEDIATE')

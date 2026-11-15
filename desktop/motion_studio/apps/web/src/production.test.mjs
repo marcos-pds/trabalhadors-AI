@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech } from "./production.mjs";
+import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneReference, sceneTimingForSpeech } from "./production.mjs";
+
+test("workers choose different numbers of full-scene keyframes", () => {
+  assert.equal(referenceKeyframeCount(8), 2);
+  assert.equal(referenceKeyframeCount(15), 3);
+  assert.equal(referenceKeyframeCount(20), 4);
+  assert.equal(referenceKeyframeCount(30), 5);
+});
 
 const scenes = Array.from({ length: 8 }, (_, index) => ({ scene: index + 1, title: `Cena ${index + 1}`,
   image_prompt: "Caio at the laboratory bench", prompt: "Caio lifts the flask" }));
@@ -16,6 +23,12 @@ test("planning accepts multiple worker proposals and uses the final complete one
   const final = { visual_bible: "Final proposal", scenes: scenes.map((scene) => ({ ...scene, dialogue: "Caio ouve pensamentos." })) };
   const output = `## Designer IA\n${JSON.stringify(first)}\n\n## Revisor IA\n${JSON.stringify(final)}`;
   assert.equal(parseProductionPlan(output).visual_bible, "Final proposal");
+});
+
+test("planning accepts a scene-specific image count and long timing", () => {
+  const longScenes = scenes.map((scene, index) => ({ ...scene, duration_frames: 360, pose_count: index % 2 ? 10 : 6 }));
+  assert.equal(parseProductionPlan(JSON.stringify({ visual_bible: "Same corridor", scenes: longScenes })).scenes[1].pose_count, 10);
+  assert.throws(() => parseProductionPlan(JSON.stringify({ visual_bible: "Same corridor", scenes: longScenes.map((scene) => ({ ...scene, pose_count: 31 })) })), /oito cenas/);
 });
 
 test("video stage waits until every scene has its image", () => {

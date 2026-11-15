@@ -1869,6 +1869,8 @@ class MotionPhotoSceneIn(BaseModel):
     background_data: str = Field(min_length=32, max_length=8_400_000)
     poses: list[str] = Field(min_length=2, max_length=30)
     frames: int = Field(default=96, ge=24, le=720)
+    mode: Literal['isolated', 'reference'] = 'isolated'
+    replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -2226,7 +2228,7 @@ def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(curr
     """Render isolated image poses over one immutable scene background."""
     require_csrf(request);local_only(request)
     from .motion_queue import authorized_root
-    from .photo_sequence import PhotoSequenceError, render_photo_scene
+    from .photo_sequence import PhotoSequenceError, render_photo_scene, render_reference_scene
     from .workspace_tools import target
     _,timeline=_motion_project_timeline(data.project_id,user['id'])
     if not any(scene.get('scene')==data.scene for scene in
@@ -2273,11 +2275,14 @@ def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(curr
     relative_video=f'episodes/{data.project_id}/episode_01/photo_scene_{data.scene:02d}_{run_id}.mp4'
     video=target(grant,'MotionStudio/'+relative_video,creating=True)
     try:
-        render_photo_scene(sources[0],sources[1:],video,frames=data.frames)
+        if data.mode == 'reference':
+            render_reference_scene(sources[1:],video,frames=data.frames)
+        else:
+            render_photo_scene(sources[0],sources[1:],video,frames=data.frames)
     except PhotoSequenceError as exc:
         raise HTTPException(422,str(exc)) from None
     return MOTION.register_photo_video(user['id'],data.project_id,relative_video,
-                                      data.scene,data.frames,24)
+                                      data.scene,data.frames,24,data.replace_clip_id)
 
 
 @app.post('/api/motion/ltx/scenes')
@@ -2625,8 +2630,10 @@ def motion_export_episode(project_id:str,request:Request,user=Depends(current_us
                 raise HTTPException(422,'A fala precisa ser WAV.')
         planned_scene=next((scene for scene in (timeline.get('storyboard') or {}).get('scenes',[])
                             if scene.get('scene')==style.get('scene_number')),None)
-        captions.append(str((planned_scene or {}).get('dialogue') or '') if continuous_clip else
-                        str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+        captions.append((str((planned_scene or {}).get('dialogue') or '') if continuous_clip else
+                         str((audio_clip or {}).get('style',{}).get('speech_text') or ''))
+                        if ((timeline.get('storyboard') or {}).get('captions_enabled', True)
+                            and 'sem legendas' not in str((timeline.get('storyboard') or {}).get('theme','')).lower()) else '')
         scenes.append((video,audio,clip['duration_frames']/timeline['fps']))
     export_id=uid()
     relative=f'MotionStudio/episodes/{project_id}/episode_01/episode_{export_id}.mp4'

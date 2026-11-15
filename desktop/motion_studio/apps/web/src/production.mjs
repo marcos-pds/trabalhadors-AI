@@ -17,6 +17,8 @@ export function parseProductionPlan(raw) {
         typeof scene.title !== "string" || !scene.title.trim() || scene.title.length > 120 ||
         typeof scene.image_prompt !== "string" || !scene.image_prompt.trim() || scene.image_prompt.length > 1024 ||
         typeof scene.prompt !== "string" || !scene.prompt.trim() || scene.prompt.length > 1024 ||
+        (scene.pose_count !== undefined && (!Number.isInteger(scene.pose_count) || scene.pose_count < 2 || scene.pose_count > 30)) ||
+        (scene.duration_frames !== undefined && (!Number.isInteger(scene.duration_frames) || scene.duration_frames < 24 || scene.duration_frames > 720)) ||
         (scene.dialogue && (typeof scene.dialogue !== "string" || scene.dialogue.length > 300)))) {
     throw new Error("O roteiro precisa trazer oito cenas com direção visual e ação para o vídeo.");
   }
@@ -29,6 +31,10 @@ export function sceneReference(references, number) {
 
 export function allSceneImagesReady(scenes, references) {
   return scenes.length > 0 && scenes.every((scene) => Boolean(sceneReference(references, scene.scene)));
+}
+
+export function referenceKeyframeCount(poseCount) {
+  return Math.max(2, Math.min(5, Math.round((Number.isInteger(poseCount) ? poseCount : 10) / 5)));
 }
 
 export function meanPixelDifference(left, right) {

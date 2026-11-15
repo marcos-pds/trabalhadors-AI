@@ -78,6 +78,8 @@ class PlannedScene(BaseModel):
     cliffhanger: str = Field(default="", max_length=250)
     speaker: str = Field(default="", max_length=64)
     dialogue: str = Field(default="", max_length=300)
+    duration_frames: int = Field(default=96, ge=24, le=720)
+    pose_count: int = Field(default=4, ge=2, le=30)
 
 
 class VisualReference(BaseModel):
@@ -107,6 +109,7 @@ class Storyboard(BaseModel):
     episode_status: Literal["draft", "approved"] = "draft"
     publication: Publication | None = None
     voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)
+    captions_enabled: bool = True
 
 
 class Timeline(BaseModel):
