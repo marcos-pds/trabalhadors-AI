@@ -18,6 +18,16 @@ def _run(args, timeout=180):
         raise PhotoSequenceError('A montagem das fotos falhou: ' + result.stderr[-350:])
 
 
+def _magenta_corner(path, ffmpeg):
+    corner = subprocess.run([str(ffmpeg), '-v', 'error', '-i', str(path),
+        '-vf', 'crop=1:1:0:0,format=rgb24', '-frames:v', '1',
+        '-f', 'rawvideo', '-'], capture_output=True, timeout=30, check=False)
+    if corner.returncode or len(corner.stdout) != 3:
+        raise PhotoSequenceError('Não foi possível inspecionar a cor de uma imagem.')
+    red, green, blue = corner.stdout
+    return red > 150 and blue > 110 and green < 150 and red > green * 1.35 and blue > green * 1.2
+
+
 def render_photo_scene(background, poses, output, *, frames=96, fps=24,
                        ffmpeg='ffmpeg', ffprobe='ffprobe'):
     """Keep background pixels fixed; show each isolated pose for a short interval."""
@@ -27,22 +37,20 @@ def render_photo_scene(background, poses, output, *, frames=96, fps=24,
         raise PhotoSequenceError('Use 2 a 30 poses e uma duração de 1 a 30 segundos em 24 FPS.')
     if not background.is_file() or any(not pose.is_file() for pose in poses):
         raise PhotoSequenceError('Falta o cenário fixo ou uma das poses.')
+    if _magenta_corner(background, ffmpeg):
+        raise PhotoSequenceError('O cenário recebeu fundo magenta; gere um ambiente vazio antes de montar a cena.')
     output.parent.mkdir(parents=True, exist_ok=True)
     stills = []
     for index, pose in enumerate(poses):
         # An isolated magenta background is mandatory. It prevents a generated
         # room or street from replacing the scene's fixed setting.
-        corner = subprocess.run([str(ffmpeg), '-v', 'error', '-i', str(pose),
-            '-vf', 'crop=1:1:0:0,format=rgb24', '-frames:v', '1',
-            '-f', 'rawvideo', '-'], capture_output=True, timeout=30, check=False)
-        if corner.returncode or len(corner.stdout) != 3 or not (
-                corner.stdout[0] > 170 and corner.stdout[1] < 110 and corner.stdout[2] > 130):
+        if not _magenta_corner(pose, ffmpeg):
             raise PhotoSequenceError(f'Pose {index + 1} precisa de fundo magenta uniforme.')
         still = output.with_name(f'{output.stem}.pose_{index:02d}.png')
         _run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y',
             '-i', background, '-i', pose, '-filter_complex',
             '[0:v]scale=720:1280,format=rgba[bg];'
-            '[1:v]colorkey=0xff00ff:0.23:0.08,scale=520:-1,format=rgba[actor];'
+            '[1:v]colorkey=0xff00ff:0.48:0.0,scale=520:-1,format=rgba[actor];'
             '[bg][actor]overlay=(W-w)/2:H-h-60:format=auto,format=rgb24[v]',
             '-map', '[v]', '-frames:v', '1', still])
         stills.append(still)

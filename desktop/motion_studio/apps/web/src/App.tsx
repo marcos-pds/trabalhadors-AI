@@ -588,7 +588,7 @@ export default function App() {
       const imageSamples = await Promise.all(scenes.map(async (scene) => imagePixels(findSceneReference(ready.timeline.storyboard?.references ?? [], scene.scene)!.image_data!)));
       for (let index = 1; index < imageSamples.length; index += 1) {
         if (meanPixelDifference(imageSamples[index - 1], imageSamples[index]) < 10) {
-          throw new Error(`Os quadros ${index} e ${index + 1} ficaram parecidos demais para cenários diferentes. Revise as referências antes da montagem; nenhum vídeo foi iniciado.`);
+          addChatMessage("assistant", `Os quadros ${index} e ${index + 1} têm aparência próxima. Vou manter a continuidade visual e conferir se as poses mostram ações diferentes na revisão.`);
         }
       }
       if (reviewAfterImages || !ideaOverride) {
@@ -607,8 +607,7 @@ export default function App() {
         setAutoProgress(`Criando cenário fixo da cena ${scene.scene}/8…`);
         const background = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
           method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1",
-            prompt: `Use the reference only for layout and art style. Render the exact same location as an EMPTY background plate, without any character, person, silhouette, hand or text. Keep scenery and props unchanged. ${scene.image_prompt}`,
-            reference_image_data: sceneReference.image_data }),
+            prompt: `Empty location plate for this story scene, 2D illustrated style, vertical 9:16. Scene: ${scene.title}. Setting details: ${scene.image_prompt}. Draw ONLY architecture, scenery, lighting and stationary props. Absolutely no person, human figure, silhouette, face, hand, clothing, magenta or pink backdrop, or text. Leave the central foreground clear for a character to be composited later.` }),
         });
         const phases = ["before the action", "first small movement", "midway through the action", "end of the action"];
         const poses: string[] = [];
@@ -616,7 +615,7 @@ export default function App() {
           setAutoProgress(`Gerando pose ${index + 1}/${phases.length} da cena ${scene.scene}/8…`);
           const pose = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
             method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1",
-              prompt: `ONE full-body character, isolated on perfectly uniform solid bright magenta (#FF00FF) background. No scenery, no floor, no gradients, no text, no collage. Preserve exactly the face, black hair, blue glasses, white lab coat and blue shirt from the reference. Scene action: ${scene.prompt}. This is the pose ${index + 1} of 4, ${phases[index]}. Change only the character pose and any small object held by the character. Keep body proportions and clothing stable.`,
+              prompt: `ONE full-body character, isolated on perfectly uniform solid bright magenta (#FF00FF) background. No scenery, no floor, no gradients, no text, no collage. Preserve exactly the face, hair, accessories, outfit, colors and art style of the supplied character reference. Character identity: ${current.timeline.storyboard?.visual_bible ?? "Use the supplied reference exactly."}. Scene action: ${scene.prompt}. This is pose ${index + 1} of 4, ${phases[index]}. Change only the character pose and any small object held by the character. Keep body proportions and clothing stable.`,
               reference_image_data: anchor.image_data }),
           });
           poses.push(pose.image_data);

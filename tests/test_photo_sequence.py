@@ -43,3 +43,12 @@ def test_rejects_full_scene_in_place_of_isolated_pose(tmp_path):
     run('-f', 'lavfi', '-i', 'color=c=blue:s=512x1024', '-frames:v', '1', pose)
     with pytest.raises(PhotoSequenceError, match='magenta'):
         render_photo_scene(background, [pose, pose], tmp_path / 'scene.mp4')
+
+
+def test_rejects_magenta_character_plate_as_background(tmp_path):
+    background = tmp_path / 'background.png'
+    pose = tmp_path / 'pose.png'
+    run('-f', 'lavfi', '-i', 'color=c=0xaa33cc:s=720x1280', '-frames:v', '1', background)
+    run('-f', 'lavfi', '-i', 'color=c=magenta:s=512x1024', '-frames:v', '1', pose)
+    with pytest.raises(PhotoSequenceError, match='cenário recebeu fundo magenta'):
+        render_photo_scene(background, [pose, pose], tmp_path / 'scene.mp4')
