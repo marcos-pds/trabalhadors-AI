@@ -1870,6 +1870,7 @@ class MotionPhotoSceneIn(BaseModel):
     poses: list[str] = Field(min_length=2, max_length=30)
     frames: int = Field(default=96, ge=24, le=720)
     mode: Literal['isolated', 'reference'] = 'isolated'
+    camera_motion: Literal['gentle', 'push_in'] = 'gentle'
     replace_clip_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
@@ -1878,6 +1879,16 @@ class MotionSceneEffectIn(BaseModel):
     clip_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
     preset: Literal['footsteps', 'lamp_clicks', 'door_slam', 'wind', 'metal_creak']
     cue_seconds: float = Field(ge=.5, le=29.5)
+
+
+class MotionVisualReviewIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    scene: int = Field(ge=1, le=64)
+
+
+class MotionCameraPushIn(BaseModel):
+    project_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
+    clip_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,64}$')
 
 
 class MotionWanDialogueIn(BaseModel):
@@ -2283,7 +2294,7 @@ def motion_photo_scene(data:MotionPhotoSceneIn,request:Request,user=Depends(curr
     video=target(grant,'MotionStudio/'+relative_video,creating=True)
     try:
         if data.mode == 'reference':
-            render_reference_scene(sources[1:],video,frames=data.frames)
+            render_reference_scene(sources[1:],video,frames=data.frames,camera_motion=data.camera_motion)
         else:
             render_photo_scene(sources[0],sources[1:],video,frames=data.frames)
     except PhotoSequenceError as exc:
@@ -2339,6 +2350,66 @@ def motion_photo_effect(data:MotionSceneEffectIn,request:Request,user=Depends(cu
     return MOTION.register_photo_video(user['id'],data.project_id,relative,scene,
                                       clip['duration_frames'],timeline['fps'],clip['id'],
                                       data.preset,data.cue_seconds)
+
+
+@app.post('/api/motion/photo/review')
+def motion_photo_review(data:MotionVisualReviewIn,request:Request,user=Depends(current_user)):
+    """Inspect an owned scene reference with the user's configured vision provider."""
+    require_csrf(request);local_only(request)
+    from .motion_visual_review import VisualReviewError, review_scene
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    storyboard=timeline.get('storyboard') or {}
+    scene=next((item for item in storyboard.get('scenes',[]) if item.get('scene')==data.scene),None)
+    references=storyboard.get('references') or []
+    image=next((item.get('image_data') for item in reversed(references)
+                if item.get('scene_number')==data.scene and item.get('image_data')),None)
+    master=next((item.get('image_data') for item in references
+                 if item.get('kind')=='character' and not item.get('scene_number') and item.get('image_data')),None)
+    previous=next((item.get('image_data') for item in reversed(references)
+                   if item.get('scene_number')==data.scene-1 and item.get('image_data')),None)
+    if not scene or not image or not master:
+        raise HTTPException(422,'A revisão exige roteiro, imagem da cena e imagem mestra.')
+    provider=DB.one("SELECT model,api_key_enc FROM providers WHERE user_id=? AND kind='gemini' AND enabled=1 AND api_key_enc IS NOT NULL ORDER BY CASE WHEN model='gemini-3.1-flash-lite' THEN 0 ELSE 1 END,priority LIMIT 1",(user['id'],))
+    if not provider:
+        raise HTTPException(503,'Configure um provedor Gemini visual para revisar as imagens.')
+    try:
+        return review_scene(image,master,previous,title=scene.get('title') or '',
+                            action=scene.get('prompt') or '',visual_bible=storyboard.get('visual_bible') or '',
+                            api_key=SEC.decrypt(provider['api_key_enc']),model=provider['model'])
+    except VisualReviewError as exc:
+        raise HTTPException(503,str(exc)) from None
+
+
+@app.post('/api/motion/photo/camera-push')
+def motion_photo_camera_push(data:MotionCameraPushIn,request:Request,user=Depends(current_user)):
+    require_csrf(request);local_only(request)
+    from .motion_queue import authorized_root
+    from .photo_sequence import PhotoSequenceError, render_camera_push
+    from .workspace_tools import target
+    _,timeline=_motion_project_timeline(data.project_id,user['id'])
+    clip=next((item for track in timeline['tracks'] if track['kind']=='video'
+               for item in track['clips'] if item['id']==data.clip_id),None)
+    if not clip or not clip['style'].get('scene_number'):
+        raise HTTPException(404,'Cena não encontrada neste projeto.')
+    style=clip['style']
+    run_id,artifact_id=style.get('motion_run_id'),style.get('motion_artifact_id')
+    if not run_id or not artifact_id or MOTION.get(user['id'],run_id)['project_id']!=f'motion-{data.project_id}':
+        raise HTTPException(403,'Cena não pertence a este projeto e usuário.')
+    source=MOTION.artifact_path(user['id'],run_id,artifact_id)
+    if source.suffix.lower()!='.mp4':
+        raise HTTPException(422,'A cena precisa ser MP4.')
+    _,grant=authorized_root(DB,user['id'])
+    scene=int(style['scene_number'])
+    relative=f'episodes/{data.project_id}/episode_01/camera_scene_{scene:02d}_{uid()}.mp4'
+    output=target(grant,'MotionStudio/'+relative,creating=True)
+    try:
+        render_camera_push(source,output,frames=clip['duration_frames'],fps=timeline['fps'])
+    except PhotoSequenceError as exc:
+        output.unlink(missing_ok=True)
+        raise HTTPException(422,str(exc)) from None
+    return MOTION.register_photo_video(user['id'],data.project_id,relative,scene,
+                                      clip['duration_frames'],timeline['fps'],clip['id'],
+                                      camera_motion='push_in')
 
 
 @app.post('/api/motion/ltx/scenes')
@@ -2593,7 +2664,9 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
             raise HTTPException(422,'O perfil do narrador não está disponível no VoiceStudio.')
         script=' '.join(str(scene['dialogue']).strip() for scene in planned)
         audio=synthesize_aligned_narration([(str(scene['dialogue']).strip(),
-            clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile)
+            clip['duration_frames']/timeline['fps']) for scene,clip in zip(planned,videos)],profile,
+            directions=[scene.get('voice_direction') if scene.get('voice_direction') in ('whisper','breathless') else None
+                        for scene in planned])
     except VoiceStudioError as exc:
         raise HTTPException(503,str(exc)) from None
     duration=sum(clip['duration_frames'] for clip in videos)/timeline['fps']

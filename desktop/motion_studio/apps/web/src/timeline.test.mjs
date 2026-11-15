@@ -161,6 +161,18 @@ test("regenerating a scene replaces it in place and keeps its previous version r
   assert.equal(restored.style.version, 1);
 });
 
+test("stale replacement ID still replaces the same planned scene", () => {
+  const timeline = { fps: 24, tracks: [{ id: "video", kind: "video", clips: [
+    { id: "restored", name: "Impacto", start_frame: 360, duration_frames: 360,
+      style: { scene_number: 4, motion_run_id: "old", motion_artifact_id: "video", version: 1 } },
+  ] }] };
+  const next = addWanVideoClip(timeline, { runId: "edited", artifactId: "video", name: "Impacto",
+    frames: 360, fps: 24, sceneNumber: 4, replaceClipId: "stale-id" });
+  assert.equal(next.tracks[0].clips.length, 1);
+  assert.equal(next.tracks[0].clips[0].start_frame, 360);
+  assert.equal(next.tracks[0].clips[0].style.previous_versions[0].clip_id, "restored");
+});
+
 test("changing scene length moves later video, captions and speech; restoring reverses the shift", () => {
   const timeline = { fps: 24, tracks: [
     { id: "video", kind: "video", clips: [

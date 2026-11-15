@@ -78,12 +78,12 @@ def render_photo_scene(background, poses, output, *, frames=96, fps=24,
     return {'path': output, 'frames': frames, 'fps': fps, 'poses': len(poses)}
 
 
-def render_reference_scene(images, output, *, frames=360, fps=24,
+def render_reference_scene(images, output, *, frames=360, fps=24, camera_motion='gentle',
                            ffmpeg='ffmpeg', ffprobe='ffprobe'):
     """Move gently across full scene references and dissolve between action states."""
     images = [Path(image) for image in images]
     output = Path(output)
-    if not 2 <= len(images) <= 30 or not 24 <= frames <= 720 or fps != 24:
+    if not 2 <= len(images) <= 30 or not 24 <= frames <= 720 or fps != 24 or camera_motion not in ('gentle', 'push_in'):
         raise PhotoSequenceError('Use 2 a 30 quadros de cena e até 30 segundos em 24 FPS.')
     if any(not image.is_file() or _magenta_corner(image, ffmpeg) for image in images):
         raise PhotoSequenceError('Os quadros completos precisam conter o cenário, sem fundo magenta.')
@@ -96,9 +96,11 @@ def render_reference_scene(images, output, *, frames=360, fps=24,
     for image in images:
         args += ['-loop', '1', '-framerate', str(fps), '-t', f'{duration:.6f}', '-i', str(image)]
     filters = []
+    zoom_step = .0007 if camera_motion == 'push_in' else .00035
+    zoom_limit = 1.25 if camera_motion == 'push_in' else 1.13
     for index in range(len(images)):
         filters.append(f'[{index}:v]scale=720:1280,'
-                       "zoompan=z='min(zoom+0.00035,1.13)':"
+                       f"zoompan=z='min(zoom+{zoom_step},{zoom_limit})':"
                        "x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':"
                        "d=1:s=720x1280:fps=24,"
                        'setsar=1,format=yuv420p'
@@ -123,3 +125,27 @@ def render_reference_scene(images, output, *, frames=360, fps=24,
             or video.get('height') != 1280 or video.get('r_frame_rate') != '24/1'):
         raise PhotoSequenceError('A cena não tem a duração ou o formato esperado.')
     return {'path': output, 'frames': frames, 'fps': fps, 'references': len(images)}
+
+
+def render_camera_push(source, output, *, frames, fps=24, ffmpeg='ffmpeg', ffprobe='ffprobe'):
+    """Add a visible forward camera move to an existing scene, retaining its audio."""
+    if not 24 <= frames <= 720 or fps != 24:
+        raise PhotoSequenceError('O avanço de câmera exige cena de 1 a 30 segundos em 24 FPS.')
+    source, output = Path(source), Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    zoom = f"zoompan=z='1+0.24*min(on,{frames-1})/{max(1,frames-1)}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=720x1280:fps=24"
+    _run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-i', source,
+          '-vf', f'scale=720:1280,{zoom},setsar=1,format=yuv420p',
+          '-map', '0:v:0', '-map', '0:a?', '-frames:v', str(frames),
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-c:a', 'copy',
+          '-movflags', '+faststart', output], timeout=300)
+    probe = subprocess.run([str(ffprobe), '-v', 'error', '-show_entries',
+        'format=duration:stream=codec_type,nb_frames,width,height', '-of', 'json', output],
+        capture_output=True, text=True, timeout=30, check=False)
+    if probe.returncode:
+        raise PhotoSequenceError('O ffprobe não validou o avanço de câmera.')
+    media = json.loads(probe.stdout)
+    video = next((stream for stream in media['streams'] if stream['codec_type'] == 'video'), None)
+    if not video or int(video.get('nb_frames') or 0) != frames or video.get('width') != 720 or video.get('height') != 1280:
+        raise PhotoSequenceError('O avanço de câmera perdeu quadros ou formato.')
+    return output

@@ -78,6 +78,7 @@ class PlannedScene(BaseModel):
     cliffhanger: str = Field(default="", max_length=250)
     speaker: str = Field(default="", max_length=64)
     dialogue: str = Field(default="", max_length=300)
+    voice_direction: Literal["neutral", "whisper", "breathless"] = "neutral"
     duration_frames: int = Field(default=96, ge=24, le=720)
     pose_count: int = Field(default=4, ge=2, le=30)
 
@@ -100,12 +101,22 @@ class Publication(BaseModel):
     hashtags: str = Field(default="", max_length=500)
 
 
+class VisualQualityReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scene: int = Field(ge=1, le=64)
+    reference_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    status: Literal["pass", "needs_revision"]
+    findings: list[str] = Field(default_factory=list, max_length=4)
+    reviewer: str = Field(max_length=80)
+
+
 class Storyboard(BaseModel):
     model_config = ConfigDict(extra="forbid")
     theme: str = Field(max_length=2000)
     visual_bible: str = Field(default="", max_length=2000)
     scenes: list[PlannedScene] = Field(default_factory=list, max_length=64)
     references: list[VisualReference] = Field(default_factory=list, max_length=32)
+    quality_reviews: list[VisualQualityReview] = Field(default_factory=list, max_length=64)
     episode_status: Literal["draft", "approved"] = "draft"
     publication: Publication | None = None
     voice_profiles: dict[str, str] = Field(default_factory=dict, max_length=12)

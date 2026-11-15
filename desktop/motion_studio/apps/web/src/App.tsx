@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 
 import { addContinuousNarrationClip, addSceneCaptionClip, addSceneSpeechClip, addTextClip, addWanSpeechClip, addWanVideoClip, compactSceneSequence, compositionEndFrame, formatTimecode, makeId, restoreClipVersion, standaloneSpeechPreviewUrl, updateClipReview, updateSceneCaptionClip, wanRunMatchesProject, wanVideoPreviewUrl } from "./timeline.mjs";
 import { allSceneImagesReady, characterMasterPrompt, meanPixelDifference, parseProductionPlan, referenceAnchor, referenceKeyframeCount, sceneImageEditPrompt, sceneTimingForSpeech, sceneReference as findSceneReference } from "./production.mjs";
+import { directScene } from "./scene_direction.mjs";
 
 type Clip = {
   id: string;
@@ -15,12 +16,13 @@ type Clip = {
 type Track = { id: string; name: string; kind: Clip["kind"]; clips: Clip[] };
 type VisualReference = { id: string; kind: "character" | "setting"; name: string; prompt: string; image_data?: string; source: "generated_brief" | "generated_image" | "upload"; scene_number?: number };
 type VoiceProfile = string;
-type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; voice_profiles?: Record<string, VoiceProfile>; captions_enabled?: boolean; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
+type VisualQualityReview = { scene: number; reference_id: string; status: "pass" | "needs_revision"; findings: string[]; reviewer: string };
+type Timeline = { schema_version: 1; fps: number; width: number; height: number; tracks: Track[]; storyboard?: { theme: string; visual_bible?: string; scenes: PlannedScene[]; references?: VisualReference[]; quality_reviews?: VisualQualityReview[]; voice_profiles?: Record<string, VoiceProfile>; captions_enabled?: boolean; episode_status?: "draft" | "approved"; publication?: { cover_text: string; caption: string; hashtags: string } } };
 type Project = { id: string; title: string; summary: string; timeline: Timeline; updated_at: string };
 type Capabilities = { comfyui: { installed: boolean; status: string }; wan21_t2v_13b: { installed: boolean }; ffmpeg: { installed: boolean }; rendering: { status: string }; transcription: { status: string } };
-type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; effect_preset?: string | null; effect_cue?: number | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
+type MotionRun = { id: string; project_id?: string; state: string; error: string | null; jobs: Array<{ id: string; adapter?: string; state: string; frames?: number | null; fps?: number | null; scene_number?: number | null; replace_clip_id?: string | null; effect_preset?: string | null; effect_cue?: number | null; camera_motion?: string | null; speech_artifact_id?: string | null; speech_text?: string | null; speaker?: string | null; voice_profile?: string | null; error: string | null; artifact: { id: string; path: string; bytes: number } | null }> };
 type MotionTools = { comfy_endpoint: string | null; comfy_root: string | null; allow_remote: boolean; executables: Record<string, string> | null; comfy_status?: string };
-type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; duration_frames?: number; pose_count?: number };
+type PlannedScene = { scene: number; title: string; prompt: string; image_prompt?: string; hook?: string; cliffhanger?: string; speaker?: string; dialogue?: string; voice_direction?: "neutral" | "whisper" | "breathless"; duration_frames?: number; pose_count?: number };
 
 const initialTimeline = (): Timeline => ({
   schema_version: 1,
@@ -152,6 +154,8 @@ export default function App() {
   const [effectPreset, setEffectPreset] = useState("wind");
   const [effectCue, setEffectCue] = useState(8);
   const [effectBusy, setEffectBusy] = useState(false);
+  const [visualReviewBusy, setVisualReviewBusy] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
@@ -261,6 +265,10 @@ export default function App() {
     () => project?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClip),
     [project, selectedClip],
   );
+  const selectedScene = selected?.kind === "video" ? project?.timeline.storyboard?.scenes.find((scene) => scene.scene === selected.style.scene_number) : undefined;
+  const selectedReference = selectedScene ? findSceneReference(project?.timeline.storyboard?.references ?? [], selectedScene.scene) : undefined;
+  const selectedQualityReview = project?.timeline.storyboard?.quality_reviews?.find((review) =>
+    review.scene === selectedScene?.scene && review.reference_id === selectedReference?.id);
   const fps = project?.timeline.fps ?? 24;
   const projectLength = project ? compositionEndFrame(project.timeline) : 0;
   const videoClips = project?.timeline.tracks.filter((track) => track.kind === "video").flatMap((track) => track.clips) ?? [];
@@ -291,9 +299,9 @@ export default function App() {
   useEffect(() => {
     setReviewComment(selected?.kind === "video" ? String(selected.style.review_comment ?? "") : "");
     if (selected?.kind === "video") {
-      const defaults: Record<number, string> = { 1: "footsteps", 2: "footsteps", 4: "door_slam", 5: "lamp_clicks", 6: "metal_creak", 7: "wind" };
-      setEffectPreset(String(selected.style.effect_preset ?? defaults[Number(selected.style.scene_number)] ?? "wind"));
-      setEffectCue(Number(selected.style.effect_cue ?? Math.min(8, selected.duration_frames / (project?.timeline.fps ?? 24) / 2)));
+      const direction = directScene(project?.timeline.storyboard?.scenes.find((scene) => scene.scene === selected.style.scene_number), project?.summary);
+      setEffectPreset(String(selected.style.effect_preset ?? direction.effect ?? "wind"));
+      setEffectCue(Number(selected.style.effect_cue ?? direction.cue));
     }
   }, [selected?.id, selected?.kind, selected?.style.review_comment]);
 
@@ -339,6 +347,7 @@ export default function App() {
         voiceProfile: job.voice_profile ?? undefined,
         effectPreset: job.effect_preset ?? undefined,
         effectCue: job.effect_cue ?? undefined,
+        cameraMotion: job.camera_motion ?? undefined,
       })));
     if (!videos.length) return;
     const fresh = await request<Project>("/api/projects/" + targetProjectId);
@@ -481,6 +490,62 @@ export default function App() {
     }
   }
 
+  async function reviewReference(projectId: string, scene: PlannedScene, force = false) {
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const reference = findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene);
+    if (!reference) throw new Error(`Falta a imagem da cena ${scene.scene}.`);
+    const existing = current.timeline.storyboard?.quality_reviews?.find((item) =>
+      item.scene === scene.scene && item.reference_id === reference.id);
+    if (existing?.status === "pass" && !force) return existing;
+    const result = await centralRequest<{ status: "pass" | "needs_revision"; findings: string[]; reviewer: string }>(
+      "/api/motion/photo/review", { method: "POST", body: JSON.stringify({ project_id: projectId, scene: scene.scene }) });
+    const review: VisualQualityReview = { scene: scene.scene, reference_id: reference.id, ...result };
+    const storyboard = current.timeline.storyboard!;
+    const updated = await request<Project>(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({
+      title: current.title, summary: current.summary, timeline: { ...current.timeline, storyboard: {
+        ...storyboard, quality_reviews: [...(storyboard.quality_reviews ?? []).filter((item) => item.scene !== scene.scene), review],
+      } },
+    }) });
+    setProject(updated);
+    return review;
+  }
+
+  async function correctReference(projectId: string, scene: PlannedScene, findings: string[]) {
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const storyboard = current.timeline.storyboard!;
+    const reference = findSceneReference(storyboard.references ?? [], scene.scene);
+    if (!reference?.image_data || (storyboard.references ?? []).length >= 32) throw new Error("Não há espaço para outra versão da imagem.");
+    const correction = findings.join('; ').slice(0, 600);
+    setAutoProgress(`Corrigindo somente a imagem da cena ${scene.scene}: ${correction}`);
+    const image = await centralRequest<{ image_data: string }>("/api/motion/references/generate", {
+      method: "POST", body: JSON.stringify({ provider: "qwen_image_2_1", reference_image_data: reference.image_data,
+        prompt: `Edit the supplied image while preserving its architecture, camera angle and visual identity. Scene: ${scene.title}. Required visible state: ${scene.image_prompt ?? scene.prompt}. Correct only these verified issues: ${correction}. One coherent vertical 9:16 frame, no text.`.slice(0, 4096) }),
+    });
+    const revised: VisualReference = { id: makeId("ref"), kind: "setting", scene_number: scene.scene,
+      name: `Cena ${scene.scene} · revisão visual`, prompt: correction,
+      image_data: image.image_data, source: "generated_image" };
+    const updated = await request<Project>(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({
+      title: current.title, summary: current.summary, timeline: { ...current.timeline, storyboard: {
+        ...storyboard, references: [...(storyboard.references ?? []), revised], episode_status: "draft",
+      } },
+    }) });
+    setProject(updated);
+    return revised;
+  }
+
+  async function applyAutomaticSceneEffect(projectId: string, scene: PlannedScene, brief: string) {
+    const direction = directScene(scene, brief);
+    if (!direction.effect) return;
+    const current = await request<Project>(`/api/projects/${projectId}`);
+    const clip = current.timeline.tracks.find((track) => track.kind === "video")?.clips.find((item) => item.style.scene_number === scene.scene);
+    if (!clip || clip.style.effect_preset) return;
+    setAutoProgress(`Direção sonora: aplicando ${direction.effect} à cena ${scene.scene}…`);
+    const edited = await centralRequest<MotionRun>("/api/motion/photo/effects", { method: "POST", body: JSON.stringify({
+      project_id: projectId, clip_id: clip.id, preset: direction.effect, cue_seconds: direction.cue,
+    }) });
+    await syncCompletedVideos([edited], projectId);
+  }
+
   async function createEpisodeFromChat(ideaOverride?: string, reviewAfterImages = false, resumeProject?: Project) {
     const idea = (ideaOverride ?? chatPrompt).trim();
     const longEpisode = /(?:2\s*minutos|120\s*segundos)/i.test(idea);
@@ -505,8 +570,8 @@ export default function App() {
         "Planejamento criativo de uma minissérie vertical animada original para Instagram. Resposta exclusivamente em JSON com história e instruções para imagem e vídeo; esta etapa é apenas texto.",
         `Brief narrativo: "${planningBrief.replace(/["\r\n]/g, " ")}"`,
         promptImage ? "O usuário enviou uma imagem mestra. Use sua composição e identidade como âncora visual; não invente detalhes incompatíveis com ela." : "Sem imagem enviada: defina uma identidade visual original, estável e detalhada para os personagens e cenários.",
-        `O roteiro tem exatamente 8 cenas consecutivas de ${longEpisode ? "15" : "4"} segundos, total ${longEpisode ? "120" : "32"} segundos. Cada ação decorre da anterior. Em cada cena, escolha pose_count entre 2 e 30 conforme a complexidade e as mudanças de movimento, sem repetir quadros quase idênticos. Defina duration_frames=${longEpisode ? "360" : "96"} em todas as cenas (24 FPS). Composição vertical 9:16. Respeite a cena e os personagens do pedido; não invente um protagonista quando o pedido mostra somente ambiente e sombra. visual_bible descreve a identidade visual e os cenários. image_prompt representa um quadro estático em inglês; prompt descreve a ação em etapas progressivas e fisicamente plausíveis. ${longEpisode ? "Escreva narração direta em português brasileiro, uma fala de cerca de 20 palavras por cena, mantendo uma história contínua ao longo dos dois minutos. Use speaker Narrador e a voz padrão." : "Escreva narração apenas quando o pedido exigir; caso contrário dialogue deve ser vazio."}`,
-        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês\",\"prompt\":\"movimento progressivo em inglês\",\"speaker\":\"Narrador\",\"dialogue\":\"\",\"duration_frames\":360,\"pose_count\":8}]}. Não inclua explicações fora do JSON.",
+        `O roteiro tem exatamente 8 cenas consecutivas de ${longEpisode ? "15" : "4"} segundos, total ${longEpisode ? "120" : "32"} segundos. Cada ação decorre da anterior. Em cada cena, escolha pose_count entre 2 e 30 conforme a complexidade e as mudanças de movimento, sem repetir quadros quase idênticos. Defina duration_frames=${longEpisode ? "360" : "96"} em todas as cenas (24 FPS). Composição vertical 9:16. Respeite a cena e os personagens do pedido; não invente um protagonista quando o pedido mostra somente ambiente e sombra. visual_bible descreve a identidade visual e os cenários. image_prompt representa um quadro estático em inglês; prompt descreve a ação em etapas progressivas e fisicamente plausíveis, incluindo passos, porta, lâmpadas ou vento quando pedidos. Defina voice_direction como neutral, whisper ou breathless somente quando a interpretação for pedida no tema ou na cena. ${longEpisode ? "Escreva narração direta em português brasileiro, uma fala de cerca de 20 palavras por cena, mantendo uma história contínua ao longo dos dois minutos. Use speaker Narrador e a voz padrão." : "Escreva narração apenas quando o pedido exigir; caso contrário dialogue deve ser vazio."}`,
+        "Responda SOMENTE JSON válido: {\"visual_bible\":\"identidade visual e cenário consistentes\",\"scenes\":[{\"scene\":1,\"title\":\"...\",\"image_prompt\":\"quadro estático detalhado em inglês\",\"prompt\":\"movimento progressivo em inglês\",\"speaker\":\"Narrador\",\"dialogue\":\"\",\"voice_direction\":\"neutral\",\"duration_frames\":360,\"pose_count\":8}]}. Não inclua explicações fora do JSON.",
       ].join("\n") }) });
       let status = "queued";
       for (let attempt = 0; attempt < 180 && ["queued", "running", "awaiting_approval"].includes(status); attempt += 1) {
@@ -518,6 +583,7 @@ export default function App() {
       const raw = messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
       const plan = parseProductionPlan(raw);
       scenes = plan.scenes.map((scene) => ({ ...scene, duration_frames: longEpisode ? 360 : 96,
+        voice_direction: scene.voice_direction ?? (directScene(scene, idea).expressive ?? "neutral"),
         pose_count: longEpisode ? Math.max(8, scene.pose_count ?? 8) : (scene.pose_count ?? 4) }));
       addChatMessage("assistant", `História pronta: ${scenes.map((scene) => `${scene.scene}. ${scene.title}`).join(" · ")}. Agora vou gerar os cenários e as poses de cada cena.`);
       setAutoProgress("Criando o projeto e preparando a produção…");
@@ -604,6 +670,16 @@ export default function App() {
       if (!allSceneImagesReady(scenes, ready.timeline.storyboard?.references ?? [])) {
         throw new Error("A montagem aguarda as oito imagens de referência.");
       }
+      for (const scene of scenes) {
+        setAutoProgress(`Trabalhador de revisão visual: conferindo cena ${scene.scene}/8 com roteiro e imagem mestra…`);
+        let review = await reviewReference(planned.id, scene);
+        if (review.status === "needs_revision") {
+          addChatMessage("assistant", `Cena ${scene.scene}: encontrei ${review.findings.join("; ")}. Vou corrigir esse quadro e conferir novamente.`);
+          await correctReference(planned.id, scene, review.findings);
+          review = await reviewReference(planned.id, scene);
+          if (review.status === "needs_revision") throw new Error(`A cena ${scene.scene} ainda precisa de revisão: ${review.findings.join("; ") || "verifique a imagem"}.`);
+        }
+      }
       const imageSamples = await Promise.all(scenes.map(async (scene) => imagePixels(findSceneReference(ready.timeline.storyboard?.references ?? [], scene.scene)!.image_data!)));
       for (let index = 1; index < imageSamples.length; index += 1) {
         if (meanPixelDifference(imageSamples[index - 1], imageSamples[index]) < 10) {
@@ -622,7 +698,10 @@ export default function App() {
         const keyframeCount = referenceKeyframeCount(scene.pose_count);
         const needsReferenceUpgrade = longEpisode && /corredor/i.test(idea) && existingSceneClip?.style.version === 1 &&
           (scene.scene === 1 || keyframeCount > 2);
-        if (existingSceneClip && !needsReferenceUpgrade) continue;
+        if (existingSceneClip && !needsReferenceUpgrade) {
+          await applyAutomaticSceneEffect(planned.id, scene, idea);
+          continue;
+        }
         const sceneReference = findSceneReference(current.timeline.storyboard?.references ?? [], scene.scene);
         if (!sceneReference?.image_data) throw new Error(`Falta a imagem da cena ${scene.scene}.`);
         const anchor = referenceAnchor(current.timeline.storyboard?.references ?? []);
@@ -649,8 +728,10 @@ export default function App() {
             background_data: sceneReference.image_data,
             poses: keyframes,
             frames: scene.duration_frames ?? 360,
+            camera_motion: directScene(scene, idea).camera,
           }) });
           await syncCompletedVideos([generated], planned.id);
+          await applyAutomaticSceneEffect(planned.id, scene, idea);
           addChatMessage("assistant", `Cena ${scene.scene}/8 pronta na timeline.`);
           continue;
         }
@@ -687,6 +768,7 @@ export default function App() {
         }
         if (latest.state !== "completed") throw new Error(`Cena ${scene.scene}: ${latest.error || latest.state}. As cenas prontas permanecem na timeline.`);
         await syncCompletedVideos([latest], planned.id);
+        await applyAutomaticSceneEffect(planned.id, scene, idea);
         addChatMessage("assistant", `Cena ${scene.scene}/8 pronta na timeline.`);
       }
       if (continuousNarrator) {
@@ -933,6 +1015,46 @@ export default function App() {
     } finally { setEffectBusy(false); }
   }
 
+  async function reviewSelectedSceneImage() {
+    if (!project || !selectedScene || visualReviewBusy) return;
+    setVisualReviewBusy(true);
+    setError("");
+    try {
+      const result = await reviewReference(project.id, selectedScene, true);
+      addChatMessage("assistant", `Revisor visual · cena ${selectedScene.scene}: ${result.status === "pass" ? "sem falha evidente" : "precisa de revisão"}${result.findings.length ? ` — ${result.findings.join("; ")}` : ""}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha na revisão visual.");
+    } finally { setVisualReviewBusy(false); }
+  }
+
+  async function correctSelectedSceneImage() {
+    if (!project || !selectedScene || !selectedQualityReview?.findings.length || visualReviewBusy) return;
+    setVisualReviewBusy(true);
+    setError("");
+    try {
+      await correctReference(project.id, selectedScene, selectedQualityReview.findings);
+      const result = await reviewReference(project.id, selectedScene);
+      addChatMessage("assistant", `Imagem da cena ${selectedScene.scene} corrigida e reavaliada: ${result.status === "pass" ? "sem falha evidente" : result.findings.join("; ")}. A cena de vídeo anterior permanece até ser refeita.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao corrigir a imagem.");
+    } finally { setVisualReviewBusy(false); }
+  }
+
+  async function pushSelectedCamera() {
+    if (!project || selected?.kind !== "video" || cameraBusy) return;
+    setCameraBusy(true);
+    setError("");
+    try {
+      const generated = await centralRequest<MotionRun>("/api/motion/photo/camera-push", { method: "POST",
+        body: JSON.stringify({ project_id: project.id, clip_id: selected.id }) });
+      await syncCompletedVideos([generated], project.id);
+      await exportCurrentEpisode(project.id);
+      addChatMessage("assistant", `Movimento de avanço aplicado à cena ${selected.style.scene_number}; a versão anterior foi preservada.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha no movimento de câmera.");
+    } finally { setCameraBusy(false); }
+  }
+
   async function regenerateSelectedSceneImage() {
     if (!project || selected?.kind !== "video" || sceneImageBusy) return;
     const sceneNumber = Number(selected.style.scene_number);
@@ -1130,6 +1252,10 @@ export default function App() {
             <p className="helper-text">Selecione uma cena na timeline, descreva a alteração e gere somente essa parte.</p>
             <textarea aria-label="Alteração desejada na cena" value={reviewComment} maxLength={2000} placeholder="O que deve mudar nesta cena?" onChange={(event) => setReviewComment(event.target.value)} />
             <div className="review-actions"><button className="quiet-button" onClick={() => saveSceneReview("approved")}>✓ APROVAR CENA</button><button className="quiet-button" onClick={() => saveSceneReview("needs_revision")}>MARCAR REVISÃO</button><button className="quiet-button" onClick={() => void regenerateSelectedSceneImage()} disabled={!embedded || sceneImageBusy}>↻ {sceneImageBusy ? "GERANDO IMAGEM…" : "REFAZER IMAGEM"}</button><button className="quiet-button" onClick={() => void regenerateSelectedScene()} disabled={!embedded || wanBusy || sceneImageBusy}>↻ REFAZER CENA</button></div>
+            <button className="quiet-button" onClick={() => void reviewSelectedSceneImage()} disabled={!embedded || visualReviewBusy || !selectedReference}>{visualReviewBusy ? "REVISANDO IMAGEM…" : "REVISAR IMAGEM COM IA"}</button>
+            {selectedQualityReview && <p className="helper-text" role="status">Revisor visual: {selectedQualityReview.status === "pass" ? "sem falha evidente" : "revisão necessária"}{selectedQualityReview.findings.length ? ` · ${selectedQualityReview.findings.join("; ")}` : ""}</p>}
+            {selectedQualityReview?.status === "needs_revision" && <button className="quiet-button" onClick={() => void correctSelectedSceneImage()} disabled={visualReviewBusy}>CORRIGIR IMAGEM SINALIZADA</button>}
+            <button className="quiet-button" onClick={() => void pushSelectedCamera()} disabled={!embedded || cameraBusy || effectBusy}>{cameraBusy ? "MOVENDO CÂMERA…" : "AVANÇAR CÂMERA PELA CENA"}</button>
             <label className="field-label" htmlFor="scene-effect">MOVIMENTO E EFEITO SONORO</label>
             <select id="scene-effect" value={effectPreset} onChange={(event) => setEffectPreset(event.target.value)}>
               <option value="footsteps">Passos com movimento suave</option>

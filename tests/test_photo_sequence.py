@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from central.photo_sequence import PhotoSequenceError, render_photo_scene, render_reference_scene
+from central.photo_sequence import PhotoSequenceError, render_photo_scene, render_reference_scene, render_camera_push
 
 
 def run(*args):
@@ -64,3 +64,20 @@ def test_full_scene_references_keep_exact_fifteen_second_timing(tmp_path):
     probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-show_entries', 'stream=nb_frames,r_frame_rate,width,height', '-of', 'json', output], text=True))['streams'][0]
     assert probe == {'width': 720, 'height': 1280, 'r_frame_rate': '24/1', 'nb_frames': '360'}
+
+
+def test_camera_push_changes_framing_and_retains_audio(tmp_path):
+    source, output = tmp_path / 'source.mp4', tmp_path / 'push.mp4'
+    run('-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24:d=2',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+        '-vf', 'drawbox=x=150:y=350:w=420:h=600:color=white:t=4',
+        '-c:v', 'libx264', '-c:a', 'aac', '-shortest', source)
+    render_camera_push(source, output, frames=48)
+    probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+        '-show_entries', 'stream=codec_type,nb_frames', '-of', 'json', output], text=True))['streams']
+    assert any(stream['codec_type'] == 'video' and stream['nb_frames'] == '48' for stream in probe)
+    assert any(stream['codec_type'] == 'audio' for stream in probe)
+    def frame(at):
+        return subprocess.check_output(['ffmpeg', '-v', 'error', '-ss', str(at), '-i', output,
+            '-vf', 'scale=72:128', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+    assert frame(.1) != frame(1.7)

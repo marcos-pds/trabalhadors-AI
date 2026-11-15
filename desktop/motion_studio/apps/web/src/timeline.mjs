@@ -60,7 +60,7 @@ export function wanVideoPreviewUrl(runId, artifactId) {
 }
 
 /** Preserve generated scenes on the project video track without duplicate imports. */
-export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle, effectPreset, effectCue }) {
+export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps, replaceClipId, sceneNumber, plannedPrompt, plannedTitle, effectPreset, effectCue, cameraMotion }) {
   if (!wanVideoPreviewUrl(runId, artifactId)) throw new Error("Invalid generated video reference");
   if (!Number.isInteger(frames) || frames < 1 || frames > 3600 ||
       !Number.isInteger(fps) || fps < 1 || fps > 120) {
@@ -71,7 +71,8 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
   if (track.clips.some((clip) =>
       (clip.style?.motion_run_id === runId && clip.style?.motion_artifact_id === artifactId) ||
       clip.style?.previous_versions?.some((version) => version.run_id === runId && version.artifact_id === artifactId))) return timeline;
-  const replaced = replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null;
+  const replaced = (replaceClipId ? track.clips.find((clip) => clip.id === replaceClipId) : null) ??
+    (sceneNumber ? track.clips.find((clip) => clip.style?.scene_number === sceneNumber) : null);
   const start = replaced?.start_frame ?? track.clips.reduce((end, clip) => Math.max(end, clip.start_frame + clip.duration_frames), 0);
   const priorVersions = replaced ? [...(replaced.style?.previous_versions ?? []), {
     clip_id: replaced.id,
@@ -97,7 +98,11 @@ export function addWanVideoClip(timeline, { runId, artifactId, name, frames, fps
       scene_number: sceneNumber ?? null,
       planned_prompt: plannedPrompt ?? "",
       planned_title: plannedTitle ?? String(name || "Cena Wan"),
-      ...(effectPreset ? { effect_preset: effectPreset, effect_cue: effectCue } : {}),
+      ...((effectPreset ?? replaced?.style?.effect_preset) ? {
+        effect_preset: effectPreset ?? replaced?.style?.effect_preset,
+        effect_cue: effectCue ?? replaced?.style?.effect_cue,
+      } : {}),
+      ...((cameraMotion ?? replaced?.style?.camera_motion) ? { camera_motion: cameraMotion ?? replaced?.style?.camera_motion } : {}),
       version: Number(replaced?.style?.version ?? 0) + 1,
       previous_versions: priorVersions,
       review_status: "pending",

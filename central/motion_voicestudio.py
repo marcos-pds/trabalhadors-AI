@@ -102,14 +102,19 @@ def synthesize_narration(text, voice_id):
     return bytes(output)
 
 
-def synthesize_aligned_narration(lines, voice_id):
+def synthesize_aligned_narration(lines, voice_id, directions=None):
     """Place each spoken line in its video scene, returning one continuous WAV payload."""
     if not lines or sum(len(text) for text, _ in lines) > 4096:
         raise VoiceStudioError('A narração excede o limite de 4096 caracteres.')
+    if directions is not None and len(directions) != len(lines):
+        raise VoiceStudioError('As direções de voz não correspondem às cenas.')
     output = bytearray()
-    for text, seconds in lines:
+    for index, (text, seconds) in enumerate(lines):
         slot_samples = round(seconds * 48000)
-        spoken = synthesize_line(text, voice_id)
+        direction = directions[index] if directions else None
+        instructions = {'whisper': 'Speak in a low, intimate whisper in Brazilian Portuguese, with natural suspense and clear words.',
+                        'breathless': 'Speak in Brazilian Portuguese with audible urgency and breathless emotion, keeping every word clear.'}.get(direction)
+        spoken = synthesize_line(text, voice_id, instructions=instructions) if instructions else synthesize_line(text, voice_id)
         spoken_samples = len(spoken) // 2
         if slot_samples <= 0 or spoken_samples > slot_samples:
             raise VoiceStudioError('Uma fala dura mais que sua cena. Reduza o texto ou aumente a cena.')

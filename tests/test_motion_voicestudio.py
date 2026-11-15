@@ -78,6 +78,19 @@ def test_narration_starts_each_line_at_its_scene_boundary(monkeypatch):
         synthesize_aligned_narration([('Longa.',.05)],'lara-id')
 
 
+def test_requested_whisper_and_breathlessness_reach_voice_engine(monkeypatch):
+    calls = []
+    def fake_line(text, voice_id, *, instructions=None):
+        calls.append((text, voice_id, instructions))
+        return b'\x01\x00' * 4800
+    monkeypatch.setattr('central.motion_voicestudio.synthesize_line', fake_line)
+    synthesize_aligned_narration([('Segredo.', 1), ('Corra.', 1)], 'narrador-id',
+                                 directions=['whisper', 'breathless'])
+    assert calls[0][1] == calls[1][1] == 'narrador-id'
+    assert 'whisper' in calls[0][2]
+    assert 'breathless' in calls[1][2]
+
+
 def test_import_creates_a_local_profile_from_short_pcm_reference(monkeypatch):
     source=BytesIO()
     with wave.open(source,'wb') as stream:
