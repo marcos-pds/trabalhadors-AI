@@ -105,6 +105,8 @@ def test_script_emotions_reach_same_voice_profile(monkeypatch):
 
 
 def test_directed_scene_keeps_distinct_voices_and_scripted_silence(monkeypatch):
+    monkeypatch.setattr('central.motion_voicestudio.available_voices', lambda: [
+        {'id': 'narrator-id', 'name': 'Narrador'}, {'id': 'mother-id', 'name': 'Mãe'}])
     calls = []
     def fake_line(text, voice_id, *, instructions=None):
         calls.append((text, voice_id, instructions))
@@ -122,7 +124,7 @@ def test_directed_scene_keeps_distinct_voices_and_scripted_silence(monkeypatch):
     assert len(audio) == 2*48000*2
 
 
-def test_directed_scene_combines_local_voice_engines(monkeypatch):
+def test_directed_scene_rejects_non_voicestudio_profile(monkeypatch):
     calls = []
     def studio(text, voice_id, *, instructions=None):
         calls.append(('studio', voice_id, instructions))
@@ -132,16 +134,18 @@ def test_directed_scene_combines_local_voice_engines(monkeypatch):
         return b'\x01\x00' * 4800
     monkeypatch.setattr('central.motion_voicestudio.synthesize_line', studio)
     monkeypatch.setattr('central.motion_qwen.synthesize_line', qwen)
-    synthesize_directed_scenes([{'scene': 1, 'seconds': 2, 'beats': [
-        {'speaker': 'Narrador', 'text': 'Ela chamou.', 'direction': 'calm'},
-        {'speaker': 'Mãe', 'text': 'Lucas.', 'direction': 'fear'},
-    ]}], {'Narrador': '669da35a', 'Mãe': '1a2a000000000002'}, 'owner')
+    monkeypatch.setattr('central.motion_voicestudio.available_voices', lambda: [{'id': '669da35a', 'name': 'Narrador'}])
+    with pytest.raises(VoiceStudioError, match='VoiceStudio'):
+        synthesize_directed_scenes([{'scene': 1, 'seconds': 2, 'beats': [
+            {'speaker': 'Narrador', 'text': 'Ela chamou.', 'direction': 'calm'},
+            {'speaker': 'Mãe', 'text': 'Lucas.', 'direction': 'fear'},
+        ]}], {'Narrador': '669da35a', 'Mãe': '1a2a000000000002'}, 'owner')
     assert calls[0][0] == 'studio'
-    assert calls[1][0] == 'qwen'
-    assert 'fear' in calls[1][2]
+    assert len(calls) == 1
 
 
 def test_final_scripted_silence_stays_at_end_of_scene(monkeypatch):
+    monkeypatch.setattr('central.motion_voicestudio.available_voices', lambda: [{'id': '669da35a', 'name': 'Narrador'}])
     monkeypatch.setattr('central.motion_voicestudio.synthesize_line',
                         lambda text, voice_id, *, instructions=None: b'\x01\x00' * 4800)
     audio = synthesize_directed_scenes([{'scene': 5, 'seconds': 3, 'beats': [

@@ -130,6 +130,7 @@ export default function App() {
   const [sceneSpeaker, setSceneSpeaker] = useState("Lara");
   const [sceneSpeechBusy, setSceneSpeechBusy] = useState(false);
   const [voiceReferenceText, setVoiceReferenceText] = useState("");
+  const [newVoiceName, setNewVoiceName] = useState("");
   const [voiceReferenceBusy, setVoiceReferenceBusy] = useState(false);
   const [episodeNumber] = useState(1);
   const [sceneNumber] = useState(1);
@@ -205,17 +206,9 @@ export default function App() {
 
   useEffect(() => {
     if (!embedded) return;
-    void Promise.allSettled([
-      centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices"),
-      centralRequest<typeof voiceCatalog>("/api/motion/voices"),
-      centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices"),
-    ]).then((results) => {
-      const voices = results.filter((result): result is PromiseFulfilledResult<typeof voiceCatalog> => result.status === "fulfilled")
-        .map((result) => result.value).filter((catalog) => catalog.ready);
-      setVoiceCatalog({ ready: voices.length > 0, voices: voices.flatMap((catalog) => catalog.voices.map((voice) => ({
-        ...voice, name: catalog.engine === "omnivoice" ? `VoiceStudio · ${voice.name}` : voice.name,
-      }))) });
-    });
+    void centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices")
+      .then((catalog) => setVoiceCatalog({ ready: catalog.ready, voices: catalog.voices.map((voice) => ({ ...voice, name: `VoiceStudio · ${voice.name}` })) }))
+      .catch(() => setVoiceCatalog({ ready: false, voices: [] }));
     let active = true;
     void centralRequest<MotionTools>("/api/motion/tools")
       .then((config) => {
@@ -596,23 +589,21 @@ export default function App() {
       const fresh = await request<Project>(`/api/projects/${created.id}`, { method: "PUT", body: JSON.stringify({ title: created.title, summary: idea, timeline: { ...initialTimeline(), fps: 24, width: 720, height: 1280 } }) });
       setProjects((current) => [fresh, ...current.filter((item) => item.id !== fresh.id)]);
       setProject(fresh);
-      const profiles = await centralRequest<typeof voiceCatalog>("/api/motion/voices");
-      const qwen = await centralRequest<typeof voiceCatalog>("/api/motion/qwen/voices").catch(() => ({ ready: false, voices: [] }));
-      const studio = await centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices").catch(() => ({ ready: false, voices: [] }));
-      const allVoices = [...(studio.ready ? studio.voices : []), ...(qwen.ready ? qwen.voices : []), ...(profiles.ready ? profiles.voices : [])];
-      const voice = studio.voices.find((item) => item.name === "Padrao") ??
-        allVoices.find((item) => /pt-br|brasileir/i.test(item.name)) ?? allVoices[0];
-      if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Instale um motor de voz local antes de produzir falas.");
+      const studio = await centralRequest<typeof voiceCatalog>("/api/motion/voicestudio/voices");
+      const allVoices = studio.ready ? studio.voices : [];
+      const voice = allVoices.find((item) => /padr[aã]o|narrad/i.test(item.name)) ?? allVoices[0];
+      if (scenes.some((scene) => scene.dialogue?.trim()) && !voice) throw new Error("Crie ou ative uma voz no VoiceStudio antes de produzir falas.");
       const cast = [...new Set(scenes.flatMap((scene) => scene.voice_beats?.length ? scene.voice_beats.filter((beat) => beat.text).map((beat) => beat.speaker) : scene.dialogue?.trim() ? [scene.speaker?.trim() || "Narradora"] : []))];
+      if (cast.length > allVoices.length) throw new Error(`O roteiro tem ${cast.length} personagens com fala. Crie ${cast.length - allVoices.length} voz(es) no VoiceStudio antes de continuar.`);
       const alternatives = allVoices.filter((item) => item.id !== voice?.id);
       const voiceProfiles = Object.fromEntries(cast.map((speaker, index) => [speaker,
         (speaker === "Mãe" ? allVoices.find((item) => /lara|narradora|feminin|voz atrás da porta/i.test(item.name) && item.id !== voice?.id)?.id : undefined) ??
-        (/^narrad/i.test(speaker) ? studio.voices.find((item) => item.name === "Padrao")?.id ?? studio.voices.find((item) => item.name !== "Minha voz")?.id : undefined) ??
-        (speaker === "Narrador" ? allVoices.find((item) => item.name === "Narrador · natural pt-BR")?.id : undefined) ??
+        (/^narrad/i.test(speaker) ? allVoices.find((item) => /padr[aã]o|narrad/i.test(item.name))?.id : undefined) ??
         allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")) && /pt-br|brasil/i.test(item.name))?.id ??
         allVoices.find((item) => item.name.toLocaleLowerCase("pt-BR").startsWith(speaker.toLocaleLowerCase("pt-BR")))?.id ??
         (/narrad/i.test(speaker) ? allVoices.find((item) => /narrad/i.test(item.name))?.id : undefined) ??
         (index === 0 ? voice?.id : alternatives[(index - 1) % alternatives.length]?.id) ?? voice?.id ?? ""]));
+      if (new Set(Object.values(voiceProfiles)).size !== cast.length) throw new Error("Atribua uma voz diferente do VoiceStudio para cada personagem.");
       const masters: VisualReference[] = promptImage ? [{ id: makeId("ref"), kind: "character", name: promptImage.name,
         prompt: "Imagem mestra enviada no chat.", image_data: promptImage.image_data, source: "upload" }] : [];
       planned = await request<Project>(`/api/projects/${fresh.id}`, { method: "PUT", body: JSON.stringify({ title: fresh.title, summary: idea, timeline: { ...fresh.timeline, storyboard: { theme: idea, visual_bible: plan.visual_bible, scenes, references: masters, voice_profiles: voiceProfiles, captions_enabled: !/sem legendas/i.test(idea), episode_status: "draft" } } }) });
@@ -624,7 +615,7 @@ export default function App() {
       const voiceProfiles = planned.timeline.storyboard?.voice_profiles ?? {};
       const cast = [...new Set(scenes.flatMap((scene) => scene.voice_beats?.length ? scene.voice_beats.filter((beat) => beat.text).map((beat) => beat.speaker) : [scene.speaker?.trim() || "Narradora"]))];
       const continuousNarrator = scenes.every((scene) => scene.dialogue?.trim()) &&
-        cast.every((speaker) => /^(?:[a-f0-9]{8}|[a-f0-9]{16})$/.test(voiceProfiles[speaker] ?? ""));
+        cast.every((speaker) => /^[a-f0-9]{8}$/.test(voiceProfiles[speaker] ?? ""));
       if (!(planned.timeline.storyboard?.references ?? []).some((reference) => reference.kind === "character" && reference.image_data && !reference.scene_number)) {
         setAutoProgress("Criando a imagem mestra do personagem antes dos cenários…");
         const status = await centralRequest<{ qwen_image_2_1: { available: boolean } }>("/api/motion/reference-providers");
@@ -980,7 +971,7 @@ export default function App() {
   async function importBrazilianVoice(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !sceneSpeaker.trim() || !voiceReferenceText.trim() || voiceReferenceBusy) return;
+    if (!file || !newVoiceName.trim() || !voiceReferenceText.trim() || voiceReferenceBusy) return;
     if (file.type !== "audio/wav" && !file.name.toLowerCase().endsWith(".wav")) {
       setError("Envie uma gravação WAV da voz do personagem."); return;
     }
@@ -993,13 +984,13 @@ export default function App() {
         reader.onerror = () => reject(new Error("Não foi possível ler a gravação."));
         reader.readAsDataURL(file);
       });
-      const studioAvailable = voiceCatalog.voices.some((voice) => voice.name.startsWith("VoiceStudio · "));
-      const imported = await centralRequest<{ id: string; name: string }>(studioAvailable ? "/api/motion/voicestudio/voices/import" : "/api/motion/qwen/voices/import", {
-        method: "POST", body: JSON.stringify({ name: `${sceneSpeaker.trim()} · Brasil`,
+      const imported = await centralRequest<{ id: string; name: string }>("/api/motion/voicestudio/voices/import", {
+        method: "POST", body: JSON.stringify({ name: newVoiceName.trim(),
           transcript: voiceReferenceText.trim(), audio_data }),
       });
-      setVoiceCatalog((current) => ({ ready: true, voices: [{ ...imported, name: `${studioAvailable ? "VoiceStudio" : "Qwen"} · ${imported.name}` }, ...current.voices] }));
-      setSceneVoice(imported.id);
+      setVoiceCatalog((current) => ({ ready: true, voices: [{ ...imported, name: `VoiceStudio · ${imported.name}` }, ...current.voices] }));
+      setImportNotice(`Voz ${imported.name} criada no VoiceStudio. Agora você pode atribuí-la a um personagem.`);
+      if (selected?.kind === "video") setSceneVoice(imported.id);
       setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível importar a voz."); }
     finally { setVoiceReferenceBusy(false); }
@@ -1168,6 +1159,17 @@ export default function App() {
             {wanRun && <p className="motion-chat-run">Cena em andamento: {wanRun.state}{wanRun.error ? ` · ${wanRun.error}` : ""}</p>}
           </div>
           <div className="motion-chat-composer">
+            <details className="chat-references"><summary>VoiceStudio · criar voz</summary>
+              <p className="helper-text">Gravação WAV PCM com 3 a 20 segundos de fala clara. A transcrição deve corresponder exatamente ao áudio.</p>
+              <label className="field-label" htmlFor="chat-voice-name">NOME DA VOZ</label>
+              <input id="chat-voice-name" value={newVoiceName} maxLength={80} onChange={(event) => setNewVoiceName(event.target.value)} />
+              <label className="field-label" htmlFor="chat-voice-text">TEXTO DA GRAVAÇÃO</label>
+              <input id="chat-voice-text" value={voiceReferenceText} maxLength={300} onChange={(event) => setVoiceReferenceText(event.target.value)} />
+              <label className="reference-upload">{voiceReferenceBusy ? "CRIANDO VOZ…" : "ENVIAR GRAVAÇÃO WAV"}
+                <input type="file" accept="audio/wav,.wav" onChange={(event) => void importBrazilianVoice(event)} disabled={voiceReferenceBusy || !newVoiceName.trim() || !voiceReferenceText.trim()} />
+              </label>
+              <p className="helper-text">{voiceCatalog.ready ? `${voiceCatalog.voices.length} vozes disponíveis` : "VoiceStudio indisponível"}</p>
+            </details>
             {promptImage && <div className="motion-chat-attachment"><img src={promptImage.image_data} alt="Imagem anexada ao pedido" /><span>{promptImage.name}</span><button onClick={() => setPromptImage(null)} aria-label="Remover imagem anexada">×</button></div>}
             <div className="motion-chat-input-row"><button className="motion-attach" onClick={() => promptImageInputRef.current?.click()} disabled={autoBusy} aria-label="Anexar imagem de referência">＋</button>
               <input ref={promptImageInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadPromptImage} />
@@ -1292,14 +1294,6 @@ export default function App() {
             <select id="review-voice" value={project?.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? ""} onChange={(event) => setSceneVoice(event.target.value)}>
               <option value="">Selecione uma voz</option>{voiceCatalog.voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
             </select>
-            <details className="chat-references"><summary>Usar gravação brasileira para {sceneSpeaker}</summary>
-              <p className="helper-text">Envie 3 a 20 segundos de fala clara em WAV PCM e escreva exatamente o que foi dito. A voz fica salva neste computador para as próximas cenas.</p>
-              <label className="field-label" htmlFor="voice-reference-text">TEXTO DA GRAVAÇÃO</label>
-              <input id="voice-reference-text" value={voiceReferenceText} maxLength={300} onChange={(event) => setVoiceReferenceText(event.target.value)} />
-              <label className="reference-upload">{voiceReferenceBusy ? "IMPORTANDO VOZ…" : "ENVIAR GRAVAÇÃO WAV"}
-                <input type="file" accept="audio/wav,.wav" onChange={(event) => void importBrazilianVoice(event)} disabled={voiceReferenceBusy || !voiceReferenceText.trim()} />
-              </label>
-            </details>
             <button className="quiet-button" onClick={() => void generateSelectedSceneSpeech()} disabled={!embedded || sceneSpeechBusy || !sceneSpeechText.trim()}>{sceneSpeechBusy ? "GERANDO FALA…" : /^[a-f0-9]{8}$/.test(project?.timeline.storyboard?.voice_profiles?.[sceneSpeaker] ?? "") && /^narrad/i.test(sceneSpeaker) ? "↻ REFAZER NARRAÇÃO" : "↻ REFAZER FALA"}</button>
           </> : <><p className="helper-text">Selecione um clipe de vídeo na timeline para aprovar ou solicitar uma alteração.</p><button className="quiet-button" onClick={approveEpisode} disabled={!videoClips.length || !plannedScenesComplete || videoClips.some((clip) => clip.style.review_status !== "approved")}>APROVAR EPISÓDIO</button></>}
           {[2, 8].includes(episodePlan.length) && videoClips.length === episodePlan.length && <button className="quiet-button" onClick={() => void exportCurrentEpisode().catch((reason) => setError(reason instanceof Error ? reason.message : "Falha na montagem."))} disabled={autoBusy}>ATUALIZAR MP4 FINAL</button>}

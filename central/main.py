@@ -2651,8 +2651,8 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
         raise HTTPException(422,'A narração contínua exige fala do narrador em todas as cenas.')
     if any(not str(scene.get('dialogue') or '').strip() for scene in planned):
         raise HTTPException(422,'Todas as cenas precisam de fala para a narração contínua.')
-    if any(not isinstance(profiles.get(name),str) or not re.fullmatch(r'(?:[a-f0-9]{8}|[a-f0-9]{16})',profiles[name]) for name in speakers):
-        raise HTTPException(422,'Selecione um perfil de voz local para cada personagem do roteiro.')
+    if any(not isinstance(profiles.get(name),str) or not re.fullmatch(r'[a-f0-9]{8}',profiles[name]) for name in speakers):
+        raise HTTPException(422,'Selecione um perfil do VoiceStudio para cada personagem do roteiro.')
     speaker='Elenco' if directed else next(iter(speakers))
     profile=profiles['Narrador'] if directed and 'Narrador' in profiles else profiles[next(iter(speakers))]
     root,grant=authorized_root(DB,user['id'])
@@ -2664,8 +2664,7 @@ def motion_project_narration(project_id:str,request:Request,user=Depends(current
                 raise
             target(grant,relative_dir,creating=True).mkdir()
     try:
-        from .motion_qwen import available_voices as qwen_voices
-        available={voice['id'] for voice in available_voices()} | {voice['id'] for voice in qwen_voices(user['id'])}
+        available={voice['id'] for voice in available_voices()}
         if any(profiles[name] not in available for name in speakers):
             raise HTTPException(422,'Um perfil do roteiro não está disponível na Central.')
         script=' '.join(str(scene['dialogue']).strip() for scene in planned)

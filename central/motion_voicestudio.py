@@ -133,6 +133,7 @@ def synthesize_aligned_narration(lines, voice_id, directions=None):
 
 def synthesize_directed_scenes(scenes, profiles, user_id=None):
     """Render the exact spoken beats and scripted silences inside each scene slot."""
+    studio_profiles = {voice['id'] for voice in available_voices()}
     output = bytearray()
     for scene in scenes:
         slot_samples = round(scene['seconds'] * 48000)
@@ -156,14 +157,9 @@ def synthesize_directed_scenes(scenes, profiles, user_id=None):
                     'suspense': 'Speak with growing tension in Brazilian Portuguese, with clear words.',
                 }.get(direction)
                 profile = profiles[speaker]
-                if len(profile) == 16:
-                    from .motion_qwen import QwenVoiceError, synthesize_line as qwen_line
-                    try:
-                        spoken = qwen_line(beat['text'], profile, user_id, instructions=instruction)
-                    except QwenVoiceError as exc:
-                        raise VoiceStudioError(str(exc)) from exc
-                else:
-                    spoken = synthesize_line(beat['text'], profile, instructions=instruction) if instruction else synthesize_line(beat['text'], profile)
+                if profile not in studio_profiles:
+                    raise VoiceStudioError(f'A voz de {speaker} precisa ser um perfil do VoiceStudio.')
+                spoken = synthesize_line(beat['text'], profile, instructions=instruction) if instruction else synthesize_line(beat['text'], profile)
                 segments.append(('speech', spoken))
         used_samples = sum(len(segment) // 2 for _, segment in segments)
         if used_samples > slot_samples:
