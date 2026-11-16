@@ -103,6 +103,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Central de Trabalhadores IA', version='0.2.0', lifespan=lifespan)
+from .desktop_updates import install_desktop_update_routes
+install_desktop_update_routes(app, DB)
 
 class RedactChatGPTOAuthAccessLog(logging.Filter):
     def filter(self, record):
