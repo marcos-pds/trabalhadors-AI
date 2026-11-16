@@ -5,7 +5,8 @@ import DesktopGlassSurface from './DesktopGlassSurface.jsx'
 // Compact desktop-only composer. Reuses the same prompt, mode, attachments,
 // and send actions as the full ChatPage; it does not create a second chat.
 export default function DesktopChatPrompt({
-  prompt, setPrompt, files, setFiles, mode, setMode, onSend, onCommand, onError,
+  prompt, setPrompt, files, setFiles, mode, setMode, selectedAgent, setSelectedAgent, agents = [],
+  onSend, onCommand, onError, onClose,
 }) {
   const fieldRef = useRef(null)
   const uploadRef = useRef(null)
@@ -102,6 +103,7 @@ export default function DesktopChatPrompt({
           placeholder={sending ? 'Enviando…' : 'Pergunte à Central'}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => {
+            if (e.key === 'Escape') { onClose?.(); return }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submit()
@@ -132,6 +134,15 @@ export default function DesktopChatPrompt({
         </button>
       </form>
     </div>
+    {mode === 'manual' && <label className="desktop-quick-worker">
+      Trabalhador
+      <select aria-label="Trabalhador preferido" value={selectedAgent || ''}
+        onChange={e => setSelectedAgent(e.target.value)}>
+        <option value="">Selecionar trabalhador</option>
+        {agents.filter(agent => agent.enabled).map(agent =>
+          <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+      </select>
+    </label>}
     {files.length > 0 && <p className="desktop-quick-files" role="status">{files.length} arquivo(s) anexado(s)</p>}
   </section>
 }
