@@ -11,6 +11,7 @@ on:
       - feat/desktop-github-release-updater
       - feat/desktop-chat-prompt-first
       - fix/desktop-chat-glass-preview
+      - fix/desktop-borderless-clean-chat
     paths:
       - 'desktop/**'
       - 'frontend/**'

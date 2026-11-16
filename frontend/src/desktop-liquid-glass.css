@@ -1181,3 +1181,155 @@ html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet iframe {
     scroll-behavior: auto !important;
   }
 }
+
+/* Desktop visual cleanup: remove the outlined frame and dark halo shown in
+   the user's capture. All overrides are scoped to Electron so the web retains
+   its current styles. Blur/refraction stay active INSIDE the glass surfaces. */
+html.central-desktop-shell .central-desktop-mode .desktop-dock {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-dock::before {
+  content: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-dock-refraction {
+  opacity: .25;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode[data-theme="dark"] .central-main,
+html.central-desktop-shell .central-desktop-mode .central-main {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-workspace-refraction,
+html.central-desktop-shell .central-desktop-mode .desktop-workspace-refraction .glass {
+  box-shadow: none !important;
+  filter: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet {
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-composer {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  /* Subtle colour gradient keeps the input visible without a glowing frame. */
+  background: linear-gradient(125deg,
+    rgba(69, 86, 114, .90) 0%,
+    rgba(33, 46, 69, .96) 52%,
+    rgba(18, 28, 47, .97) 100%) !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-composer::before,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-composer::after {
+  content: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass {
+  opacity: .095 !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass .glass,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass .glass > div {
+  border: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* Auto remains the active mode, but the word "Auto" is intentionally hidden
+   until the user opens this tiny, frameless settings control. This prevents
+   the former framed select from becoming a visual rectangle in the prompt. */
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-picker {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-width: 28px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 30px;
+  height: 36px;
+  padding: 0 6px;
+  color: rgba(237, 245, 255, .83);
+  background: transparent !important;
+  border: 0 !important;
+  outline: none;
+  border-radius: 11px;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-trigger:hover,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-trigger[aria-expanded="true"] {
+  color: #fff;
+  background: rgba(235, 243, 255, .10) !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-trigger:focus-visible {
+  outline: 2px solid rgba(225, 235, 255, .9);
+  outline-offset: 2px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-trigger svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-active {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-options {
+  position: absolute;
+  z-index: 80;
+  top: 68px;
+  right: 57px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  max-width: calc(100% - 16px);
+  border: 0 !important;
+  border-radius: 13px;
+  background: rgba(29, 41, 62, .96);
+  box-shadow: none !important;
+  -webkit-backdrop-filter: blur(21px) saturate(130%);
+  backdrop-filter: blur(21px) saturate(130%);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-options button {
+  white-space: nowrap;
+  min-height: 31px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #e2ebfa;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 9px;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-options button[aria-pressed="true"],
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-options button:hover {
+  color: #fff;
+  background: rgba(223, 236, 255, .16) !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-options button:focus-visible {
+  outline: 2px solid #d5e1ff;
+  outline-offset: -2px;
+}
+/* Embedded input sits at the bottom of the expanded chat; open the mode
+   choices above it instead of clipping them outside the Electron window. */
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only.is-embedded .desktop-quick-mode-options {
+  top: auto;
+  bottom: calc(100% + 8px);
+  right: 57px;
+}

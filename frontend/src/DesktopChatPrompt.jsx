@@ -11,10 +11,34 @@ export default function DesktopChatPrompt({
   const uploadRef = useRef(null)
   const sendLock = useRef(false)
   const recognitionRef = useRef(null)
+  const modePickerRef = useRef(null)
+  const [showModes, setShowModes] = useState(false)
   const [sending, setSending] = useState(false)
   const [listening, setListening] = useState(false)
   const recognitionAvailable = typeof window !== 'undefined' &&
     Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+
+  // The automatic mode is the default, but its label and outline are not
+  // rendered on the compact bar. A small settings icon opens other choices.
+  useEffect(() => {
+    if (!showModes) return undefined
+    const closeOnOutside = event => {
+      if (!modePickerRef.current?.contains(event.target)) setShowModes(false)
+    }
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setShowModes(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutside)
+    document.addEventListener('keydown', closeOnEscape, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside)
+      document.removeEventListener('keydown', closeOnEscape, true)
+    }
+  }, [showModes])
 
   useEffect(() => {
     fieldRef.current?.focus()
@@ -82,7 +106,7 @@ export default function DesktopChatPrompt({
     catch { onError('Não foi possível iniciar o microfone.') }
   }
 
-  return <section className={'desktop-prompt-only' + (embedded ? ' is-embedded' : '')} aria-label="Nova mensagem para a Central">
+  return <section ref={modePickerRef} className={'desktop-prompt-only' + (embedded ? ' is-embedded' : '')} aria-label="Nova mensagem para a Central">
     <div className="desktop-quick-composer">
       <DesktopGlassSurface className="desktop-quick-rdev-glass"/>
       <form className="desktop-quick-input-row" onSubmit={event => { event.preventDefault(); submit() }}>
@@ -98,21 +122,25 @@ export default function DesktopChatPrompt({
           placeholder={sending ? 'Enviando…' : embedded ? 'Escreva sua próxima mensagem…' : 'O que deseja fazer?'}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose?.(); return }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (showModes) setShowModes(false); else onClose?.(); return }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submit()
             }
           }}/>
-        <label className="desktop-quick-mode-label" title="Modo de execução">
-          <span className="sr-only">Modo de execução</span>
-          <select aria-label="Modo de execução" value={mode}
-            onChange={e => setMode(e.target.value)} disabled={sending}>
-            <option value="auto">Auto</option>
-            <option value="team">Equipe</option>
-            <option value="manual">Individual</option>
-          </select>
-        </label>
+        <div className="desktop-quick-mode-picker">
+          <button type="button" className={'desktop-quick-mode-trigger' + (mode !== 'auto' ? ' has-selection' : '')}
+            aria-label={mode === 'auto' ? 'Escolher modo de execução (automático)' : 'Modo de execução: ' + (mode === 'team' ? 'Equipe' : 'Individual')}
+            title="Modo de execução"
+            aria-expanded={showModes} aria-controls="desktop-quick-mode-options"
+            disabled={sending} onClick={() => setShowModes(open => !open)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="currentColor" stroke="none"/>
+              <circle cx="16" cy="17" r="2.5" fill="currentColor" stroke="none"/>
+            </svg>
+            {mode !== 'auto' && <span className="desktop-quick-mode-active">{mode === 'team' ? 'Equipe' : 'Individual'}</span>}
+          </button>
+        </div>
         <button type="button" className={'desktop-quick-microphone' + (listening ? ' is-listening' : '')}
           onClick={dictate} disabled={!recognitionAvailable || sending}
           title={recognitionAvailable ? 'Ditar mensagem' : 'Ditado não disponível nesta instalação'}
@@ -129,6 +157,14 @@ export default function DesktopChatPrompt({
         </button>
       </form>
     </div>
+    {showModes && <div id="desktop-quick-mode-options" className="desktop-quick-mode-options"
+      role="group" aria-label="Escolher modo de execução">
+      {[['auto','Auto'], ['team','Equipe'], ['manual','Individual']].map(([value,label]) =>
+        <button key={value} type="button" aria-pressed={mode === value}
+          onClick={() => { setMode(value); setShowModes(false); fieldRef.current?.focus() }}>
+          {label}
+        </button>)}
+    </div>}
     {mode === 'manual' && <label className="desktop-quick-worker">
       Trabalhador
       <select aria-label="Trabalhador preferido" value={selectedAgent || ''}
