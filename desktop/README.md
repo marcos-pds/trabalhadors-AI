@@ -1,3 +1,19 @@
+## Limpeza visual do chat — Desktop 0.3.6
+
+Correção baseada na captura do usuário mostrando moldura de contorno em vermelho, seletor `Auto` com caixa em volta e sombra escura ao redor da janela:
+
+- **Janela sem moldura visual**: remove bordas CSS, halos, sombras externas e linhas decorativas da janela principal, dock superior e barra de prompt. A janela Electron já utiliza `hasShadow: false`, `transparent: true` e fundo transparente.
+- **Vidro sem contorno pesado**: mantém cores, reflexos, desfoque e a refração `rdev/liquid-glass-react`, porém com sombra e contorno ausentes nas superfícies externas.
+- **`Auto` oculto**: o modo automático continua selecionado e funcional, mas nenhum texto `Auto` ou seletor com borda aparece por padrão. Um **ícone pequeno de ajustes** permite escolher Auto, Equipe ou Individual, sem bloquear digitação. Se selecionar Equipe ou Individual, o nome do modo aparece discretamente ao lado do ícone.
+- **Menu acessível**: tecla Escape e clique fora fecham as opções; a abertura do menu não abre o chat inteiro. Na conversa expandida, as opções aparecem acima do campo de texto, sem sair da janela.
+- **Web/PWA sem alterações**: o CSS está restrito ao `html.central-desktop-shell .central-desktop-mode`; o componente compacto é usado somente no Electron.
+
+Arquivos: `frontend/src/DesktopChatPrompt.jsx`, `frontend/src/desktop-liquid-glass.css`, `frontend/src/desktopMinimalFrame.test.mjs`.
+Validação automática: `node --test frontend/src/desktopMinimalFrame.test.mjs` e `npm run build`, com empacotamento Windows `desktop/build_windows.ps1`.
+Ainda é necessária uma verificação visual na máquina Windows, principalmente em escalas de 100%, 125% e 150%.
+
+---
+
 ## Correção visual do chat e prévia — Desktop 0.3.5
 
 Correções motivadas por duas capturas da Central no Windows:
