@@ -1,0 +1,13 @@
+{
+  "name": "central-ia-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Janela desktop opcional da Central IA",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}

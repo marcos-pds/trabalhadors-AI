@@ -37,6 +37,10 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check Python syntax
         run: python -m compileall -q central
+      - name: Validate isolated desktop main/preload syntax
+        run: |
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
       - name: Build React frontend
         run: npm run build
       - name: Run regression and autonomy tests

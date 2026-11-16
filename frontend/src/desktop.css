@@ -1,0 +1,175 @@
+/* Desktop-only appearance. Never applied to the ordinary web app.
+   The Electron preload exposes centralDesktop, and App sets this class. */
+html:has(.central-desktop-mode),
+body:has(.central-desktop-mode),
+#root:has(.central-desktop-mode) {
+  background: transparent !important;
+  overflow: hidden;
+}
+.central-desktop-mode {
+  --color-ink: #090c13;
+  --color-sidebar: #121821;
+  --color-panel: #171e29;
+  --color-card: #1b2430;
+  --color-copy: #edf2fc;
+  --color-muted: #aab6c8;
+  --color-lilac: #c4b6fb;
+  --color-aqua: #b7d9ff;
+  background: transparent !important;
+  color: #edf2fc;
+  min-height: 0 !important;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+}
+.desktop-dock {
+  position: fixed;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: block;
+  width: max-content;
+  max-width: calc(100vw - 14px);
+  height: 64px;
+  border-radius: 24px;
+  overflow: visible;
+  background: linear-gradient(135deg, rgba(238,246,255,.20) 0%, rgba(30,38,56,.42) 32%, rgba(13,17,27,.63) 100%);
+  border: 1px solid rgba(238,245,255,.36);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.36), inset 0 -2px 6px rgba(255,255,255,.05),
+    0 5px 25px rgba(0,0,0,.33), 0 0 0 1px rgba(10,15,27,.24);
+  backdrop-filter: blur(25px) saturate(155%);
+  -webkit-backdrop-filter: blur(25px) saturate(155%);
+}
+.desktop-dock::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  border-radius: 23px;
+  pointer-events: none;
+  background: linear-gradient(172deg, rgba(255,255,255,.21), transparent 25%, transparent 72%, rgba(193,201,238,.04));
+}
+.desktop-dock-refraction { position: absolute; inset: 0; pointer-events:none; border-radius: inherit; opacity:.42; overflow:hidden; }
+.desktop-dock-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 62px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 5px;
+}
+.desktop-slime-button {
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  flex: 0 0 54px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent !important;
+  box-shadow: none !important;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  transition: transform .28s cubic-bezier(.2, .9, .3, 1);
+}
+.desktop-slime-button:hover { transform: translateY(-2px) scale(1.08); }
+.desktop-slime-button:active { transform: scale(.96); }
+.desktop-slime-button:focus-visible { outline: 2px solid rgba(205,208,250,.85); outline-offset: 2px; }
+.desktop-slime-canvas { display: block; width: 52px; height: 52px; position: relative; pointer-events:none; }
+.desktop-slime-fallback { position: absolute; inset: 5px 4px 7px; border-radius: 53% 53% 44% 44%;
+  background: radial-gradient(circle at 29% 17%, #555e73, #1a202d 48%, #03040a 90%); box-shadow: inset -3px -4px 9px #0009, inset 2px 2px 6px #aab7d266; }
+.desktop-slime-fallback i { position:absolute; width: 7px;height:10px;border-radius:50%;top:18px;background:#06080f;box-shadow:-1px -2px 2px #c8bde366; }
+.desktop-slime-fallback i:nth-child(1){left:11px}.desktop-slime-fallback i:nth-child(2){right:11px}
+.desktop-slime-fallback b{position:absolute;width:11px;height:5px;left:16px;top:31px;border-bottom:2px solid #07090d;border-radius:50%}
+.desktop-dock-separator { flex: 0 0 1px; height: 24px; margin: 0 2px; background: linear-gradient(transparent,rgba(255,255,255,.36),transparent); }
+.desktop-dock-actions { display:flex; gap:2px; align-items:center; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.desktop-dock-actions::-webkit-scrollbar { display:none; }
+.desktop-dock-icon {
+  width: 29px;
+  height: 32px;
+  flex: 0 0 29px;
+  padding:0;
+  border:1px solid transparent;
+  border-radius: 10px;
+  display:grid;
+  place-items:center;
+  color: rgba(229,233,246,.72);
+  background: transparent;
+  transition: background .22s, color .22s, border-color .22s, transform .22s;
+}
+.desktop-dock-icon svg { width: 15px; height:15px; stroke-width: 1.65px; }
+.desktop-dock-icon:hover,
+.desktop-dock-icon.is-current { background: rgba(235,239,255,.12); border-color:rgba(255,255,255,.14); color:#fff; transform:translateY(-1px); }
+.desktop-dock-icon:focus-visible { outline: 2px solid #c0d2ff; outline-offset: 1px; }
+.desktop-dock-close:hover { background: rgba(255,120,130,.16); color:#ffc6cc; }
+.desktop-dock-status { height:6px; width:6px; border-radius:50%; background:#5ae3a7; box-shadow:0 0 8px #5ae3a755; }
+.central-desktop-mode .central-main {
+  margin: 82px 12px 12px;
+  min-height:0;
+  overflow:hidden;
+  border: 1px solid rgba(233,243,255,.26);
+  border-radius: 23px;
+  background: linear-gradient(142deg, rgba(35,44,62,.91),rgba(12,16,27,.94) 60%);
+  backdrop-filter: blur(25px) saturate(130%);
+  -webkit-backdrop-filter: blur(25px) saturate(130%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 14px 50px rgba(0,0,0,.38);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity .34s ease, transform .38s cubic-bezier(.22,1,.36,1), visibility .38s;
+}
+.central-desktop-mode.desktop-panel-collapsed .central-main {
+  opacity:0;
+  transform: translateY(-13px) scale(.975);
+  visibility: hidden;
+  pointer-events:none;
+}
+.central-desktop-mode .central-main > section { min-height:0; }
+/* Compact chat actions remain accessible at the TOP of the opened panel:
+   preview, memory, worker selection, and command palette retain their behavior. */
+.central-desktop-mode .central-chat-toolbar {
+  display:flex;
+  min-height: 38px;
+  padding: 3px 10px;
+  background: transparent;
+  border-bottom-color: rgba(255,255,255,.09);
+}
+.central-desktop-mode .central-chat-toolbar > div:first-child { display:none; }
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 5px;
+  border-radius: 9px;
+}
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action > span,
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action > kbd { display:none; }
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action svg { width:15px;height:15px; }
+
+.central-desktop-mode .reference-bottom-dock {
+  border-top: 1px solid rgba(255,255,255,.11);
+  background: rgba(10,15,27,.33);
+}
+.central-desktop-mode .central-drawer {
+  border-radius: 18px;
+  background: rgba(20,27,40,.96);
+  backdrop-filter:blur(24px);
+}
+.central-desktop-mode .menu-drawer { top:76px; bottom:12px; left:12px; max-height:calc(100vh - 88px); }
+.central-desktop-mode .central-main .liquid-chat-composer { background:rgba(23,31,44,.74); }
+@media (max-width: 680px) {
+  .desktop-dock {max-width:calc(100vw - 12px);}
+  .desktop-dock-content {max-width:calc(100vw - 16px);}
+  .desktop-slime-button {width:48px;height:48px;flex-basis:48px}
+  .desktop-slime-canvas {width:46px;height:46px}
+  .desktop-dock-actions {max-width:calc(100vw - 176px)}
+  .central-desktop-mode .central-main {margin:78px 8px 8px;border-radius:18px}
+}
+@media (prefers-reduced-motion: reduce) {
+  .central-desktop-mode .central-main,.desktop-slime-button,.desktop-dock-icon {transition:none !important;animation:none !important}
+}

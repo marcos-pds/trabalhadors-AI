@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { chatCommands, matchingChatCommands } from './commandPalette.mjs'
 import { CommandIcon, LiquidGlassUnderlay, LiveAgentOrbit } from './LiquidGlassUI.jsx'
 import { AIIcons, ReferenceProviderIcon } from './ReferenceIcons.jsx'
@@ -18,6 +18,9 @@ import ConversationActivity from './ConversationActivity.jsx'
 import PauseLimitPrompt from './PauseLimitPrompt.jsx'
 import { parseResourceCommand, matchingResources, setChatResourceState } from './chatResources.mjs'
 import TokenUsagePanel from './TokenUsagePanel'
+const DesktopDock = lazy(() => import('./DesktopDock.jsx'))
+import './desktop.css'
+import { isCentralDesktop } from './desktopMode.mjs'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
@@ -560,6 +563,10 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 }
 
 export default function App() {
+  // Electron preload is the desktop authority. Web/PWA never receives this API.
+  const desktopMode = isCentralDesktop(window)
+  const [desktopExpanded, setDesktopExpanded] = useState(false)
+  const desktopResizeTimer = useRef(null)
   const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState((localStorage.getItem('central-theme-design') === 'reference-ice-v1' ? (localStorage.getItem('central-theme') || 'light') : 'light'));const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
@@ -616,10 +623,31 @@ export default function App() {
     const timer=setInterval(syncRun,3000)
     return()=>{active=false;clearInterval(timer)}
   },[inspectedRun,page,user?.id,loadAll,notify])
-  useEffect(()=>()=>{sourceRef.current?.close();clearTimeout(toastTimer.current)},[])
+  useEffect(()=>()=>{sourceRef.current?.close();clearTimeout(toastTimer.current);clearTimeout(desktopResizeTimer.current)},[])
+  useEffect(() => {
+    if (!desktopMode || !authReady) return undefined
+    clearTimeout(desktopResizeTimer.current)
+    // The login form needs a regular window; after login only the top dock stays.
+    if (!user || desktopExpanded) window.centralDesktop.setExpanded(true)
+    else desktopResizeTimer.current = setTimeout(() => window.centralDesktop.setExpanded(false), 330)
+    return () => clearTimeout(desktopResizeTimer.current)
+  }, [desktopMode, authReady, user, desktopExpanded])
   async function login(authMode,credentials){const me=await api(`/${authMode}`,'POST',credentials);setUser(me);setPage('chat');await loadAll()}
   async function logout(){sourceRef.current?.close();await api('/logout','POST');setMenuOpen(false);setUser(null);setCurrentConvo(null);setData(emptyData);setMessages([]);setComputerAccess({mode:'blocked',folder:''})}
   const navigate=next=>{sourceRef.current?.close();setPage(next);setMenuOpen(false)}
+  const toggleDesktopChat = () => {
+    if (desktopExpanded && page === 'chat') { setDesktopExpanded(false); setMenuOpen(false) }
+    else { setPage('chat'); setDesktopExpanded(true); setMenuOpen(false) }
+  }
+  const navigateDesktop = next => { if (next === 'chat') return; navigate(next); setDesktopExpanded(true) }
+  const openDesktopMenu = () => { if (page === 'chat') setPage('dashboard'); setDesktopExpanded(true); setMenuOpen(true) }
+  const openDesktopUtility = utility => {
+    if (page === 'chat') setPage('dashboard')
+    setDesktopExpanded(true)
+    if (utility === 'memory') openMemoryPanel()
+    if (utility === 'computer') setComputerOpen(true)
+  }
+  const closeDesktopPanel = () => { setDesktopExpanded(false); setMenuOpen(false) }
   function newChat(){sourceRef.current?.close();setInspectedRun(null);setExecutionPanelOpen(false);setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
   async function openConversation(id){
     sourceRef.current?.close();setCurrentRun(null);setWorkspaceApprovals([]);setSteps([]);setCurrentConvo(id);setSelectedProject(null);setPage('chat');setMenuOpen(false)
@@ -730,18 +758,26 @@ export default function App() {
   const selectSuggestion=value=>setPrompt(value)
   if(!authReady)return <div className="grid min-h-screen place-items-center bg-ink text-sm text-muted">Abrindo sua central…</div>
   if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-card px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
-  return <div className="central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy" data-page={page} data-theme={theme}>
+  return <div className={'central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy' + (desktopMode ? ' central-desktop-mode ' + (desktopExpanded ? 'desktop-panel-open' : 'desktop-panel-collapsed') : '')} data-page={page} data-theme={desktopMode ? 'dark' : theme}>
+    {desktopMode && <Suspense fallback={null}><DesktopDock active={desktopExpanded} page={page} running={!!currentRun}
+      onToggleChat={toggleDesktopChat} onNavigate={navigateDesktop}
+      onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}
+      onOpenMemory={() => openDesktopUtility('memory')} onOpenComputer={() => openDesktopUtility('computer')}/></Suspense>}
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
     {menuOpen && <>
       <button aria-hidden="true" tabIndex={-1} onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/>
       <div className="menu-drawer central-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
         <button type="button" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-lg text-xl text-muted hover:bg-white/10">×</button>
-        <Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/>
+        <Sidebar page={page} data={{...data,currentConvo}} me={user}
+          onNavigate={desktopMode ? next => { if (next === 'chat') closeDesktopPanel(); else navigateDesktop(next) } : navigate}
+          onNewChat={desktopMode ? () => { newChat(); closeDesktopPanel() } : newChat}
+          onSwitch={desktopMode ? id => { openConversation(id).finally(closeDesktopPanel) } : openConversation}
+          onLogout={() => logout().catch(e => notify(e.message))}/>
       </div>
     </>}
     <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
+      {!desktopMode && <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
         <div className="reference-header-left flex items-center gap-4">
           <button type="button" aria-label="Abrir menu" title="Menu"
             onClick={() => setMenuOpen(true)} className="reference-menu-toggle">
@@ -763,7 +799,7 @@ export default function App() {
             onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
             className="reference-icon-button">◐</button>
         </div>
-      </header>
+      </header>}
       <section className={'min-h-0 flex-1 ' + (page === 'chat' ? 'overflow-hidden' : 'scrollbar-soft overflow-y-auto')}>
         {page === 'chat' && <div className="flex h-full min-h-0 flex-col lg:flex-row"><div className="min-h-0 min-w-0 flex-1"><ChatPage data={data} messages={messages} steps={steps} mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles} running={!!currentRun} onSend={sendMessage} onCancel={cancelRun} onApproval={approval} onSuggest={selectSuggestion} currentConvo={currentConvo} onMenu={() => setMenuOpen(true)} onCommand={runCommand} selectedProject={selectedProject} onOpenMemory={() => openMemoryPanel()} computerAccess={computerAccess} onOpenComputer={() => setComputerOpen(true)} autonomous={autonomous} setAutonomous={setAutonomous} workspaceApprovals={workspaceApprovals} onWorkspaceApproval={approveWorkspaceAction} onOpenExecution={() => setExecutionPanelOpen(open => !open)} activityRunId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id}/></div>
           {executionPanelOpen && <><div role="separator" aria-label="Ajustar largura do painel de execução" aria-orientation="vertical" className="hidden w-1 shrink-0 cursor-col-resize bg-white/10 transition hover:bg-violet-400/70 lg:block" onPointerDown={event=>{event.preventDefault();const size=e=>Math.min(68,Math.max(34,100-(e.clientX/window.innerWidth*100)));const move=e=>setExecutionWidth(size(e));const up=e=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);localStorage.setItem('central-execution-width',String(Math.round(size(e))))};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>
@@ -775,9 +811,9 @@ export default function App() {
         {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})} onRestored={loadAll}/>}
-        {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id)}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
-        {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={useWorkflow}/>}
-        {page === 'history' && <History data={data} onOpen={openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
+        {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id);if(desktopMode)closeDesktopPanel()}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
+        {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={workflow => {useWorkflow(workflow);if(desktopMode)closeDesktopPanel()}}/>}
+        {page === 'history' && <History data={data} onOpen={desktopMode ? run => openRun(run).finally(closeDesktopPanel) : openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
         {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
         {page === 'git' && <GitConnectPage api={api}/>}
