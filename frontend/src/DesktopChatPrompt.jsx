@@ -46,6 +46,10 @@ export default function DesktopChatPrompt({
 
   async function submit() {
     if (sendLock.current || !prompt.trim()) return
+    if (mode === 'manual' && !selectedAgent) {
+      onError('Selecione um trabalhador antes de enviar.')
+      return
+    }
     sendLock.current = true
     setSending(true)
     try {
