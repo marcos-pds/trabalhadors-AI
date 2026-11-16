@@ -1,3 +1,17 @@
+## Liquid Glass completo — versão desktop 0.3.2
+
+O modo Windows/Electron usa o projeto [rdev/liquid-glass-react](https://github.com/rdev/liquid-glass-react) (MIT) para **refração SVG real nas bordas** da área de trabalho e usa o sistema de vidro do projeto para aplicar a mesma estética em toda a Central: chat, menus, provedores, trabalhadores, fluxos, projetos, histórico, relatórios, tokens, Git, configurações, modais, formulários, tabelas e notificações.
+
+- **Somente desktop:** o CSS é importado pelo `DesktopDock.jsx`, que só é carregado na janela Electron. Todos os seletores visuais exigem `html.central-desktop-shell`; a web e o PWA não recebem essa classe nem essa renderização.
+- **Slime rosa preservado:** o avatar 3D original não recebe vidro nem filtros, continua pequeno e animado e controla sozinho a abertura/fechamento do chat.
+- **Performance:** a refração real só é montada na área de trabalho quando aberta; cartões menores usam bordas, reflexos, saturação e desfoque CSS, em vez de um filtro SVG para cada elemento.
+- **Acessibilidade:** campos e textos conservam contraste adequado, menus permitem navegação por teclado, preferências de movimento reduzido e modo de alto contraste continuam respeitados.
+- **Login:** o assistente de login/registro do executável também usa a identidade visual escura de vidro. O navegador mantém seu tema atual.
+
+Verificações em `npm test` conferem que o tema só pode ser ligado pelo preload desktop, que a dependência de refração é carregada de forma lazy e que o Slime original está isento. Os testes não substituem a inspeção gráfica do Electron em um PC Windows.
+
+---
+
 ## Correções do avatar e da barra — Desktop 0.3.1
 
 Esta atualização **não altera a versão web**. A barra branca exibida atrás do dock foi tratada em duas etapas: o preload Electron agora cria a superfície transparente antes do React ser exibido, e o CSS desktop impede que a cor clara herdada da web apareça no fundo ou no cabeçalho.
