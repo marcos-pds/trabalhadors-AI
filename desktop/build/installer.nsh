@@ -1,6 +1,7 @@
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 
+!ifndef BUILD_UNINSTALLER
 Var CentralVoiceSelected
 Var CentralOllamaSelected
 Var CentralQwenSelected
@@ -12,7 +13,6 @@ Var CentralQwenControl
 Var CentralLlamaControl
 Var CentralDockerControl
 
-!ifndef BUILD_UNINSTALLER
 Function centralOptionsCreate
   ${If} ${Silent}
     Abort
