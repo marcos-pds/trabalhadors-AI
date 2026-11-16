@@ -18,7 +18,7 @@ const tools = [
 // Always visible even while the conversation is collapsed. The avatar alone
 // toggles CHAT; tool icons open their own workspace, never the chat.
 export default function DesktopDock({ active = false, page = 'chat', running = false,
-  onToggleChat, onNavigate, onClosePanel, onOpenMenu }) {
+  onToggleChat, onNavigate, onClosePanel, onOpenMenu, onOpenMemory, onOpenComputer }) {
   return <header className="desktop-dock" aria-label="Barra de ferramentas desktop da Central IA">
     <LiquidGlassUnderlay className="desktop-dock-refraction" strength={0.09}
       radius={28} glow={0.2} edgeHighlight={0.4}/>
@@ -39,6 +39,10 @@ export default function DesktopDock({ active = false, page = 'chat', running = f
         </button>)}
       </nav>
       <span className="desktop-dock-separator" aria-hidden="true"/>
+      <button type="button" onClick={onOpenMemory} aria-label="Memória da Central"
+        title="Memória" className="desktop-dock-icon"><CommandIcon name="brain"/></button>
+      <button type="button" onClick={onOpenComputer} aria-label="Acesso ao computador"
+        title="Acesso ao computador" className="desktop-dock-icon"><CommandIcon name="monitor"/></button>
       <button type="button" onClick={onOpenMenu} aria-label="Menu de conversas"
         title="Histórico de conversas" className="desktop-dock-icon">
         <CommandIcon name="menu"/>
