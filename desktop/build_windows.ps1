@@ -14,7 +14,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Build do frontend falhou' }
 Write-Host '[3/5] Incluindo o servico local'
 python -m pip install --disable-pip-version-check -r requirements.txt
 if ($LASTEXITCODE -ne 0) { throw 'Dependencias Python falharam' }
-python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0' 'pillow>=10,<12'
+python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0' 'pillow>=10,<12' 'mcp[cli]==1.30.0'
 if ($LASTEXITCODE -ne 0) { throw 'Ferramentas de empacotamento falharam' }
 $pyArgs = @('--noconfirm', '--clean', '--onedir', '--name', 'central-backend',
   '--paths', $root, '--distpath', "$root\dist\backend",
