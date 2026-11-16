@@ -6,6 +6,7 @@ on:
     branches:
       - feat/desktop-clean-exe-installer
       - feat/installer-optional-models
+      - fix/desktop-pink-slime-reactions
     paths:
       - 'desktop/**'
       - 'frontend/**'
