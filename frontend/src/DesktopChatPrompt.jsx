@@ -98,7 +98,7 @@ export default function DesktopChatPrompt({
           placeholder={sending ? 'Enviando…' : embedded ? 'Escreva sua próxima mensagem…' : 'O que deseja fazer?'}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Escape') { onClose?.(); return }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose?.(); return }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submit()
