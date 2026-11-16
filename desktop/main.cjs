@@ -130,7 +130,7 @@ function bounds(layout = 'dock') {
     : layout === 'compose' ? Math.min(790, workArea.width - 20)
     : Math.min(SMALL_WIDTH, workArea.width - 20)
   const height = layout === 'full' ? Math.min(780, workArea.height - 26)
-    : layout === 'compose' ? Math.min(184, workArea.height - 12)
+    : layout === 'compose' ? Math.min(210, workArea.height - 12)
     : Math.min(SMALL_HEIGHT, workArea.height - 12)
   return {
     x: workArea.x + Math.round((workArea.width - width) / 2),
