@@ -18,6 +18,10 @@ Plataforma multiagente em português: autenticação, chat com streaming SSE, ag
 
 > **Importante:** o projeto implementa uma primeira versão **real**, mas **não** cumpre integralmente as 15 fases da especificação. Consulte a seção "Funcionalidades e limitações". O código não contém integrações falsas em produção. Para obter respostas de IA, você precisa conectar APIs com acesso válido. Os testes automatizados usam provedores simulados **somente nos testes**.
 
+## Central IA Desktop (opcional)
+
+A versão Windows com **barra Liquid Glass**, Slime 3D preto e chat retrátil está documentada em [desktop/README.md](desktop/README.md). Ela funciona em uma janela Electron transparente e sempre no topo. **A versão web no navegador mantém a interface tradicional.**
+
 ## Instalação no Windows (recomendado)
 
 1. Extraia o ZIP em uma pasta de sua escolha, como `C:\Projetos\central-trabalhadores-ia`.
