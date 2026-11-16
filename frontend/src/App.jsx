@@ -20,6 +20,7 @@ import { parseResourceCommand, matchingResources, setChatResourceState } from '.
 import TokenUsagePanel from './TokenUsagePanel'
 const DesktopDock = lazy(() => import('./DesktopDock.jsx'))
 import './desktop.css'
+import { isCentralDesktop } from './desktopMode.mjs'
 import { providerCategory } from './providerFilters'
 
 const pageNames = { chat: 'Chat IA', dashboard: 'Visão geral', agents: 'Trabalhadores', workflows: 'Fluxos', projects: 'Projetos', history: 'Histórico', monitoring: 'Monitoramento', tokens: 'Uso de tokens', providers: 'Provedores', settings: 'Configurações', resources: 'Skills e integrações', git: 'Conectar GitHub' }
@@ -563,7 +564,7 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 
 export default function App() {
   // Electron preload is the desktop authority. Web/PWA never receives this API.
-  const desktopMode = window.centralDesktop?.isDesktop === true
+  const desktopMode = isCentralDesktop(window)
   const [desktopExpanded, setDesktopExpanded] = useState(false)
   const desktopResizeTimer = useRef(null)
   const [user,setUser]=useState(null);const [authReady,setAuthReady]=useState(false);const [page,setPage]=useState('chat');const [menuOpen,setMenuOpen]=useState(false);const [theme,setTheme]=useState((localStorage.getItem('central-theme-design') === 'reference-ice-v1' ? (localStorage.getItem('central-theme') || 'light') : 'light'));const [data,setData]=useState(emptyData);const [stats,setStats]=useState(null);const [modal,setModal]=useState(null);const [toast,setToast]=useState('');const [currentConvo,setCurrentConvo]=useState(null);const [selectedProject,setSelectedProject]=useState(null);const [memoryOpen,setMemoryOpen]=useState(false);const [memoryTargetProject,setMemoryTargetProject]=useState(null);const [computerOpen,setComputerOpen]=useState(false);const [computerAccess,setComputerAccess]=useState({mode:'blocked',folder:''});const [autonomous,setAutonomous]=useState(false);const [workspaceApprovals,setWorkspaceApprovals]=useState([]);const [selectedWorkflow,setSelectedWorkflow]=useState(null);const [messages,setMessages]=useState([]);const [steps,setSteps]=useState([]);const [mode,setMode]=useState('auto');const [selectedAgent,setSelectedAgent]=useState('');const [prompt,setPrompt]=useState('');const [files,setFiles]=useState([]);const [currentRun,setCurrentRun]=useState(null);const [inspectedRun,setInspectedRun]=useState(null);const [executionPanelOpen,setExecutionPanelOpen]=useState(false);const [executionWidth,setExecutionWidth]=useState(()=>Math.min(68,Math.max(34,Number(localStorage.getItem('central-execution-width'))||50)));const sourceRef=useRef(null);const toastTimer=useRef(null)
