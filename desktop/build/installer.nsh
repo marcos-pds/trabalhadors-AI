@@ -12,6 +12,7 @@ Var CentralQwenControl
 Var CentralLlamaControl
 Var CentralDockerControl
 
+!ifndef BUILD_UNINSTALLER
 Function centralOptionsCreate
   ${If} ${Silent}
     Abort
@@ -47,6 +48,7 @@ Function centralOptionsLeave
   ${NSD_GetState} $CentralLlamaControl $CentralLlamaSelected
   ${NSD_GetState} $CentralDockerControl $CentralDockerSelected
 FunctionEnd
+!endif
 
 !macro customWelcomePage
   !insertmacro MUI_PAGE_WELCOME
