@@ -31,6 +31,15 @@ test('the actual rdev refraction is behind the workspace, never on pink avatar',
   assert.match(slime, /createOriginalPinkSlime/)
 })
 
+test('native Electron never inherits the white PWA caption and intro', () => {
+  const frame = file('./DesktopFrame.jsx')
+  const intro = file('./StartupIntro.jsx')
+  assert.match(frame, /isNativeDesktop/)
+  assert.match(frame, /if \(isNativeDesktop \|\| !visible\) return children/)
+  assert.match(intro, /window\.centralDesktop\?\.isDesktop === true/)
+  assert.match(intro, /return 'dark'/)
+})
+
 test('desktop glass theme covers all Central screens and input types', () => {
   const css = file('./desktop-liquid-glass.css')
   for (const selector of [
