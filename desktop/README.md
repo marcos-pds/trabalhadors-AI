@@ -1,0 +1,48 @@
+# Central IA Desktop — Liquid Glass + Slime preto
+
+Esta é uma **interface Windows opcional** e separada do navegador. A versão web mantém suas telas, cabeçalho, barra lateral e chat atuais sem alteração visual. O invólucro Electron usa o mesmo backend FastAPI e a mesma aplicação React, mas fornece um canal desktop autenticado pelo preload, ativando um layout específico **somente na janela Electron**.
+
+## Recursos
+
+- Slime 3D de material preto/grafite, sobre **fundo transparente**, sem cartão ou moldura.
+- Barra de notificações Liquid Glass fixa na parte superior, com menus da Central em ícones pequenos e com nomes acessíveis ao passar o mouse.
+- Chat recolhido na inicialização; **só o clique no avatar** abre/fecha a conversa. Ícones abrem suas próprias seções, como Projetos, Provedores e Configurações.
+- Ao expandir, uma janela transparente do Electron cresce e exibe o chat completo e as ferramentas reais da Central. Ao recolher, volta a ocupar apenas a região da barra, com transição suave do painel.
+- O vidro usa os componentes já existentes do projeto (liquid-glass-web-react) e CSS; não é aplicado à malha do avatar.
+- Web em Chrome/Edge em uma aba normal: interface **inalterada**.
+
+## Primeira instalação — Windows 10 ou 11
+
+1. Configure a Central normalmente usando o [guia de instalação](../GUIA-INSTALACAO-WINDOWS.md), incluindo `npm ci`, `npm run build` e instalação do Python.
+2. A partir da pasta raiz, compile a nova interface: `npm ci && npm run build`.
+3. Execute `desktop\iniciar_desktop.bat`. O script inicia o backend em `127.0.0.1:8765` se necessário, instala o Electron no diretório `desktop` quando ainda não existir e abre a barra compacta.
+4. Se for o primeiro login, a janela se amplia para permitir autenticação; depois volta à barra pequena.
+5. **Clique no Slime preto** para abrir o chat. Clique novamente para fechar, ou use o botão de recolher. Use Alt+F4 para fechar o aplicativo quando estiver em foco.
+
+Alternativa se o servidor já estiver funcionando em outra porta:
+
+```bat
+cd desktop
+npm install --no-audit --no-fund
+set "CENTRAL_DESKTOP_URL=http://127.0.0.1:8876/"
+npm start
+```
+
+Se estiver usando uma cópia de testes diferente da raiz, compile essa cópia antes de abrir Electron.
+
+## Segurança e isolamento
+
+A janela desktop usa `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true` e URL local restrita a `http://localhost`/`http://127.0.0.1`. O preload expõe apenas `{isDesktop, setExpanded(boolean)}`, sem acesso direto a Node, disco ou credenciais. O processo principal só aceita IPC do frame principal da janela, na origem local aprovada.
+
+A barra é **sempre no topo** da área de trabalho Windows; não modifica a barra do Windows nem instala serviços do sistema. Janelas de alguns aplicativos em tela cheia exclusiva podem ficar acima dela. Para manter o conteúdo da tela subjacente visível, a janela usa transparência do Electron, não o CSS de uma aba do navegador.
+
+**Observação:** o Windows pode solicitar permissões ao instalar Electron, e programas de captura ou proteção podem afetar a transparência. A instalação não gera instalador .exe assinado nesta fase; `npm start` executa o aplicativo local. Não publique o backend em interfaces de rede externas.
+
+## Testes
+
+- `npm ci && npm run build` na raiz.
+- `npm test` (testes do projeto).
+- `node --check desktop/main.cjs && node --check desktop/preload.cjs`.
+- Teste manual no Windows: abrir dock, clicar no avatar, trocar para Projetos e voltar ao chat, minimizar, verificar que o browser em `http://127.0.0.1:8765` mantém a UI antiga, testar Alt+F4 e modo de alta DPI.
+
+O CI do GitHub valida a compilação React e sintaxe do processo Electron. A verificação visual de transparência, posição de janela, redimensionamento e GPU/WebGL precisa acontecer em Windows com interface gráfica.
