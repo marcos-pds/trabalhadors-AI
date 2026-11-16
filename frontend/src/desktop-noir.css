@@ -475,3 +475,79 @@ html.central-desktop-shell #root > :is([role="dialog"],[role="alertdialog"]) {
   }
 }
 /* The pink avatar is NOT touched by the noir theme. */
+
+/* Last-mile specificity: form controls normally receive a stronger generic
+ * rule. Preserve the native chat's single invisible text area instead. */
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only
+  .desktop-quick-composer .desktop-quick-input-row > textarea.desktop-quick-field,
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-composer
+  .desktop-quick-composer .desktop-quick-input-row > textarea.desktop-quick-field {
+  background: transparent !important;
+  background-image: none !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only
+  .desktop-quick-composer .desktop-quick-input-row > textarea.desktop-quick-field::placeholder {
+  color: #a7a7a7 !important;
+  -webkit-text-fill-color: #a7a7a7 !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-picker
+  .desktop-quick-mode-trigger {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.shadow-lg,.shadow-xl,.shadow-2xl) {
+  box-shadow: none !important;
+}
+/* Make default brand primary buttons neutral without suppressing the
+ * semantically important green, amber or red warning components. */
+html.central-desktop-shell .central-desktop-mode
+  button:is([class*="bg-lilac"],[class*="bg-violet-"]) {
+  background: #ededed !important;
+  color: #050505 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode
+  button:is([class*="bg-lilac"],[class*="bg-violet-"]):hover {
+  background: #cecece !important;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.desktop-update-help,.desktop-update-message,.desktop-update-version,.desktop-update-backup) {
+  color: #bdbdbd !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-progress {
+  background: #191919 !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-progress span {
+  background: #bdbdbd !important;
+}
+
+/* The intro is mounted outside #root directly into body. Electron's preload
+ * class is therefore the only safe way to theme it without touching web. */
+html.central-desktop-shell .cia-intro[data-theme="dark"] {
+  --cia-bg: #000;
+  --cia-ink: #f1f1f1;
+  --cia-muted: #a7a7a7;
+  --cia-line: #292929;
+  --cia-glass-top: #272727dd;
+  --cia-glass-bottom: #0b0b0bee;
+  --cia-glass-line: #3b3b3bcc;
+  background: #000 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .cia-intro__glow {
+  opacity: 0 !important;
+}
+html.central-desktop-shell .cia-intro__glass {
+  box-shadow: none !important;
+}
+html.central-desktop-shell .cia-intro__glass svg {
+  filter: grayscale(1);
+}
