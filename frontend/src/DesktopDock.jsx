@@ -1,4 +1,5 @@
 import './desktop-liquid-glass.css'
+import './desktop-noir.css'
 import { CommandIcon, LiquidGlassUnderlay } from './LiquidGlassUI.jsx'
 import DesktopSlime from './DesktopSlime.jsx'
 import DesktopUpdateControl from './DesktopUpdateControl.jsx'

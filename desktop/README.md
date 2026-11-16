@@ -1,3 +1,25 @@
+## Tema Noir #000 — Central Desktop 0.3.7
+
+Esta versão de teste aplica a identidade visual **preto verdadeiro** ao aplicativo **Electron/Windows somente**. A versão web/PWA não importa este tema e continua com a aparência anterior.
+
+- **Base:** `#000000` na área de trabalho, chat, histórico e demais telas principais; superfícies auxiliares em `#090909` e `#101010` para distinguir cartões, campos e controles sem recorrer a azul ou roxo.
+- **Liquid Glass contido:** refração `rdev/liquid-glass-react` permanece no dock/campo, com opacidade reduzida. Sem molduras brilhantes nem sombras externas. Fora da barra compacta, a janela continua transparente para não criar um retângulo preto na área de trabalho.
+- **Telas abrangidas:** dock, chat compacto e expandido, prévia opcional, dashboard, trabalhadores, projetos, workflows, históricos, provedores, monitoramento, uso de tokens, integrações, GitHub, configurações, menus, modais, notificações, login e animação de abertura.
+- **Texto e acessibilidade:** branco/cinza legível, hover grafite, foco de teclado visível; cores de alerta, sucesso e erro permanecem para sinalizar estados.
+- **Slime:** avatar 3D rosa original preservado sem filtros de vidro/preto.
+- **Funcionalidade:** clique do avatar abre somente o compositor; após enviar uma mensagem válida aparece a conversa; prévia abre sob demanda; modos de execução, atualizador, banco e integrações não mudam.
+
+O arquivo `frontend/src/desktop-noir.css` concentra as variáveis e os estilos. Ele é carregado **somente** se o preload Electron expuser `centralDesktop.isDesktop`: no dock depois do Liquid Glass existente e, na tela de login, por importação dinâmica protegida. Não há importação estática pelo frontend web.
+
+### Validação
+
+- `node --test frontend/src/desktopNoir.test.mjs` — preta real, páginas cobertas, web isolada, slime original e bordas discretas.
+- `npm run build` — frontend React.
+- `desktop/build_windows.ps1` — Setup EXE Windows 0.3.7 e testes do backend instalado.
+- **Inspeção visual ainda necessária:** tela preta em 100%/125%/150% de escala, legibilidade dos campos, uso de CPU/GPU dos filtros e login. Não mesclar na main nem publicar GitHub Release sem confirmar essas verificações.
+
+---
+
 ## Limpeza visual do chat — Desktop 0.3.6
 
 Correção baseada na captura do usuário mostrando moldura de contorno em vermelho, seletor `Auto` com caixa em volta e sombra escura ao redor da janela:

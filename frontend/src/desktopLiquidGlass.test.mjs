@@ -35,7 +35,7 @@ test('desktop settings cannot overwrite the web appearance preference', () => {
   const app = file('./App.jsx')
   assert.match(app, /if\(!desktopMode\)\{localStorage\.setItem\('central-theme'/)
   assert.match(app, /desktopMode \? 'dark' : theme/)
-  assert.match(app, /Liquid Glass · Desktop/)
+  assert.match(app, /Noir · Preto #000/)
 })
 
 test('native Electron never inherits the white PWA caption and intro', () => {

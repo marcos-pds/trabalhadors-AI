@@ -12,6 +12,7 @@ on:
       - feat/desktop-chat-prompt-first
       - fix/desktop-chat-glass-preview
       - fix/desktop-borderless-clean-chat
+      - feat/desktop-true-black-noir
     paths:
       - 'desktop/**'
       - 'frontend/**'
