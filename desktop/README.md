@@ -1,3 +1,17 @@
+## Componentes opcionais durante a instalação (Setup 0.3.0)
+
+O instalador apresenta, **antes de copiar os arquivos**, uma tela limpa para escolher VoiceStudio + OmniVoice, Ollama, Qwen 2.5 Coder 3B, Llama 3.2 3B e Docker Desktop. Nenhuma opção vem marcada por padrão.
+
+- **VoiceStudio:** identifica instalação existente e, se necessário, baixa o instalador Windows do release oficial `debpalash/VoiceStudio`, validando `SHA256SUMS.txt`. O catálogo de modelos exige aceite das licenças OmniVoice e Higgs tokenizer. O instalador **não aceita licenças silenciosamente**: se ainda não estiverem aprovadas ou o runtime não tiver sido configurado, a conclusão do modelo ficará pendente no VoiceStudio. Em uma instalação existente com OmniVoice funcional, os arquivos são reutilizados.
+- **Ollama:** instala pelo distribuidor oficial, se ainda não houver Ollama. Se você marcar apenas um modelo, o instalador também providencia Ollama. As opções de modelos são `qwen2.5-coder:3b` e `llama3.2:3b`, instaladas por `ollama pull`; modelos já registrados não são baixados novamente.
+- **Docker:** utiliza o instalador oficial Windows no modo `--user`. A configuração de WSL2, termos de uso e eventual reinicialização continuam sob controle do Windows/Docker. Não tenta habilitar automaticamente recursos privilegiados do sistema.
+
+As fontes de downloads são HTTPS de `github.com`, `ollama.com` e `desktop.docker.com`. O progresso de transferência usa **bytes efetivamente recebidos**; a instalação de modelos de terceiros pode exibir apenas andamento por etapa quando o comando não publica porcentagem. O registro fica em `%LOCALAPPDATA%\Central\setup-components.log`.
+
+**Importante:** componentes opcionais não devem bloquear a instalação do aplicativo principal. Se algum deles falhar, a Central continuará funcionando e o instalador exibirá uma pendência. Para um teste controlado, compile no Windows com `desktop/build_windows.ps1` e confira a tela do Setup e a primeira abertura do programa. O instalador 0.3.0 ainda exige avaliação manual de instalações limpas e do fluxo de licenças para confirmar cada componente.
+
+---
+
 ## Instalador EXE (versão recomendada)
 
 O instalador Windows é gerado pela pipeline [Build Central Windows installer](../.github/workflows/build-desktop-installer.yml). A aparência é propositalmente **clean**: fundo claro, marca neutra, tipografia simples e **progresso nativo real do Windows**, sem animações que simulem downloads ou mensagens de "IA instalando".
