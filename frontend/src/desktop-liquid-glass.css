@@ -712,3 +712,480 @@ html.central-desktop-shell .central-desktop-mode .desktop-quick-worker select {
   background: transparent !important;
   color: #f1f6ff !important;
 }
+
+/* Desktop Chat 0.3.5. A legible, elevated native composer inspired by
+   prompt-input patterns: one dark glass pill, never nested rectangular inputs.
+   The original web chat is not styled by these selectors. */
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only {
+  isolation: isolate;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-composer {
+  background:
+    linear-gradient(135deg, rgba(82,100,134,.86) 0%,rgba(36,50,75,.94) 38%,rgba(16,25,42,.97) 100%) !important;
+  border: 1px solid rgba(227,237,255,.61) !important;
+  box-shadow:
+    0 18px 45px rgba(1,6,19,.58),
+    0 1px 0 rgba(235,242,255,.25),
+    inset 0 1.5px 0 rgba(255,255,255,.34),
+    inset 0 -1px 0 rgba(255,255,255,.10) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(155%);
+  backdrop-filter: blur(30px) saturate(155%);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass {
+  opacity: .11 !important;
+  z-index: 0;
+  border-radius: inherit;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row {
+  background: transparent !important;
+  z-index: 2;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row > textarea.desktop-quick-field {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  color: #fcfdff !important;
+  -webkit-text-fill-color: #fcfdff !important;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  border-radius: 0 !important;
+  resize: none !important;
+  opacity: 1 !important;
+  min-height: 34px !important;
+  height: 36px !important;
+  line-height: 22px !important;
+  padding: 7px 5px !important;
+  font-size: 14px !important;
+  font-weight: 500;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row > textarea.desktop-quick-field::placeholder {
+  color: #d9e4f5 !important;
+  -webkit-text-fill-color: #d9e4f5 !important;
+  opacity: .92 !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row > textarea.desktop-quick-field:focus-visible {
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label select {
+  color: #f1f6ff !important;
+  -webkit-text-fill-color: #f1f6ff !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-attach,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-microphone {
+  color: #edf3ff !important;
+  opacity: .95;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-send:not(:disabled) {
+  background: linear-gradient(145deg,#e8f1ff,#b0c9f1) !important;
+  color: #132944 !important;
+  box-shadow: inset 0 1px 0 #fff, 0 4px 12px rgba(1,8,22,.30) !important;
+}
+
+/* Reuse one compact composer inside the full conversation, never mount a
+   second one or let the floating geometry invade the transcript. */
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only.is-embedded {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  transform: none !important;
+  animation: none !important;
+  width: 100% !important;
+  max-width: 760px;
+  margin: 0 auto;
+  z-index: 3;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only.is-embedded .desktop-quick-composer {
+  height: 64px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only.is-embedded .desktop-quick-files,
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only.is-embedded .desktop-quick-worker {
+  position: relative;
+  z-index: 4;
+}
+
+/* A dedicated conversation screen replaces the old web layout in Electron. */
+html.central-desktop-shell .central-desktop-mode .desktop-chat-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation {
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr) auto;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 0% 0%,rgba(125,159,205,.13),transparent 48%),
+    linear-gradient(155deg, rgba(28,40,60,.55),rgba(12,20,36,.72)) !important;
+  color: #f2f6ff !important;
+  border-radius: 22px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-header {
+  min-height: 67px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(230,240,255,.18);
+  background: rgba(255,255,255,.055);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-heading strong {
+  font-size: 13px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-heading > span {
+  font-size: 11px;
+  color: #c1d0e6;
+  line-height: 1.3;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-presence {
+  height: 8px;
+  width: 8px;
+  background: #8edfc7;
+  border-radius: 99px;
+  box-shadow: 0 0 8px rgba(142,223,199,.5);
+  flex: 0 0 8px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-presence.is-running {
+  background: #b8cfff;
+  box-shadow: 0 0 10px #9dc4fc;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions {
+  display: flex;
+  gap: 7px;
+  flex-shrink: 0;
+  align-items: center;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 7px 10px;
+  color: #e4edfd;
+  background: rgba(219,232,255,.10);
+  border: 1px solid rgba(235,243,255,.21);
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions button:hover {
+  background: rgba(218,234,255,.21);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions button:focus-visible {
+  outline: 2px solid #e6dcff;
+  outline-offset: 2px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-actions button.is-danger {
+  border-color: rgba(251,183,191,.34);
+  color: #ffd0d8;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-scroll {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 28px 14px;
+  scroll-behavior: smooth;
+  scrollbar-color: rgba(174,199,236,.34) transparent;
+  scrollbar-width: thin;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-stream {
+  width: min(100%, 735px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 21px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-empty {
+  margin: clamp(24px,13vh,100px) auto;
+  text-align: center;
+  display: grid;
+  gap: 6px;
+  color: #dce9fa;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-empty-mark {
+  font-size: 18px;
+  opacity: .7;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-empty p {
+  color: #b6c7df;
+  font-size: 12px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message.is-user {
+  justify-content: flex-end;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message-avatar {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  width: 30px;
+  border-radius: 12px;
+  flex: 0 0 30px;
+  border: 1px solid rgba(250,244,255,.28);
+  color: #edccff;
+  background: rgba(190,169,240,.11);
+  font-size: 15px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message-main {
+  min-width: 0;
+  max-width: min(83%, 680px);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message-byline {
+  display: block;
+  margin: 0 0 5px 6px;
+  color: #d7e3f3;
+  font-size: 11px;
+  font-weight: 650;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message.is-user .desktop-message-byline {
+  text-align: right;
+  margin-right: 8px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message-bubble {
+  padding: 13px 17px;
+  border-radius: 18px;
+  background:
+    linear-gradient(150deg, rgba(154,183,223,.13),rgba(38,53,77,.63));
+  border: 1px solid rgba(227,239,255,.24);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10);
+  font-size: 13px;
+  line-height: 1.72;
+  color: #f2f7ff;
+  overflow-wrap: anywhere;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message.is-user .desktop-message-bubble {
+  background:
+    linear-gradient(125deg,rgba(179,173,238,.33),rgba(96,116,165,.36));
+  border-color: rgba(221,212,255,.38);
+  border-radius: 18px 18px 6px 18px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-message-bubble p {
+  color: inherit;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-event,
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-usage {
+  align-self: center;
+  padding: 7px 12px;
+  max-width: 92%;
+  border: 1px solid rgba(234,242,255,.14);
+  border-radius: 11px;
+  background: rgba(176,194,232,.075);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #cbdaf0;
+  overflow-wrap: anywhere;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-working {
+  color: #c3d6f1;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-working-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9cbcff;
+  box-shadow: 0 0 9px #9cbcff;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-steps,
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-workspace-approval {
+  padding: 13px 15px;
+  border-radius: 16px;
+  border: 1px solid rgba(232,242,255,.25);
+  background: rgba(44,58,82,.62);
+  font-size: 12px;
+  color: #f0f5ff;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-steps summary {
+  cursor: pointer;
+  color: #e5e7ff;
+  font-weight: 600;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-steps-body {
+  margin-top: 12px;
+  display: grid;
+  gap: 9px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-step {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 7px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(233,243,255,.1);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-step small {
+  color: #b4c8e1;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-approval {
+  flex-basis: 100%;
+  padding: 8px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-approval button,
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-workspace-approval button {
+  padding: 7px 10px;
+  margin: 9px 8px 0 0;
+  border: 1px solid rgba(235,243,255,.29);
+  border-radius: 10px;
+  background: rgba(255,255,255,.13);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-composer {
+  border-top: 1px solid rgba(227,238,255,.14);
+  background: linear-gradient(180deg,rgba(17,27,43,.55),rgba(14,22,38,.85));
+  padding: 14px 24px 12px;
+  min-width: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-conversation-hint {
+  margin: 10px auto 0;
+  text-align: center;
+  color: #b6c6de;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+/* Only on request. Preview is a side sheet inside the main workspace, not a
+   flex column or fullscreen iframe that breaks transcript dimensions. */
+html.central-desktop-shell .central-desktop-mode .desktop-preview-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2,6,15,.17);
+  z-index: 36;
+  border: 0;
+  cursor: default;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet {
+  position: absolute;
+  z-index: 37;
+  top: 11px;
+  right: 11px;
+  bottom: 11px;
+  width: clamp(350px, 51%, 530px);
+  min-width: 0;
+  max-width: calc(100% - 22px);
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(140deg,rgba(77,93,126,.38),rgba(18,28,47,.97) 45%) !important;
+  border: 1px solid rgba(238,245,255,.40);
+  border-radius: 22px;
+  box-shadow: -12px 0 48px rgba(0,4,14,.36), inset 0 1px 0 rgba(255,255,255,.27);
+  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  backdrop-filter: blur(30px) saturate(160%);
+  overflow: hidden;
+  animation: desktop-preview-enter .28s cubic-bezier(.16,1,.3,1) both;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 15px;
+  background: rgba(180,202,239,.07);
+  border-bottom: 1px solid rgba(232,242,255,.19);
+  color: #f7faff;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet-header button {
+  min-width: 31px;
+  min-height: 30px;
+  color: #e4eefc;
+  border-radius: 9px;
+  border: 1px solid rgba(239,246,255,.24);
+  background: rgba(221,235,255,.10);
+  cursor: pointer;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet-body > aside {
+  flex: 1 1 auto;
+  width: 100% !important;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet iframe {
+  max-width: 100%;
+  width: 100%;
+  min-height: 250px;
+}
+@keyframes desktop-preview-enter {
+  from { opacity:0; transform:translateX(16px) scale(.98); }
+  to { opacity:1; transform:translateX(0) scale(1); }
+}
+@media (max-width: 680px) {
+  html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet {
+    width: calc(100% - 22px);
+  }
+  html.central-desktop-shell .central-desktop-mode .desktop-conversation-header {
+    padding: 10px 12px;
+  }
+  html.central-desktop-shell .central-desktop-mode .desktop-conversation-scroll {
+    padding: 16px 13px 11px;
+  }
+  html.central-desktop-shell .central-desktop-mode .desktop-conversation-composer {
+    padding: 10px 12px;
+  }
+  html.central-desktop-shell .central-desktop-mode .desktop-conversation-action-text {display:none;}
+}
+@media (prefers-reduced-motion: reduce) {
+  html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet {
+    animation: none !important;
+  }
+  html.central-desktop-shell .central-desktop-mode .desktop-conversation-scroll {
+    scroll-behavior: auto !important;
+  }
+}
