@@ -515,3 +515,175 @@ html.central-desktop-shell .central-desktop-mode .desktop-update-backup {
     background:Canvas;color:CanvasText;border:2px solid CanvasText;
   }
 }
+
+/* Chat redesign: only in the native Electron window. The compact composer is
+   an independent floating Liquid Glass surface placed directly under the dock.
+   No oversized empty chat scene or orbit is mounted before the first send. */
+html.central-desktop-shell .central-desktop-mode .desktop-prompt-only {
+  position: absolute;
+  z-index: 66;
+  top: 81px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 26px));
+  pointer-events: auto;
+  animation: desktop-composer-enter .28s cubic-bezier(.16,1,.3,1) both;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-composer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 60px;
+  overflow: hidden;
+  border: 1px solid rgba(236,245,255,.44);
+  border-radius: 31px;
+  background:
+    linear-gradient(130deg,rgba(247,251,255,.20) 0%,rgba(97,119,162,.20) 30%,rgba(27,37,60,.73) 100%);
+  box-shadow:
+    0 10px 32px rgba(5,10,25,.35),
+    inset 0 1px 0 rgba(255,255,255,.31),
+    inset 0 -2px 10px rgba(167,188,235,.11);
+  backdrop-filter: blur(27px) saturate(160%);
+  -webkit-backdrop-filter: blur(27px) saturate(160%);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-refraction,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none !important;
+  overflow: hidden;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-rdev-glass {
+  opacity: .25;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  margin: 0;
+}
+html.central-desktop-shell .central-desktop-mode :is(.desktop-quick-attach,.desktop-quick-microphone,.desktop-quick-send) {
+  flex: 0 0 auto;
+  width: 39px;
+  height: 39px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #f2f6ff;
+  background: transparent;
+  cursor: pointer;
+}
+html.central-desktop-shell .central-desktop-mode :is(.desktop-quick-attach,.desktop-quick-microphone,.desktop-quick-send) svg {
+  width: 18px;
+  height: 18px;
+}
+html.central-desktop-shell .central-desktop-mode :is(.desktop-quick-attach,.desktop-quick-microphone):hover,
+html.central-desktop-shell .central-desktop-mode .desktop-quick-microphone.is-listening {
+  background: rgba(231,242,255,.15);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-microphone:disabled {
+  opacity: .34;
+  cursor: not-allowed;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-send {
+  background: linear-gradient(140deg,#cadcff,#a1bbeb);
+  color: #122343;
+  box-shadow: inset 0 1px rgba(255,255,255,.66),0 4px 12px rgba(3,16,40,.25);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-send:disabled {
+  background: rgba(181,200,231,.23);
+  color: rgba(237,244,255,.65);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-field {
+  min-height: 38px;
+  max-height: 40px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 9px 4px;
+  margin: 0;
+  resize: none;
+  overflow-y: auto;
+  border: 0 !important;
+  outline: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: #f3f6ff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  font: 400 13px/20px system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-field:focus-visible {
+  outline: none !important;
+  border: 0 !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-field::placeholder {
+  color: rgba(220,231,246,.73) !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label {
+  flex: 0 0 auto;
+  position: relative;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: auto;
+  min-width: 64px;
+  max-width: 102px;
+  padding: 8px 18px 8px 7px;
+  font-size: 11px;
+  color: #e8eef8 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 11px;
+  box-shadow: none !important;
+  cursor: pointer;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label::after {
+  content: '⌄';
+  position: absolute;
+  right: 6px;
+  top: 5px;
+  color: #b7c6db;
+  font-size: 15px;
+  pointer-events: none;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label select option {
+  background: #263148;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-files {
+  margin: 7px auto 0;
+  width: max-content;
+  max-width: 90%;
+  padding: 5px 12px;
+  border-radius: 15px;
+  border: 1px solid rgba(231,240,255,.2);
+  background: rgba(16,27,45,.75);
+  color: #e5eefc;
+  font-size: 11px;
+  backdrop-filter: blur(14px);
+}
+@keyframes desktop-composer-enter {
+  from { opacity: 0; transform: translate(-50%,-11px) scale(.974); }
+  to { opacity: 1; transform: translate(-50%,0) scale(1); }
+}
+@media (max-width: 540px) {
+  html.central-desktop-shell .central-desktop-mode .desktop-prompt-only {width: calc(100vw - 16px);}
+  html.central-desktop-shell .central-desktop-mode .desktop-quick-input-row {gap:2px;padding-inline:5px;}
+  html.central-desktop-shell .central-desktop-mode .desktop-quick-field {font-size:12px;}
+  html.central-desktop-shell .central-desktop-mode .desktop-quick-mode-label select {min-width:57px;}
+}
+@media (prefers-reduced-motion: reduce) {
+  html.central-desktop-shell .central-desktop-mode .desktop-prompt-only { animation:none !important; }
+}
