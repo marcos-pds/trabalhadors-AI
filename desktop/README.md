@@ -1,3 +1,26 @@
+## Correção visual do chat e prévia — Desktop 0.3.5
+
+Correções motivadas por duas capturas da Central no Windows:
+
+- **Barra de digitação pouco visível:** um único efeito `rdev/liquid-glass-react`, com superfície grafite escura de contraste definido e borda brilhante discreta. O `textarea` não desenha um segundo retângulo: não há fundo, borda ou sombra interna.
+- **Chat antigo depois do envio:** o desktop agora renderiza `DesktopConversation.jsx`, componente nativo com cabeçalho compacto, mensagens legíveis, atividades e aprovações, usando o mesmo prompt e a mesma API da Central. O `ChatPage` web continua original e é renderizado exclusivamente no navegador.
+- **Prévia cobrindo/quebrando a tela:** encerramos a abertura automática ao iniciar tarefa, retomá-la ou selecionar histórico. O botão **Prévia** é uma ação explícita. O painel aparece como um drawer à direita, com largura limitada (até 530 px), sem bloqueio de interação com o chat e com botão fechar; a conversa não é espremida e o iframe fica restrito ao drawer. O atalho `/previa` também conta como abertura solicitada.
+- **Envio de arquivo:** o chat compacto usa o mesmo helper de API autenticada do chat web, evitando requisições sem CSRF.
+- **Preservação:** Slime rosa, transição avatar → campo → conversa, tema dos outros recursos e versão web/PWA não foram alterados.
+
+Referências consideradas: [shadcn AI Elements Prompt Input](https://ui.shadcn.com/docs/ai-elements/aria/prompt-input) para o layout do campo compacto, [Radix Dialog](https://www.radix-ui.com/primitives/docs/components/dialog) para contenção de painéis e [rdev/liquid-glass-react](https://github.com/rdev/liquid-glass-react) para a refração real.
+
+### Validação
+
+- `node --test frontend/src/desktopChatLayout.test.mjs frontend/src/desktopChatGlass.test.mjs`
+- `npm ci && npm run build`
+- `desktop/build_windows.ps1`, com smoke test de backend + validação do manifesto do atualizador
+- Inspecionar visualmente no Windows: transparência do campo, mensagens no novo painel, alternar prévia sem alterar dimensões do chat, fechamento com Escape e exibição de anexos.
+
+**Estado:** branch de revisão, ainda não publicada como Release e não distribuída via autoatualização. Homologar as duas capturas em uma máquina Windows antes do merge.
+
+---
+
 ## Novo chat compacto — Desktop 0.3.4
 
 **Este ajuste não altera a experiência web.** A reformulação do chat desktop está isolada no Electron:

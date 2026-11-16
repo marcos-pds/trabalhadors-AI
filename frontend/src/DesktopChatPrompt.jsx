@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { LiquidGlassUnderlay } from './LiquidGlassUI.jsx'
 import DesktopGlassSurface from './DesktopGlassSurface.jsx'
 
 // Compact desktop-only composer. Reuses the same prompt, mode, attachments,
 // and send actions as the full ChatPage; it does not create a second chat.
 export default function DesktopChatPrompt({
   prompt, setPrompt, files, setFiles, mode, setMode, selectedAgent, setSelectedAgent, agents = [],
-  onSend, onCommand, onError, onClose,
+  onSend, onCommand, onError, onClose, onUpload, embedded = false,
 }) {
   const fieldRef = useRef(null)
   const uploadRef = useRef(null)
@@ -29,15 +28,9 @@ export default function DesktopChatPrompt({
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    const form = new FormData()
-    form.append('file', file)
     try {
-      const response = await fetch('/api/uploads/text', {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'x-central-request': '1' }, body: form,
-      })
-      if (!response.ok) throw new Error('Não foi possível anexar o arquivo.')
-      const uploaded = await response.json()
+      if (typeof onUpload !== 'function') throw new Error('Anexos indisponíveis nesta janela.')
+      const uploaded = await onUpload(file)
       setFiles(old => [...old, uploaded])
     } catch (error) {
       onError(error.message || 'Falha ao anexar arquivo.')
@@ -89,11 +82,9 @@ export default function DesktopChatPrompt({
     catch { onError('Não foi possível iniciar o microfone.') }
   }
 
-  return <section className="desktop-prompt-only" aria-label="Nova mensagem para a Central">
+  return <section className={'desktop-prompt-only' + (embedded ? ' is-embedded' : '')} aria-label="Nova mensagem para a Central">
     <div className="desktop-quick-composer">
       <DesktopGlassSurface className="desktop-quick-rdev-glass"/>
-      <LiquidGlassUnderlay className="desktop-quick-refraction" radius={30}
-        strength={0.09} depth={10} edgeHighlight={0.38} glow={0.16}/>
       <form className="desktop-quick-input-row" onSubmit={event => { event.preventDefault(); submit() }}>
         <input ref={uploadRef} type="file" className="hidden"
           accept=".txt,.md,.csv,.json,.py,.ts,.tsx,.jsx,.js,.html,.css,.sql,.yaml,.yml,.xml"
@@ -104,10 +95,10 @@ export default function DesktopChatPrompt({
         </button>
         <textarea ref={fieldRef} value={prompt} rows={1} disabled={sending}
           className="desktop-quick-field" aria-label="Digite seu pedido"
-          placeholder={sending ? 'Enviando…' : 'Pergunte à Central'}
+          placeholder={sending ? 'Enviando…' : embedded ? 'Escreva sua próxima mensagem…' : 'O que deseja fazer?'}
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Escape') { onClose?.(); return }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose?.(); return }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submit()
