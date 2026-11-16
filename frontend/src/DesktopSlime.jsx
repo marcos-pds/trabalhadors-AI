@@ -88,7 +88,10 @@ export default function DesktopSlime({ active = false, running = false, typing =
       const bounds = button.getBoundingClientRect()
       mouse.x = THREE.MathUtils.clamp(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -1, 1)
       mouse.y = THREE.MathUtils.clamp(1 - ((event.clientY - bounds.top) / bounds.height) * 2, -1, 1)
-      if (!pointer.down) return
+      if (!pointer.down) {
+        slime.idleTime = 0
+        return
+      }
       const dx = event.clientX - pointer.x
       const dy = event.clientY - pointer.y
       pointer.moved += Math.hypot(dx, dy)
