@@ -639,7 +639,7 @@ export default function App() {
     else { setPage('chat'); setDesktopExpanded(true); setMenuOpen(false) }
   }
   const navigateDesktop = next => { if (next === 'chat') return; navigate(next); setDesktopExpanded(true) }
-  const openDesktopMenu = () => { setDesktopExpanded(true); setMenuOpen(true) }
+  const openDesktopMenu = () => { if (page === 'chat') setPage('dashboard'); setDesktopExpanded(true); setMenuOpen(true) }
   const closeDesktopPanel = () => { setDesktopExpanded(false); setMenuOpen(false) }
   function newChat(){sourceRef.current?.close();setInspectedRun(null);setExecutionPanelOpen(false);setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
   async function openConversation(id){
@@ -761,7 +761,11 @@ export default function App() {
       <button aria-hidden="true" tabIndex={-1} onClick={() => setMenuOpen(false)} className="fixed inset-0 z-40 cursor-default bg-black/60 backdrop-blur-[2px]"/>
       <div className="menu-drawer central-drawer fixed inset-y-0 left-0 z-50 w-[286px] max-w-[88vw] shadow-2xl shadow-black/50">
         <button type="button" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-lg text-xl text-muted hover:bg-white/10">×</button>
-        <Sidebar page={page} data={{...data,currentConvo}} me={user} onNavigate={navigate} onNewChat={newChat} onSwitch={openConversation} onLogout={() => logout().catch(e => notify(e.message))}/>
+        <Sidebar page={page} data={{...data,currentConvo}} me={user}
+          onNavigate={desktopMode ? next => { if (next === 'chat') closeDesktopPanel(); else navigateDesktop(next) } : navigate}
+          onNewChat={desktopMode ? () => { newChat(); closeDesktopPanel() } : newChat}
+          onSwitch={desktopMode ? id => { openConversation(id).finally(closeDesktopPanel) } : openConversation}
+          onLogout={() => logout().catch(e => notify(e.message))}/>
       </div>
     </>}
     <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -799,9 +803,9 @@ export default function App() {
         {(page === 'dashboard' || page === 'monitoring') && <Dashboard data={data} stats={stats} page={page} navigate={navigate} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'providers' && <Providers onConnected={loadAll} data={data} onEdit={(item,preset) => setModal({kind:'provider',item,preset})} onDelete={removeProvider} onTest={testProvider} onHistory={provider => setModal({kind:'health',item:provider})}/>}
         {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})} onRestored={loadAll}/>}
-        {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id)}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
-        {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={useWorkflow}/>}
-        {page === 'history' && <History data={data} onOpen={openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
+        {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id);if(desktopMode)closeDesktopPanel()}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
+        {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={workflow => {useWorkflow(workflow);if(desktopMode)closeDesktopPanel()}}/>}
+        {page === 'history' && <History data={data} onOpen={desktopMode ? run => openRun(run).finally(closeDesktopPanel) : openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
         {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
         {page === 'git' && <GitConnectPage api={api}/>}
