@@ -131,7 +131,26 @@ body:has(.central-desktop-mode),
   pointer-events:none;
 }
 .central-desktop-mode .central-main > section { min-height:0; }
-.central-desktop-mode .central-chat-toolbar { display: none; }
+/* Compact chat actions remain accessible at the TOP of the opened panel:
+   preview, memory, worker selection, and command palette retain their behavior. */
+.central-desktop-mode .central-chat-toolbar {
+  display:flex;
+  min-height: 38px;
+  padding: 3px 10px;
+  background: transparent;
+  border-bottom-color: rgba(255,255,255,.09);
+}
+.central-desktop-mode .central-chat-toolbar > div:first-child { display:none; }
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 5px;
+  border-radius: 9px;
+}
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action > span,
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action > kbd { display:none; }
+.central-desktop-mode .central-chat-toolbar .liquid-toolbar-action svg { width:15px;height:15px; }
+
 .central-desktop-mode .reference-bottom-dock {
   border-top: 1px solid rgba(255,255,255,.11);
   background: rgba(10,15,27,.33);
