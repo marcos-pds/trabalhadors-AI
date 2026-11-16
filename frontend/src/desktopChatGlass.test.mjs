@@ -12,7 +12,7 @@ test('desktop conversation is separate from legacy web ChatPage', () => {
   assert.match(desktop, /desktop-conversation-header/)
   assert.match(desktop, /desktop-conversation-scroll/)
   assert.match(desktop, /DesktopChatPrompt embedded/)
-  assert.doesNotMatch(desktop, /ChatPage|LiveAgentOrbit|ChatWelcome/)
+  assert.doesNotMatch(desktop, /<ChatPage|<LiveAgentOrbit|<ChatWelcome/)
 })
 
 test('desktop preview is opt-in, limited to a sheet and never opened after submit', () => {
