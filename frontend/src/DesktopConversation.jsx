@@ -17,6 +17,17 @@ export default function DesktopConversation({
     const viewport = transcriptRef.current
     if (viewport && followRef.current) viewport.scrollTop = viewport.scrollHeight
   }, [messages, steps, running])
+  useEffect(() => {
+    if (!previewOpen) return undefined
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onTogglePreview()
+      }
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [previewOpen, onTogglePreview])
   const pending = steps.filter(step => step.status === 'awaiting_approval')
   return <section className="desktop-conversation" aria-label="Conversa da Central">
     <header className="desktop-conversation-header">
@@ -106,7 +117,7 @@ export default function DesktopConversation({
         files={files} setFiles={setFiles} mode={mode} setMode={setMode}
         agents={agents} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent}
         onSend={onSend} onCommand={onCommand} onError={onError}
-        onUpload={onUpload} onClose={onCollapse}/>
+        onUpload={onUpload} onClose={previewOpen ? onTogglePreview : onCollapse}/>
       <p className="desktop-conversation-hint">Enter para enviar · Shift + Enter para quebra de linha</p>
     </div>
   </section>
