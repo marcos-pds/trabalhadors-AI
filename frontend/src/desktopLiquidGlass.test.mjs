@@ -31,6 +31,13 @@ test('the actual rdev refraction is behind the workspace, never on pink avatar',
   assert.match(slime, /createOriginalPinkSlime/)
 })
 
+test('desktop settings cannot overwrite the web appearance preference', () => {
+  const app = file('./App.jsx')
+  assert.match(app, /if\(!desktopMode\)\{localStorage\.setItem\('central-theme'/)
+  assert.match(app, /desktopMode \? 'dark' : theme/)
+  assert.match(app, /Liquid Glass · Desktop/)
+})
+
 test('native Electron never inherits the white PWA caption and intro', () => {
   const frame = file('./DesktopFrame.jsx')
   const intro = file('./StartupIntro.jsx')
