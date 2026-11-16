@@ -1,3 +1,31 @@
+## Correções do avatar e da barra — Desktop 0.3.1
+
+Esta atualização **não altera a versão web**. A barra branca exibida atrás do dock foi tratada em duas etapas: o preload Electron agora cria a superfície transparente antes do React ser exibido, e o CSS desktop impede que a cor clara herdada da web apareça no fundo ou no cabeçalho.
+
+O Slime do desktop deixou de utilizar a aproximação preta. Seu desenho 3D é uma adaptação direta do arquivo de referência fornecido pelo usuário, `avatares_3d_interativos 3.html`, incluindo:
+
+- **Pink Slime original:** cúpula `#ffa6c1`, corpo `#f2577b`, base `#be1e45` e olhos texturizados
+- **96×96 segmentos:** mesma malha de gelatina de alta densidade e física de squash/stretch
+- **Superamostragem:** render interno de pelo menos 192×192 px mesmo no avatar compacto de aproximadamente 52 px
+- **Reações reais:** respiração, piscadas, bocejos, olhos acompanhando ponteiro, clique com pulo feliz, arrasto elástico e expressão surpresa
+- **Estados da Central:** digitação e execução fazem o Slime prestar atenção; sucesso após uma execução provoca uma reação alegre; falhas exibem expressão de surpresa
+- **Chat:** abre/fecha apenas no clique no Slime, sem abrir quando o avatar é arrastado
+
+O avatar continua sem fundo próprio ou vidro e não requer novos arquivos de textura externos. A interface Liquid Glass escura aplica-se exclusivamente ao dock e aos painéis.
+
+### Verificar no Windows
+
+1. Instale o `Central-Setup-0.3.1-x64.exe` da build associada a esta branch.
+2. Com o chat recolhido, confirme que não há barra branca por trás do dock.
+3. Observe o Slime piscando, respirando e bocejando. Mova o mouse sobre ele para verificar os olhos.
+4. Clique no Slime: ele deve pular e abrir a conversa. Clique novamente para recolher.
+5. Arraste o Slime: ele deve balançar como gelatina **sem abrir o chat**.
+6. Abra a Central no navegador comum e verifique que o layout web continua igual.
+
+Verificações automáticas: `npm test` inclui teste de cores, malha e reações, e `npm run build` compila o frontend. A inspeção visual do Windows continua obrigatória antes de liberar um release estável.
+
+---
+
 ## Componentes opcionais durante a instalação (Setup 0.3.0)
 
 O instalador apresenta, **antes de copiar os arquivos**, uma tela limpa para escolher VoiceStudio + OmniVoice, Ollama, Qwen 2.5 Coder 3B, Llama 3.2 3B e Docker Desktop. Nenhuma opção vem marcada por padrão.

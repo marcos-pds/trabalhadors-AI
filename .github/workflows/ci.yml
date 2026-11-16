@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "feat/**"
+      - "fix/**"
   pull_request:
 
 permissions:
@@ -43,6 +44,8 @@ jobs:
           node --check desktop/preload.cjs
       - name: Build React frontend
         run: npm run build
+      - name: Verify original Pink Slime model and reactions
+        run: node --test frontend/src/originalPinkSlime.test.mjs
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash
