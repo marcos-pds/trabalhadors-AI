@@ -88,7 +88,8 @@ jobs:
           $metadata = 'desktop/release/latest.yml'
           if (-not (Test-Path $metadata)) { throw 'latest.yml is required for GitHub auto updates' }
           $text = Get-Content $metadata -Raw
-          if ($text -notmatch 'sha512:' -or $text -notmatch '0\.3\.3') {
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if ($text -notmatch 'sha512:' -or $text -notmatch [regex]::Escape($version)) {
             throw 'latest.yml must describe the exact signed update and SHA512 digest'
           }
           Write-Host 'GitHub update manifest generated correctly'
