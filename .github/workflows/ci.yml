@@ -48,6 +48,10 @@ jobs:
         run: node --test frontend/src/originalPinkSlime.test.mjs
       - name: Verify desktop Liquid Glass isolation and surface coverage
         run: node --test frontend/src/desktopLiquidGlass.test.mjs
+      - name: Verify desktop release-update safety and offline backups
+        run: |
+          node --test desktop/tests/backup.test.cjs
+          python -m pytest tests/test_desktop_updates.py -q
       - name: Run regression and autonomy tests
         id: pytests
         shell: bash
