@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { chatCommands, matchingChatCommands } from './commandPalette.mjs'
 import { CommandIcon, LiquidGlassUnderlay, LiveAgentOrbit } from './LiquidGlassUI.jsx'
 import { AIIcons, ReferenceProviderIcon } from './ReferenceIcons.jsx'
@@ -18,7 +18,7 @@ import ConversationActivity from './ConversationActivity.jsx'
 import PauseLimitPrompt from './PauseLimitPrompt.jsx'
 import { parseResourceCommand, matchingResources, setChatResourceState } from './chatResources.mjs'
 import TokenUsagePanel from './TokenUsagePanel'
-import DesktopDock from './DesktopDock.jsx'
+const DesktopDock = lazy(() => import('./DesktopDock.jsx'))
 import './desktop.css'
 import { providerCategory } from './providerFilters'
 
@@ -752,9 +752,9 @@ export default function App() {
   if(!authReady)return <div className="grid min-h-screen place-items-center bg-ink text-sm text-muted">Abrindo sua central…</div>
   if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-card px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
   return <div className={'central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy' + (desktopMode ? ' central-desktop-mode ' + (desktopExpanded ? 'desktop-panel-open' : 'desktop-panel-collapsed') : '')} data-page={page} data-theme={desktopMode ? 'dark' : theme}>
-    {desktopMode && <DesktopDock active={desktopExpanded} page={page} running={!!currentRun}
+    {desktopMode && <Suspense fallback={null}><DesktopDock active={desktopExpanded} page={page} running={!!currentRun}
       onToggleChat={toggleDesktopChat} onNavigate={navigateDesktop}
-      onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}/>}
+      onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}/></Suspense>}
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
     {menuOpen && <>
