@@ -569,6 +569,11 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 export default function App() {
   // Electron preload is the desktop authority. Web/PWA never receives this API.
   const desktopMode = isCentralDesktop(window)
+  // Also load the desktop-only stylesheet before authentication, when the
+  // dock has not yet mounted. No Noir CSS is downloaded by the web/PWA.
+  useEffect(() => {
+    if (desktopMode) import('./desktop-noir.css')
+  }, [desktopMode])
   const [desktopExpanded, setDesktopExpanded] = useState(false)
   const [desktopComposerOpen, setDesktopComposerOpen] = useState(false)
   const desktopResizeTimer = useRef(null)
