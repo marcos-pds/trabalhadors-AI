@@ -1,0 +1,316 @@
+/* Desktop Liquid Glass theme.
+   Reference: https://github.com/rdev/liquid-glass-react
+   Only installed Electron runs with .central-desktop-shell and .central-desktop-mode.
+   Every selector is explicitly scoped; Chrome, PWA and public web UI are unchanged.
+   The 3D pink Slime is intentionally excluded from all glass treatments. */
+
+html.central-desktop-shell .central-desktop-mode {
+  --desktop-glass-face: rgba(35, 44, 62, .48);
+  --desktop-glass-raised: rgba(60, 72, 96, .36);
+  --desktop-glass-layer: rgba(17, 22, 36, .71);
+  --desktop-glass-border: rgba(231, 240, 255, .21);
+  --desktop-glass-highlight: rgba(255, 255, 255, .40);
+  --desktop-glass-shadow: 0 18px 48px rgba(1, 6, 16, .30), inset 0 1px 0 rgba(255,255,255,.19);
+  --desktop-glass-ink: #eef4ff;
+  --desktop-glass-muted: #aebdd3;
+  --desktop-glass-accent: #d7b4fa;
+  --color-ink: #090f1d;
+  --color-sidebar: rgba(17, 24, 39, .79);
+  --color-panel: rgba(26, 35, 53, .70);
+  --color-card: rgba(43, 54, 76, .48);
+  --color-line: rgba(217, 233, 252, .16);
+  --color-copy: var(--desktop-glass-ink);
+  --color-muted: var(--desktop-glass-muted);
+  --color-lilac: #d7b4fa;
+  --color-aqua: #aad6ff;
+  color: var(--desktop-glass-ink);
+  color-scheme: dark;
+}
+
+html.central-desktop-shell .central-desktop-mode[data-theme="dark"] .central-main {
+  background:
+    radial-gradient(ellipse at 18% -8%, rgba(156, 187, 244, .14), transparent 53%),
+    radial-gradient(ellipse at 82% 108%, rgba(197, 169, 248, .10), transparent 50%),
+    linear-gradient(150deg, rgba(33, 42, 63, .72), rgba(11, 18, 33, .82)) !important;
+  border: 1px solid rgba(235, 243, 255, .35) !important;
+  border-top-color: rgba(255, 255, 255, .48) !important;
+  border-radius: 26px !important;
+  box-shadow:
+    0 22px 60px rgba(0, 5, 18, .36),
+    inset 0 1px 0 rgba(255,255,255,.26),
+    inset 0 -2px 9px rgba(126,156,205,.09) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(155%);
+  backdrop-filter: blur(30px) saturate(155%);
+  isolation: isolate;
+}
+html.central-desktop-shell .central-desktop-mode .central-main > section {
+  position: relative;
+  z-index: 1;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-workspace-refraction {
+  z-index: 0;
+  opacity: .30;
+  border-radius: inherit;
+  pointer-events: none;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-workspace-refraction .liquid-underpaint {
+  background: linear-gradient(125deg, rgba(255,255,255,.22), rgba(153,186,240,.04) 47%, rgba(245,210,255,.10));
+}
+
+/* Shared glass panels and cards across dashboard, agents, workflows,
+   integrations, token reporting, history, resources and provider settings. */
+html.central-desktop-shell .central-desktop-mode
+  :is(.bg-panel, .bg-card, .bg-sidebar, .flow-activity, .flow-speech,
+      .flow-avatar, .reference-tools-menu, .liquid-command-menu,
+      .liquid-mode-menu[open], .provider-brand-icon, .reference-orbit-satellite-glass) {
+  background:
+    linear-gradient(132deg, rgba(255,255,255,.10), transparent 38%),
+    var(--desktop-glass-face) !important;
+  border-color: var(--desktop-glass-border) !important;
+  box-shadow: var(--desktop-glass-shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+html.central-desktop-shell .central-desktop-mode :is(.bg-panel\/90, .bg-panel\/80, .bg-card\/90,
+    .bg-card\/80, .bg-white\/5, .bg-white\/\[\.05\], .bg-white\/\[\.06\],
+    .bg-white\/\[\.07\], .bg-white\/10, .bg-white\/\[\.08\]) {
+  background: rgba(132,157,191,.075) !important;
+  border-color: rgba(231,240,255,.13);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.rounded-2xl, .rounded-3xl, .rounded-xl)[class*="border-white"] {
+  border-color: var(--desktop-glass-border) !important;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(section, article, aside)[class*="bg-"] {
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.flow-activity, .liquid-command-menu, .reference-tools-menu) {
+  border-radius: 22px;
+  overflow: clip;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.reference-orbit, .reference-core-icon, .flow-avatar svg) {
+  /* Do not stack extra refractive filters on illustrations. */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Chat scene, bubbles, activity and voice interactions. */
+html.central-desktop-shell .central-desktop-mode .central-chat-scene,
+html.central-desktop-shell .central-desktop-mode .reference-bottom-dock {
+  background: transparent !important;
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer {
+  background:
+    radial-gradient(ellipse at 19% -40%, rgba(255,255,255,.22), transparent 60%),
+    linear-gradient(125deg, rgba(93,114,154,.28), rgba(31,42,69,.52)) !important;
+  border: 1px solid rgba(237, 244, 255, .40) !important;
+  box-shadow: 0 13px 36px rgba(3,8,20,.25),
+    inset 0 2px 2px rgba(255,255,255,.22), inset 0 -2px 8px rgba(177,208,255,.08) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(165%);
+  backdrop-filter: blur(26px) saturate(165%);
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer:focus-within {
+  border-color: rgba(229,226,255,.72) !important;
+  box-shadow: 0 16px 41px rgba(2,8,25,.38), 0 0 0 2px rgba(183,172,245,.15),
+    inset 0 2px 2px rgba(255,255,255,.28) !important;
+  transform: translateY(-1px) !important;
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea {
+  color: var(--desktop-glass-ink) !important;
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea::placeholder {
+  color: #a7b5c9 !important;
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer .liquid-underlay {
+  opacity: .38;
+}
+html.central-desktop-shell .central-desktop-mode :is(.reference-tools, .liquid-mode-menu) summary {
+  color: var(--desktop-glass-muted);
+}
+html.central-desktop-shell .central-desktop-mode :is(.liquid-toolbar-action, .reference-tools-menu button) {
+  color: #e7eeff !important;
+  border-color: var(--desktop-glass-border) !important;
+  background: rgba(217,230,255,.09) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+html.central-desktop-shell .central-desktop-mode :is(.liquid-toolbar-action, .reference-tools-menu button):hover {
+  background: rgba(219,233,255,.18) !important;
+}
+html.central-desktop-shell .central-desktop-mode .reference-send-button {
+  background: linear-gradient(145deg,#e4d4ff,#a7bfee) !important;
+  color: #1c2943;
+  box-shadow: 0 6px 22px rgba(105,128,213,.28), inset 0 1px 2px rgba(255,255,255,.7);
+}
+
+/* All desktop menus, navigation, overlays and popovers. */
+html.central-desktop-shell .central-desktop-mode :is(.central-drawer, .menu-drawer) {
+  background:
+    linear-gradient(160deg,rgba(255,255,255,.14),transparent 40%),
+    rgba(24,32,50,.82) !important;
+  border: 1px solid rgba(233,244,255,.26) !important;
+  box-shadow: 0 22px 64px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.22);
+  -webkit-backdrop-filter: blur(32px) saturate(165%);
+  backdrop-filter: blur(32px) saturate(165%);
+}
+html.central-desktop-shell .central-desktop-mode .central-drawer aside {
+  background: transparent !important;
+  color: var(--desktop-glass-ink);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.liquid-menu-item, .central-drawer nav button) {
+  color: #d4ddec !important;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 12px;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.liquid-menu-item, .central-drawer nav button):is(:hover, :focus-visible) {
+  background: rgba(218,232,255,.12) !important;
+  border-color: rgba(237,243,255,.19);
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+/* Text inputs in every settings/editor/provider/integration screen.
+   Don't change checkboxes, radios, file pickers or status indicators. */
+html.central-desktop-shell .central-desktop-mode
+  :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+      textarea, select) {
+  background: rgba(9,17,33,.42) !important;
+  border: 1px solid rgba(215,234,255,.25) !important;
+  border-radius: 14px;
+  color: #edf3ff !important;
+  box-shadow: inset 0 1px 5px rgba(4,10,22,.14);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(input, textarea, select)::placeholder {
+  color: #aab8cc !important;
+  opacity: 1;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(input, textarea, select):focus-visible {
+  outline: 2px solid rgba(209,193,255,.70);
+  outline-offset: 2px;
+  border-color: rgba(235,215,255,.54) !important;
+}
+html.central-desktop-shell .central-desktop-mode select option {
+  background: #182236;
+  color: #eef4ff;
+}
+html.central-desktop-shell .central-desktop-mode :is(input[type="checkbox"], input[type="radio"]) {
+  accent-color: #b7a2fa;
+}
+
+/* All data grids, reports, configuration tables and timeline rows. */
+html.central-desktop-shell .central-desktop-mode table {
+  color: var(--desktop-glass-ink);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+html.central-desktop-shell .central-desktop-mode :is(thead, th) {
+  background: rgba(170,199,239,.085) !important;
+  color: #c8d6ea !important;
+}
+html.central-desktop-shell .central-desktop-mode :is(th,td) {
+  border-color: rgba(212,228,252,.13) !important;
+}
+html.central-desktop-shell .central-desktop-mode tbody tr {
+  transition: background .22s ease;
+}
+html.central-desktop-shell .central-desktop-mode tbody tr:hover {
+  background: rgba(205,220,250,.075);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(hr, .divide-y > *, .border-b, .border-t) {
+  border-color: rgba(221,233,255,.15);
+}
+
+/* Every dialog: editor, provider health, permissions, memory, activity,
+   run details, chat resource approvals, notifications. */
+html.central-desktop-shell .central-desktop-mode [role="dialog"],
+html.central-desktop-shell .central-desktop-mode [aria-modal="true"] {
+  background:
+    radial-gradient(ellipse at 17% 0%, rgba(225,233,255,.18),transparent 58%),
+    rgba(29,39,59,.78) !important;
+  color: var(--desktop-glass-ink);
+  border: 1px solid rgba(241,247,255,.34) !important;
+  border-radius: 25px;
+  box-shadow: 0 25px 75px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.28) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(175%);
+  backdrop-filter: blur(34px) saturate(175%);
+}
+html.central-desktop-shell .central-desktop-mode [role="dialog"] :is(form,section,fieldset) {
+  color: inherit;
+}
+html.central-desktop-shell .central-desktop-mode [role="status"]:not(.desktop-dock-status),
+html.central-desktop-shell .central-desktop-mode [role="alert"]:not([class*="text-rose"]) {
+  color: #edf4ff;
+}
+html.central-desktop-shell .central-desktop-mode [role="status"][class*="fixed"] {
+  background: rgba(40,53,76,.85) !important;
+  border: 1px solid rgba(239,245,255,.36) !important;
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(3,8,19,.32), inset 0 1px 0 rgba(255,255,255,.22);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+/* Preserve accessible danger/success states. */
+html.central-desktop-shell .central-desktop-mode :is(.text-rose-200,.text-rose-300) {color:#fda4af;}
+html.central-desktop-shell .central-desktop-mode :is(.text-emerald-200,.text-emerald-300) {color:#6ee7b7;}
+html.central-desktop-shell .central-desktop-mode :is(.text-amber-200,.text-amber-300) {color:#fcd34d;}
+
+/* Buttons and small actionable tools gain light-following edges.
+   Keep native semantic red/green buttons and Slime mesh untouched. */
+html.central-desktop-shell .central-desktop-mode
+  button:not(.desktop-slime-button):not(.reference-send-button):not(.desktop-dock-icon)
+  :is(.living-command-icon, svg) {
+  flex-shrink: 0;
+}
+html.central-desktop-shell .central-desktop-mode
+  button:not(.desktop-slime-button):not(.desktop-dock-icon):not(:disabled):hover {
+  filter: brightness(1.10);
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.liquid-menu-item,.liquid-toolbar-action,button.rounded-xl,button.rounded-2xl) {
+  transition: border-color .22s ease, background .22s ease, box-shadow .24s ease,transform .24s ease;
+}
+html.central-desktop-shell .central-desktop-mode
+  :is(.liquid-menu-item,.liquid-toolbar-action,button.rounded-xl,button.rounded-2xl):focus-visible {
+  outline: 2px solid rgba(208,194,255,.83);
+  outline-offset: 2px;
+}
+
+/* Forms and main chat stay readable when system-level high contrast is active. */
+@media (prefers-reduced-motion: reduce) {
+  html.central-desktop-shell .central-desktop-mode * {
+    scroll-behavior: auto !important;
+  }
+  html.central-desktop-shell .central-desktop-mode :is(button,input,textarea,select) {
+    transition-duration: .01ms !important;
+  }
+}
+@media (forced-colors: active) {
+  html.central-desktop-shell .central-desktop-mode :is(.bg-card,.bg-panel,[role="dialog"],input,textarea,select) {
+    background: Canvas !important; color: CanvasText !important;
+    border: 1px solid CanvasText !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+}
+/* Important: the original animated pink Slime has NO filter, backdrop blur,
+   liquid refraction, coloured frame or simulated glass texture. */
+html.central-desktop-shell .central-desktop-mode
+  :is(.desktop-slime-button,.desktop-slime-canvas,.desktop-slime-canvas canvas) {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
