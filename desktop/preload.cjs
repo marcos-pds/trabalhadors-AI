@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('centralDesktop', Object.freeze({
   setExpanded(open) {
     ipcRenderer.send('central-desktop:set-expanded', open === true)
   },
+  setLayout(layout) {
+    if (['dock', 'compose', 'full'].includes(layout)) {
+      ipcRenderer.send('central-desktop:set-layout', layout)
+    }
+  },
   // Fixed capability list. No URLs, paths, release assets or arbitrary IPC can
   // be passed from the web-rendered content to the privileged Electron process.
   getUpdateState() {
