@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/desktop-clean-exe-installer
+      - feat/installer-optional-models
     paths:
       - 'desktop/**'
       - 'frontend/**'
@@ -29,6 +30,19 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+
+      - name: Validate optional component PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $syntaxErrors = $null
+          $file = (Resolve-Path 'desktop/build/optional-components.ps1').Path
+          [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$syntaxErrors) | Out-Null
+          if ($syntaxErrors.Count -gt 0) {
+            $syntaxErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host 'Optional component script parsed successfully'
 
       - name: Build real offline installer (Python + React + Electron)
         shell: pwsh
