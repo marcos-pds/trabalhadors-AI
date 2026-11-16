@@ -1,3 +1,30 @@
+## Instalador EXE (versão recomendada)
+
+O instalador Windows é gerado pela pipeline [Build Central Windows installer](../.github/workflows/build-desktop-installer.yml). A aparência é propositalmente **clean**: fundo claro, marca neutra, tipografia simples e **progresso nativo real do Windows**, sem animações que simulem downloads ou mensagens de "IA instalando".
+
+O arquivo de distribuição chama-se `Central-Setup-0.2.0-x64.exe`. Depois de um build bem-sucedido, baixe o artefato **Central-Setup-Windows-x64** em GitHub Actions. Descompacte o ZIP e execute o Setup.
+
+- Instalação assistida em português, com escolha de pasta e atalhos.
+- A instalação inclui o frontend React, Electron e o backend FastAPI executável empacotado por PyInstaller.
+- Ao abrir o atalho, o aplicativo inicia seu **próprio servidor local** na interface 127.0.0.1 em porta livre e abre a barra Liquid Glass. Não é necessário instalar Python/Node, executar CMD ou abrir o browser.
+- Conversas, credenciais e demais dados ficam no diretório de usuário do aplicativo (Electron `userData/data`) e não em `Program Files`, de modo que atualizações não apaguem automaticamente os dados.
+- O aplicativo encerra seu servidor local ao fechar.
+- **A versão web permanece intacta**, inclusive quando o serviço local também é aberto pelo navegador. O modo desktop é ativado somente pelo preload seguro da janela instalada.
+
+### Produzir um instalador localmente
+
+Em um Windows 10 ou 11 com Python 3.11, Node 22 e Git:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop\build_windows.ps1
+```
+
+O Setup será criado em `desktop\release\`. O pipeline GitHub Actions executa ainda um teste que inicia o backend empacotado, acessa `http://127.0.0.1:18887/` e verifica se a página React retorna corretamente.
+
+**Limitações:** este é um instalador de teste **não assinado digitalmente**, então o Windows SmartScreen pode apresentar um aviso. Ele não instala automaticamente os modelos grandes do VoiceStudio/OmniVoice ou outras ferramentas externas opcionais. Para distribuir amplamente, precisamos testar a instalação num Windows limpo e providenciar assinatura de código antes de publicar um release estável.
+
+---
+
 # Central IA Desktop — Liquid Glass + Slime preto
 
 Esta é uma **interface Windows opcional** e separada do navegador. A versão web mantém suas telas, cabeçalho, barra lateral e chat atuais sem alteração visual. O invólucro Electron usa o mesmo backend FastAPI e a mesma aplicação React, mas fornece um canal desktop autenticado pelo preload, ativando um layout específico **somente na janela Electron**.
