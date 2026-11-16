@@ -48,6 +48,12 @@ jobs:
         run: node --test frontend/src/originalPinkSlime.test.mjs
       - name: Verify desktop Liquid Glass isolation and surface coverage
         run: node --test frontend/src/desktopLiquidGlass.test.mjs
+      - name: Validate updater and preload source syntax
+        run: |
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
+          node --check desktop/updater.cjs
+          node --check desktop/backup.cjs
       - name: Verify desktop release-update safety and offline backups
         run: |
           node --test desktop/tests/backup.test.cjs
