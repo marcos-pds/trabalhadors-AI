@@ -1,133 +1,193 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { createOriginalPinkSlime } from './originalPinkSlime.js'
 
-// A real 3D black/graphite Slime. The canvas is transparent: glass styling is
-// deliberately applied only to the surrounding dock, never to the avatar.
-export default function DesktopSlime({ active = false }) {
-  const host = useRef(null)
+// Original user-supplied Pink Slime. Its scene is transparent so the avatar
+// does not inherit the Liquid Glass filter or any coloured card around it.
+export default function DesktopSlime({ active = false, running = false, typing = false, failed = false }) {
+  const hostRef = useRef(null)
+  const slimeRef = useRef(null)
+  const stateRef = useRef({ active, running, typing, failed })
+  const previousRef = useRef({ running, failed })
   const [fallback, setFallback] = useState(false)
+  stateRef.current = { active, running, typing, failed }
+
   useEffect(() => {
-    const target = host.current
-    if (!target) return
+    const slime = slimeRef.current
+    const previous = previousRef.current
+    previousRef.current = { running, failed }
+    if (!slime) return
+    slime.isChatOpen = active
+    slime.isTyping = typing || running
+    if (failed && !previous.failed) slime.triggerReaction('dizzy', 2.2)
+    else if (previous.running && !running && !failed) slime.triggerReaction('love', 2.5)
+  }, [active, running, typing, failed])
+
+  useEffect(() => {
+    const host = hostRef.current
+    const button = host?.closest('button')
+    if (!host || !button) return undefined
+
     let renderer
     try {
-      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' })
+      renderer = new THREE.WebGLRenderer({
+        antialias: true, alpha: true, powerPreference: 'high-performance',
+        preserveDrawingBuffer: false,
+      })
     } catch {
       setFallback(true)
       return undefined
     }
-    renderer.setClearColor(0x000000, 0)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+
+    renderer.setClearColor(0, 0)
+    renderer.setPixelRatio(1)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.42
-    renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;pointer-events:none'
-    target.appendChild(renderer.domElement)
+    renderer.toneMappingExposure = 1.08
+    renderer.domElement.style.cssText =
+      'display:block;width:100%;height:100%;pointer-events:none;background:transparent;'
+    host.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 20)
-    camera.position.set(0, 0.03, 3.65)
-    scene.add(new THREE.HemisphereLight(0xa7b5df, 0x05060d, 2.3))
-    const key = new THREE.DirectionalLight(0xf1f4ff, 3.6)
-    key.position.set(-2.7, 4, 4.5)
-    scene.add(key)
-    const side = new THREE.DirectionalLight(0x8798df, 2.8)
-    side.position.set(3, 1.6, -0.3)
-    scene.add(side)
-    const edge = new THREE.DirectionalLight(0xd7d4ff, 1.45)
-    edge.position.set(-1, 2, -4)
-    scene.add(edge)
-    const root = new THREE.Group()
-    scene.add(root)
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50)
+    camera.position.set(0, 0.08, 4.9)
 
-    const bodyGeo = new THREE.SphereGeometry(1, 64, 48)
-    const pos = bodyGeo.attributes.position
-    const color = []
-    const top = new THREE.Color('#454b5e')
-    const middle = new THREE.Color('#141926')
-    const bottom = new THREE.Color('#05060c')
-    const mixed = new THREE.Color()
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
-      const bulge = 1 + .13 * Math.exp(-Math.pow((y + .26) / .45, 2))
-      const lower = y < -.55 ? .83 + .17 * (y + 1) / .45 : 1
-      pos.setXYZ(i, x * bulge * lower, y < -.55 ? -.55 + .27 * Math.sin((y + .55) / .45 * Math.PI / 2) : y * .9, z * bulge * lower)
-      const t = Math.min(1, Math.max(0, (y + .9) / 1.8))
-      if (t < .55) mixed.lerpColors(bottom, middle, t / .55)
-      else mixed.lerpColors(middle, top, (t - .55) / .45)
-      color.push(mixed.r, mixed.g, mixed.b)
-    }
-    bodyGeo.setAttribute('color', new THREE.Float32BufferAttribute(color, 3))
-    bodyGeo.computeVertexNormals()
-    const body = new THREE.Mesh(bodyGeo, new THREE.MeshPhysicalMaterial({
-      vertexColors: true, roughness: .24, metalness: .12, clearcoat: 1,
-      clearcoatRoughness: .13, transparent: false,
-    }))
-    root.add(body)
+    scene.add(new THREE.HemisphereLight(0xfff7f9, 0xd8b4c2, 1.45))
+    const keyLight = new THREE.DirectionalLight(0xfffcfb, 1.65)
+    keyLight.position.set(-2.6, 3.8, 4.2)
+    scene.add(keyLight)
+    const fillLight = new THREE.DirectionalLight(0xffe4ee, 0.75)
+    fillLight.position.set(3.2, 1.2, 2.8)
+    scene.add(fillLight)
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.65)
+    rimLight.position.set(0, 2.5, -3.5)
+    scene.add(rimLight)
 
-    const eyes = new THREE.Group()
-    const eyeMat = new THREE.MeshPhysicalMaterial({ color: 0x100d17, roughness: .15, clearcoat: 1 })
-    const gleamMat = new THREE.MeshBasicMaterial({ color: 0xeef2ff })
-    const irisMat = new THREE.MeshBasicMaterial({ color: 0x9686c9 })
-    for (const direction of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 20), eyeMat)
-      eye.scale.set(.18, .24, .09)
-      eye.position.set(direction * .35, .11, .98)
-      eyes.add(eye)
-      const iris = new THREE.Mesh(new THREE.SphereGeometry(.07, 16, 12), irisMat)
-      iris.position.set(direction * .35 + .014, .08, 1.075)
-      eyes.add(iris)
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(.046, 12, 8), gleamMat)
-      glint.position.set(direction * .35 - .05, .19, 1.085)
-      eyes.add(glint)
-    }
-    root.add(eyes)
-    const smile = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-.19, -.28, 1.09),
-      new THREE.Vector3(-.08, -.34, 1.11),
-      new THREE.Vector3(.08, -.34, 1.11),
-      new THREE.Vector3(.19, -.28, 1.09),
-    ])
-    root.add(new THREE.Mesh(new THREE.TubeGeometry(smile, 22, .019, 8, false),
-      new THREE.MeshBasicMaterial({ color: 0x090910 })))
+    const slime = createOriginalPinkSlime(scene)
+    slime.isChatOpen = stateRef.current.active
+    slime.isTyping = stateRef.current.typing || stateRef.current.running
+    slimeRef.current = slime
 
-    const resize = () => {
-      if (!target.isConnected) return
-      const side = Math.max(32, Math.round(target.getBoundingClientRect().width))
-      renderer.setSize(side, side, false)
+    // Supersample at 3.5x+ the visible avatar size. The character stays small,
+    // but its eyes and mouth render at 190-256 physical pixels before downscale.
+    function resize() {
+      if (!host.isConnected) return
+      const width = Math.max(42, host.getBoundingClientRect().width)
+      const physical = Math.max(192, Math.min(256, Math.ceil(width * Math.max(3.6, (window.devicePixelRatio || 1) * 2))))
+      renderer.setSize(physical, physical, false)
+      camera.aspect = 1
+      camera.updateProjectionMatrix()
     }
     resize()
     const observer = new ResizeObserver(resize)
-    observer.observe(target)
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-    const timer = new THREE.Clock()
-    let frame = 0
-    let rendered = true
-    const animate = () => {
-      if (!rendered) return
-      const t = timer.getElapsedTime()
-      if (!reduced?.matches) {
-        root.position.y = Math.sin(t * 1.9) * (active ? .055 : .028)
-        root.rotation.y = Math.sin(t * .78) * .14
-        body.scale.set(1 + .012 * Math.sin(t * 2.1), 1 - .016 * Math.sin(t * 2.1), 1)
+    observer.observe(host)
+
+    const mouse = new THREE.Vector2()
+    const pointer = { down: false, moved: 0, x: 0, y: 0, id: null }
+    function onPointerMove(event) {
+      const bounds = button.getBoundingClientRect()
+      mouse.x = THREE.MathUtils.clamp(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -1, 1)
+      mouse.y = THREE.MathUtils.clamp(1 - ((event.clientY - bounds.top) / bounds.height) * 2, -1, 1)
+      if (!pointer.down) return
+      const dx = event.clientX - pointer.x
+      const dy = event.clientY - pointer.y
+      pointer.moved += Math.hypot(dx, dy)
+      pointer.x = event.clientX
+      pointer.y = event.clientY
+      if (pointer.moved > 6) {
+        slime.expression = 'dizzy'
+        slime.currentRotY += dx * .022
+        slime.targetRotY = slime.currentRotY
+        slime.currentRotX = THREE.MathUtils.clamp(slime.currentRotX + dy * .015, -.55, .55)
+        slime.dragOffset.x = THREE.MathUtils.clamp(dx * .03, -.6, .6)
+        slime.dragOffset.y = THREE.MathUtils.clamp(-dy * .03, -.5, .5)
+        slime.jiggleIntensity = 1.1
       }
-      renderer.render(scene, camera)
+    }
+    function onPointerDown(event) {
+      if (event.button !== 0) return
+      pointer.down = true
+      pointer.moved = 0
+      pointer.x = event.clientX
+      pointer.y = event.clientY
+      pointer.id = event.pointerId
+      button.dataset.slimeDrag = 'false'
+      try { button.setPointerCapture(event.pointerId) } catch { /* unavailable pointer capture */ }
+      slime.triggerSquash(1.14, .86, 1.14, .6)
+    }
+    function endPointer(event) {
+      if (!pointer.down) return
+      pointer.down = false
+      if (pointer.id !== null && button.hasPointerCapture?.(pointer.id)) {
+        button.releasePointerCapture(pointer.id)
+      }
+      pointer.id = null
+      if (pointer.moved > 6) {
+        button.dataset.slimeDrag = 'true'
+        slime.triggerReaction('dizzy', 1.8)
+        slime.triggerSquash(.84, 1.24, .84, 1.4)
+      }
+    }
+    function onClick() {
+      if (button.dataset.slimeDrag === 'true') return
+      slime.triggerReaction('happy', 2.6)
+    }
+
+    button.addEventListener('pointerdown', onPointerDown)
+    button.addEventListener('pointermove', onPointerMove)
+    button.addEventListener('pointerup', endPointer)
+    button.addEventListener('pointercancel', endPointer)
+    button.addEventListener('click', onClick)
+    window.addEventListener('pointermove', onPointerMove)
+
+    const clock = new THREE.Clock()
+    let frame = 0
+    let disposed = false
+    const animate = () => {
+      if (disposed) return
       frame = requestAnimationFrame(animate)
+      const dt = Math.min(clock.getDelta(), .05)
+      const t = clock.getElapsedTime()
+      slime.isChatOpen = stateRef.current.active
+      slime.isTyping = stateRef.current.typing || stateRef.current.running
+      if (!document.hidden) {
+        slime.update(dt, t, mouse, pointer.down && pointer.moved > 6)
+        renderer.render(scene, camera)
+      }
     }
     frame = requestAnimationFrame(animate)
     return () => {
-      rendered = false
+      disposed = true
       cancelAnimationFrame(frame)
       observer.disconnect()
-      target.removeChild(renderer.domElement)
-      scene.traverse(obj => {
-        if (obj.geometry) obj.geometry.dispose()
-        if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(mat => mat.dispose())
+      button.removeEventListener('pointerdown', onPointerDown)
+      button.removeEventListener('pointermove', onPointerMove)
+      button.removeEventListener('pointerup', endPointer)
+      button.removeEventListener('pointercancel', endPointer)
+      button.removeEventListener('click', onClick)
+      window.removeEventListener('pointermove', onPointerMove)
+      delete button.dataset.slimeDrag
+      slimeRef.current = null
+      const geometries = new Set()
+      const materials = new Set()
+      const textures = new Set()
+      scene.traverse(object => {
+        if (object.geometry) geometries.add(object.geometry)
+        for (const material of [].concat(object.material || [])) {
+          if (!material) continue
+          materials.add(material)
+          if (material.map) textures.add(material.map)
+        }
       })
+      geometries.forEach(geometry => geometry.dispose())
+      textures.forEach(texture => texture.dispose())
+      materials.forEach(material => material.dispose())
       renderer.dispose()
+      renderer.domElement.remove()
     }
-  }, [active])
-  return <span ref={host} className="desktop-slime-canvas" aria-hidden="true">
+  }, [])
+
+  return <span ref={hostRef} aria-hidden="true" className="desktop-slime-canvas">
     {fallback && <span className="desktop-slime-fallback"><i/><i/><b/></span>}
   </span>
 }
