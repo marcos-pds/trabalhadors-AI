@@ -83,10 +83,10 @@ export default function DesktopSlime({ active = false }) {
     }
     root.add(eyes)
     const smile = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-.19, -.28, 1.037),
-      new THREE.Vector3(-.08, -.34, 1.063),
-      new THREE.Vector3(.08, -.34, 1.063),
-      new THREE.Vector3(.19, -.28, 1.037),
+      new THREE.Vector3(-.19, -.28, 1.09),
+      new THREE.Vector3(-.08, -.34, 1.11),
+      new THREE.Vector3(.08, -.34, 1.11),
+      new THREE.Vector3(.19, -.28, 1.09),
     ])
     root.add(new THREE.Mesh(new THREE.TubeGeometry(smile, 22, .019, 8, false),
       new THREE.MeshBasicMaterial({ color: 0x090910 })))
