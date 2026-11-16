@@ -34,7 +34,7 @@ def install_desktop_update_routes(app, db):
 
     @app.middleware("http")
     async def desktop_update_write_guard(request: Request, call_next):
-        if (request.url.path.startswith("/api/") and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        if request.url.path.startswith("/api/") and request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if not request.url.path.startswith("/api/internal/desktop-update/"):
                 with _lock:
                     if _preparing:
