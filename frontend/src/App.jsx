@@ -778,6 +778,8 @@ export default function App() {
       </div>
     </>}
     <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {desktopMode && desktopExpanded && <LiquidGlassUnderlay className="desktop-workspace-refraction"
+        strength={0.045} radius={26} glow={0.16} edgeHighlight={0.30}/>} 
       {!desktopMode && <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
         <div className="reference-header-left flex items-center gap-4">
           <button type="button" aria-label="Abrir menu" title="Menu"
