@@ -1,3 +1,24 @@
+## Novo chat compacto — Desktop 0.3.4
+
+**Este ajuste não altera a experiência web.** A reformulação do chat desktop está isolada no Electron:
+
+1. Ao iniciar, fica apenas o dock Liquid Glass fixo no topo, com o Slime rosa original.
+2. Clicar no Slime mostra **somente a barra de digitação** diretamente abaixo do dock. Não aparece o histórico, o painel de execução nem a antiga órbita branca com satélites. O Electron muda para um retângulo transparente compacto, sem uma janela grande invisível por trás.
+3. A barra segue a referência enviada pelo usuário: campo horizontal arredondado, anexo (+), entrada de texto, modo Auto/Equipe/Individual, ditado quando suportado pelo Electron e botão de enviar. O componente usa a refração real do pacote `rdev/liquid-glass-react` e o reflexo do tema existente. Anexos e seleção de trabalhador são compartilhados com a conversa completa.
+4. **Somente quando o backend aceitar o envio da mensagem**, a Central expande a janela e mostra o histórico e o painel de execução. Uma falha no envio mantém a barra aberta para tentar novamente.
+5. Um segundo clique no Slime (ou Escape no campo) recolhe tudo ao dock. Os ícones de outras funcionalidades no topo continuam abrindo suas próprias telas, independentemente do chat.
+6. O núcleo branco e as órbitas marcados em vermelho nos exemplos foram removidos **somente do chat desktop**. Na versão web, o componente `ChatWelcome` permanece inalterado.
+
+Arquivos relevantes: `frontend/src/DesktopChatPrompt.jsx`, `frontend/src/desktopChatLayout.mjs`, `frontend/src/App.jsx`, `frontend/src/desktop-liquid-glass.css`, `desktop/main.cjs` e `desktop/preload.cjs`.
+
+### Verificações
+
+- `node --test frontend/src/desktopChatLayout.test.mjs` testa os estados dock/compose/full e a regra de envio; inclui testes de isolamento da web e de ausência de órbita na interface nativa.
+- `npm run build` e `desktop/build_windows.ps1` validam o frontend e o instalador NSIS.
+- **Ainda é obrigatório** verificar visualmente no Windows 10/11 as transições, o dimensionamento e o microfone opcional antes de liberar uma versão estável.
+
+---
+
 ## Atualização automática pelo GitHub — Desktop 0.3.3
 
 A Central Desktop instalada agora poderá verificar novas versões estáveis no GitHub Releases. **O download e a instalação exigem confirmação separada.** Antes de instalar, a Central bloqueia novas gravações, verifica tarefas ativas e cria um backup local verificado. A interface web/PWA não recebe essa funcionalidade.
