@@ -153,7 +153,7 @@ async function waitForCentral(url, attempts = 30) {
 
 function createWindow() {
   dockWindow = new BrowserWindow({
-    ...bounds(false),
+    ...bounds('dock'),
     frame: false,
     transparent: true,
     hasShadow: false,
