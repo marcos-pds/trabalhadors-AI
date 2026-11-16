@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/desktop-clean-exe-installer
+      - feat/installer-optional-models
     paths:
       - 'desktop/**'
       - 'frontend/**'
