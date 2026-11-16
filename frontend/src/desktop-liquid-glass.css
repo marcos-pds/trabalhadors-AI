@@ -314,3 +314,68 @@ html.central-desktop-shell .central-desktop-mode
   backdrop-filter: none !important;
   filter: none !important;
 }
+
+/* Login and first-run registration also belong to the desktop appearance.
+   The web Auth page has no .central-desktop-mode parent, so only the
+   Electron-injected html class may scope these selectors. */
+html.central-desktop-shell #root > main {
+  background:
+    radial-gradient(ellipse 35% 40% at 20% 16%,rgba(161,190,239,.13),transparent 75%),
+    radial-gradient(ellipse 45% 48% at 85% 82%,rgba(184,165,230,.12),transparent 70%),
+    rgba(12,19,34,.82) !important;
+  color: #eef4ff;
+}
+html.central-desktop-shell #root > main > section {
+  background:
+    linear-gradient(132deg,rgba(255,255,255,.14),transparent 42%),
+    rgba(37,47,68,.64) !important;
+  color: #eef4ff !important;
+  border: 1px solid rgba(238,246,255,.33) !important;
+  border-radius: 28px;
+  box-shadow: 0 26px 74px rgba(2,7,21,.35),inset 0 1px 1px rgba(255,255,255,.22);
+  -webkit-backdrop-filter: blur(32px) saturate(170%);
+  backdrop-filter: blur(32px) saturate(170%);
+}
+html.central-desktop-shell #root > main :is(input, textarea, select) {
+  background: rgba(11,20,37,.49) !important;
+  color: #f2f5ff !important;
+  border: 1px solid rgba(229,239,255,.25) !important;
+  border-radius: 14px;
+}
+html.central-desktop-shell #root > main :is(input, textarea, select):focus-visible {
+  outline: 2px solid rgba(209,193,255,.75);
+  outline-offset: 2px;
+}
+html.central-desktop-shell #root > main :is(input, textarea)::placeholder {
+  color: #aebcd1;
+}
+html.central-desktop-shell #root > main .text-muted { color:#aebcd1; }
+html.central-desktop-shell #root > main .text-copy { color:#f1f5ff; }
+html.central-desktop-shell #root > main .text-lilac { color:#e4ceff; }
+
+/* Nested utility panels sometimes mount above the workspace. Maintain
+   the same glass treatment for them without using global web selectors. */
+html.central-desktop-shell #root > :is([role="dialog"], [role="alertdialog"]) {
+  background: rgba(29,38,58,.76);
+  border: 1px solid rgba(242,247,255,.30);
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  backdrop-filter: blur(28px) saturate(155%);
+}
+html.central-desktop-shell .central-desktop-mode :is(.reference-tools-menu,.liquid-command-menu, .central-drawer) {
+  color: #eef4ff !important;
+}
+html.central-desktop-shell .central-desktop-mode :is(.reference-tools-menu,.liquid-command-menu) :is(label,span,small) {
+  color: #cdd9ea;
+}
+html.central-desktop-shell .central-desktop-mode .reference-tools-menu {
+  background: rgba(28,39,61,.88) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(175%);
+  backdrop-filter: blur(32px) saturate(175%);
+}
+
+/* Keep chart visualizations, logos, screenshots, and generated media unfiltered.
+   Text and interactive controls retain their own accessible contrast. */
+html.central-desktop-shell .central-desktop-mode :is(img,video,canvas) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
