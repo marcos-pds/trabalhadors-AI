@@ -5,6 +5,7 @@ export default function StartupIntro() {
   const [show, setShow] = useState(true)
   const [theme] = useState(() => {
     try {
+      if (window.centralDesktop?.isDesktop === true) return 'dark'
       return localStorage.getItem('central-theme-design') === 'reference-ice-v1' &&
         localStorage.getItem('central-theme') === 'dark' ? 'dark' : 'light'
     } catch { return 'light' }
