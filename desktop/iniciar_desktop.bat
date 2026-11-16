@@ -24,7 +24,15 @@ if not exist "static\build\index.html" (
 )
 set "CENTRAL_HOST=127.0.0.1"
 set "CENTRAL_PORT=8765"
-start "Central IA Backend" /min cmd /c ".venv\Scripts\python.exe run.py"
+powershell -NoProfile -Command "try { $null=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8765/; exit 0 } catch { exit 1 }" >nul 2>nul
+if errorlevel 1 (
+  echo Iniciando backend da Central na porta 8765...
+  start "Central IA Backend" /min cmd /c ".venv\Scripts\python.exe run.py"
+) else (
+  echo Servidor ja ativo na porta 8765.
+  echo Verifique se ele usa o codigo e o build desta copia da Central.
+)
+if not defined CENTRAL_DESKTOP_URL set "CENTRAL_DESKTOP_URL=http://127.0.0.1:8765/"
 cd /d "%~dp0"
 if not exist "node_modules\electron" (
   echo Preparando aplicativo desktop...
