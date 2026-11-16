@@ -1,0 +1,71 @@
+name: Publish signed Central Desktop update
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  signed-release:
+    if: github.repository == 'marcos-pds/trabalhadors-AI'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Require code signing and matching stable tag
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+            throw 'Configure signing secrets. Never publish unsigned auto-updates.'
+          }
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -cne $env:GITHUB_REF_NAME) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match desktop version v$version."
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Only stable semantic versions can be published.' }
+
+      - name: Build signed NSIS app and latest.yml
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
+        run: ./desktop/build_windows.ps1
+
+      - name: Verify signed updater output
+        shell: pwsh
+        run: |
+          $exe = @(Get-ChildItem desktop/release/Central-Setup-*.exe)
+          if ($exe.Count -ne 1) { throw 'Expected one setup executable.' }
+          $signature = Get-AuthenticodeSignature $exe[0].FullName
+          if ($signature.Status -ne 'Valid') { throw 'EXE is not Authenticode signed correctly.' }
+          if (-not (Test-Path 'desktop/release/latest.yml')) { throw 'latest.yml missing' }
+          $metadata = Get-Content desktop/release/latest.yml -Raw
+          if ($metadata -notmatch 'sha512:' -or $metadata -notmatch [regex]::Escape($env:GITHUB_REF_NAME.Substring(1))) {
+            throw 'Release metadata does not match the signed executable.'
+          }
+          Write-Host 'Signed installer and SHA512 manifest verified.'
+
+      - name: Publish stable release with updater manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $assets = @((Get-ChildItem 'desktop/release/Central-Setup-*.exe').FullName)
+          $assets += (Resolve-Path 'desktop/release/latest.yml').Path
+          $assets += @(Get-ChildItem 'desktop/release/*.blockmap' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName })
+          gh release create $env:GITHUB_REF_NAME @assets --verify-tag --title "Central Desktop $($env:GITHUB_REF_NAME)" --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

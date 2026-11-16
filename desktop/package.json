@@ -1,6 +1,6 @@
 {
   "name": "central-ia-desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Central Desktop",
   "main": "main.cjs",
@@ -24,7 +24,10 @@
     "files": [
       "main.cjs",
       "preload.cjs",
-      "package.json"
+      "updater.cjs",
+      "backup.cjs",
+      "package.json",
+      "node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -65,6 +68,17 @@
       "uninstallerSidebar": "build/installerSidebar.bmp",
       "artifactName": "Central-Setup-${version}-${arch}.${ext}",
       "include": "build/installer.nsh"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "marcos-pds",
+        "repo": "trabalhadors-AI",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
   }
 }

@@ -439,3 +439,79 @@ html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea 
 html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea:focus-visible {
   outline: none !important;
 }
+
+/* Native desktop updater lives in the existing Liquid Glass dock, not the web.
+   The original pink Slime and normal web UI remain completely untouched. */
+html.central-desktop-shell .central-desktop-mode .desktop-update-trigger {
+  position: relative;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-dot {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  height: 5px;
+  width: 5px;
+  border-radius: 50%;
+  background: #c4f5df;
+  box-shadow: 0 0 7px rgba(142,248,205,.6);
+  pointer-events: none;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 4px;
+  z-index: 90;
+  width: min(340px, calc(100vw - 22px));
+  max-height: min(440px, calc(100vh - 94px));
+  overflow: auto;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(237,244,255,.32);
+  background: linear-gradient(130deg,rgba(255,255,255,.16),transparent 44%),rgba(25,33,51,.93);
+  color: #eef4ff;
+  box-shadow: 0 17px 50px rgba(1,7,22,.43), inset 0 1px rgba(255,255,255,.25);
+  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  backdrop-filter: blur(30px) saturate(160%);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-header {
+  display:flex; align-items:center;justify-content:space-between;
+  font-size:14px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-header button {
+  color:#c9d5e5; font-size:20px; border:0; background:transparent; padding:0 6px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-version {
+  margin-top: 7px; color:#bdcbdc; font-size:11px;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-message {
+  margin: 13px 0; color:#e0e8f5; font-size:12px; line-height:1.65; overflow-wrap:anywhere;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-primary,
+html.central-desktop-shell .central-desktop-mode .desktop-update-secondary {
+  display:block; width:100%; margin:12px 0 0; padding:10px 12px;
+  border-radius:12px; font-size:12px; font-weight:600; cursor:pointer;
+  border:1px solid rgba(236,242,255,.3);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-primary {
+  color: #15243c; background:linear-gradient(140deg,#f2e8ff,#c1d6ff);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-secondary {
+  color:#e9f1ff; background:rgba(212,228,255,.11);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-secondary:disabled {opacity:.6;cursor:wait}
+html.central-desktop-shell .central-desktop-mode .desktop-update-progress {
+  height:6px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.11);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-progress span {
+  display:block;height:100%;background:#b5d9f4;transition:width .2s linear;
+}
+html.central-desktop-shell .central-desktop-mode .desktop-update-help,
+html.central-desktop-shell .central-desktop-mode .desktop-update-backup {
+  margin-top:12px;color:#aabbd2;font-size:11px;line-height:1.55;
+  overflow-wrap:anywhere;
+}
+@media (forced-colors:active) {
+  html.central-desktop-shell .central-desktop-mode .desktop-update-popover {
+    background:Canvas;color:CanvasText;border:2px solid CanvasText;
+  }
+}

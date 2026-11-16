@@ -1,3 +1,11 @@
+## Atualização automática pelo GitHub — Desktop 0.3.3
+
+A Central Desktop instalada agora poderá verificar novas versões estáveis no GitHub Releases. **O download e a instalação exigem confirmação separada.** Antes de instalar, a Central bloqueia novas gravações, verifica tarefas ativas e cria um backup local verificado. A interface web/PWA não recebe essa funcionalidade.
+
+Veja [UPDATES.md](UPDATES.md) para a política de segurança, publicação de versões assinadas, requisitos de GitHub Releases, testes e restauração de backups.
+
+---
+
 ## Liquid Glass completo — versão desktop 0.3.2
 
 O modo Windows/Electron usa o projeto [rdev/liquid-glass-react](https://github.com/rdev/liquid-glass-react) (MIT) para **refração SVG real nas bordas** da área de trabalho e usa o sistema de vidro do projeto para aplicar a mesma estética em toda a Central: chat, menus, provedores, trabalhadores, fluxos, projetos, histórico, relatórios, tokens, Git, configurações, modais, formulários, tabelas e notificações.

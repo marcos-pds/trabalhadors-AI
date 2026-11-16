@@ -1,6 +1,7 @@
 import './desktop-liquid-glass.css'
 import { CommandIcon, LiquidGlassUnderlay } from './LiquidGlassUI.jsx'
 import DesktopSlime from './DesktopSlime.jsx'
+import DesktopUpdateControl from './DesktopUpdateControl.jsx'
 
 const tools = [
   ['dashboard', 'layout', 'Visão geral'],
@@ -51,6 +52,7 @@ export default function DesktopDock({ active = false, page = 'chat', running = f
         title="Memória" className="desktop-dock-icon"><CommandIcon name="brain"/></button>
       <button type="button" onClick={onOpenComputer} aria-label="Acesso ao computador"
         title="Acesso ao computador" className="desktop-dock-icon"><CommandIcon name="monitor"/></button>
+      <DesktopUpdateControl workspaceOpen={active}/>
       <button type="button" onClick={onOpenMenu} aria-label="Menu de conversas"
         title="Histórico de conversas" className="desktop-dock-icon">
         <CommandIcon name="menu"/>
