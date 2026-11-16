@@ -5,6 +5,8 @@ const { spawn } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
+const { createDesktopUpdater } = require('./updater.cjs')
 
 app.setAppUserModelId('br.central.desktop')
 if (!app.requestSingleInstanceLock()) app.quit()
@@ -15,6 +17,8 @@ let dockWindow = null
 let backend = null
 let target = null
 let allowedOrigin = null
+let updaterController = null
+let updateToken = null
 
 function chooseLocalUrl(urlText) {
   const url = new URL(urlText)
@@ -41,6 +45,7 @@ async function startBundledBackend() {
     throw new Error('O componente local da Central não foi incluído nesta instalação.')
   }
   const port = await findUnusedPort()
+  updateToken = crypto.randomBytes(32).toString('hex')
   const dataDir = path.join(app.getPath('userData'), 'data')
   fs.mkdirSync(dataDir, { recursive: true })
   // Keep data and credentials outside Program Files so upgrades preserve them.
@@ -51,6 +56,7 @@ async function startBundledBackend() {
     CENTRAL_DATA_DIR: dataDir,
     CENTRAL_JOB_MODE: 'embedded',
     CENTRAL_DEPLOYMENT_MODE: 'local',
+    CENTRAL_DESKTOP_UPDATE_TOKEN: updateToken,
   }
   backend = spawn(executable, [], { env, windowsHide: true, stdio: 'ignore' })
   backend.once('error', error => {
@@ -79,6 +85,42 @@ function stopBackend() {
   } else {
     owned.kill()
   }
+}
+
+async function stopBackendSafely() {
+  const owned = backend
+  if (!owned || owned.exitCode !== null || !owned.pid) throw new Error('Servidor local não está disponível.')
+  const killer = spawn('taskkill.exe', ['/PID', String(owned.pid), '/T', '/F'], {
+    windowsHide: true, stdio: 'ignore',
+  })
+  await new Promise((resolve, reject) => {
+    killer.once('error', reject)
+    killer.once('exit', code => code === 0 ? resolve() : reject(new Error('Não foi possível encerrar o backend com segurança.')))
+  })
+  if (owned.exitCode === null) {
+    await Promise.race([
+      new Promise(resolve => owned.once('exit', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('O backend ainda está em execução.')), 8000)),
+    ])
+  }
+  backend = null
+}
+async function internalUpdateRequest(method, operation) {
+  if (!target || !updateToken || !app.isPackaged) throw new Error('Atualização disponível apenas na instalação desktop.')
+  const response = await fetch(new URL('/api/internal/desktop-update/' + operation, target.origin), {
+    method, headers: { 'x-central-desktop-token': updateToken },
+    signal: AbortSignal.timeout(6000),
+  })
+  if (!response.ok) {
+    if (response.status === 409) throw new Error('Há tarefas em execução ou aguardando aprovação. Conclua-as antes de atualizar.')
+    throw new Error('Não foi possível confirmar que o servidor está seguro para atualizar.')
+  }
+  return response.json()
+}
+async function restoreBackend() {
+  target = await startBundledBackend()
+  allowedOrigin = target.origin
+  await dockWindow?.loadURL(target.href)
 }
 
 function bounds(expanded = false) {
@@ -162,15 +204,40 @@ app.whenReady().then(async () => {
     if (!await waitForCentral(target, app.isPackaged ? 1 : 30)) {
       throw new Error('Inicie a Central local antes de abrir o modo desktop.')
     }
+    updaterController = createDesktopUpdater({
+      app, getWindow: () => dockWindow,
+      prepareBackend: () => internalUpdateRequest('POST', 'prepare'),
+      cancelBackend: () => internalUpdateRequest('POST', 'cancel'),
+      stopBackend: stopBackendSafely,
+      restartBackend: restoreBackend,
+    })
+    const allowedRenderer = event => {
+      if (!dockWindow || event.sender.id !== dockWindow.webContents.id) return false
+      if (event.senderFrame !== dockWindow.webContents.mainFrame) return false
+      try { return new URL(event.senderFrame.url).origin === allowedOrigin }
+      catch { return false }
+    }
+    ipcMain.handle('central-desktop:update-state', event =>
+      allowedRenderer(event) ? updaterController.getState() : null)
+    ipcMain.handle('central-desktop:update-action', async (event, action) => {
+      if (!allowedRenderer(event) || !['check', 'download', 'install'].includes(action)) return null
+      if (action === 'install') {
+        const answer = dialog.showMessageBoxSync(dockWindow, {
+          type: 'question', buttons: ['Cancelar', 'Instalar e reiniciar'],
+          defaultId: 0, cancelId: 0, noLink: true, title: 'Atualização da Central',
+          message: 'Deseja instalar a atualização agora?',
+          detail: 'As tarefas serão verificadas e o backup será criado antes do reinício.',
+        })
+        if (answer !== 1) return updaterController.getState()
+      }
+      return updaterController.action(action)
+    })
     ipcMain.on('central-desktop:set-expanded', (event, expanded) => {
-      if (!dockWindow || event.sender.id !== dockWindow.webContents.id) return
-      if (event.senderFrame !== dockWindow.webContents.mainFrame) return
-      try {
-        if (new URL(event.senderFrame.url).origin !== allowedOrigin) return
-      } catch { return }
+      if (!allowedRenderer(event)) return
       dockWindow.setBounds(bounds(expanded === true), false)
     })
     createWindow()
+    updaterController.start()
   } catch (error) {
     dialog.showErrorBox('Central', error.message)
     app.quit()
