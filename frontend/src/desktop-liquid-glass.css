@@ -424,3 +424,18 @@ html.central-desktop-shell .central-desktop-mode .desktop-rdev-static-surface {
     opacity: .15;
   }
 }
+
+/* The chat input must remain a seamless transparent layer INSIDE the glass
+   composer, not a second dark rectangle created by the general form rule. */
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  outline: none;
+}
+html.central-desktop-shell .central-desktop-mode .liquid-chat-composer textarea:focus-visible {
+  outline: none !important;
+}
