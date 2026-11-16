@@ -9,6 +9,7 @@ on:
       - fix/desktop-pink-slime-reactions
       - feat/desktop-full-liquid-glass-theme
       - feat/desktop-github-release-updater
+      - feat/desktop-chat-prompt-first
     paths:
       - 'desktop/**'
       - 'frontend/**'
