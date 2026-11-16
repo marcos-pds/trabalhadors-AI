@@ -4,7 +4,7 @@ Correções motivadas por duas capturas da Central no Windows:
 
 - **Barra de digitação pouco visível:** um único efeito `rdev/liquid-glass-react`, com superfície grafite escura de contraste definido e borda brilhante discreta. O `textarea` não desenha um segundo retângulo: não há fundo, borda ou sombra interna.
 - **Chat antigo depois do envio:** o desktop agora renderiza `DesktopConversation.jsx`, componente nativo com cabeçalho compacto, mensagens legíveis, atividades e aprovações, usando o mesmo prompt e a mesma API da Central. O `ChatPage` web continua original e é renderizado exclusivamente no navegador.
-- **Prévia cobrindo/quebrando a tela:** encerramos a abertura automática ao iniciar tarefa, retomá-la ou selecionar histórico. O botão **Prévia** é uma ação explícita. O painel aparece como um drawer à direita, com largura limitada (até 530 px), backdrop leve e botão fechar; a conversa não é espremida e o iframe fica restrito ao drawer. O atalho `/previa` também conta como abertura solicitada.
+- **Prévia cobrindo/quebrando a tela:** encerramos a abertura automática ao iniciar tarefa, retomá-la ou selecionar histórico. O botão **Prévia** é uma ação explícita. O painel aparece como um drawer à direita, com largura limitada (até 530 px), sem bloqueio de interação com o chat e com botão fechar; a conversa não é espremida e o iframe fica restrito ao drawer. O atalho `/previa` também conta como abertura solicitada.
 - **Envio de arquivo:** o chat compacto usa o mesmo helper de API autenticada do chat web, evitando requisições sem CSRF.
 - **Preservação:** Slime rosa, transição avatar → campo → conversa, tema dos outros recursos e versão web/PWA não foram alterados.
 
