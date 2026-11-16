@@ -48,6 +48,8 @@ jobs:
         run: node --test frontend/src/originalPinkSlime.test.mjs
       - name: Verify desktop Liquid Glass isolation and surface coverage
         run: node --test frontend/src/desktopLiquidGlass.test.mjs
+      - name: Verify desktop chat composer-first interactions
+        run: node --test frontend/src/desktopChatLayout.test.mjs
       - name: Validate updater and preload source syntax
         run: |
           node --check desktop/main.cjs
