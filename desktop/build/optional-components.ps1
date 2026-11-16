@@ -114,6 +114,17 @@ function EnsureOllama {
 function PullModel([string]$model) {
   $ollama=OllamaExe
   if(-not $ollama){throw 'Ollama indisponivel.'}
+  try { Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 | Out-Null }
+  catch {
+    Log 'Iniciando o servidor Ollama local'
+    Start-Process -FilePath $ollama -ArgumentList @('serve') -WindowStyle Hidden | Out-Null
+    $ready=$false
+    for($try=0;$try -lt 30;$try++){
+      try { Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 2 | Out-Null; $ready=$true; break }
+      catch { [Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 700 }
+    }
+    if(-not $ready){throw 'O servidor Ollama nao iniciou.'}
+  }
   $installed=(& $ollama list 2>&1|Out-String)
   if($installed.Contains($model)){Log ('Modelo ja presente: '+$model);return}
   Notify ('Baixando modelo '+$model+' (acompanhe no Ollama)...')
