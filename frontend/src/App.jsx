@@ -846,8 +846,6 @@ export default function App() {
             />
           </Suspense>
           {executionPanelOpen && <>
-            <button type="button" className="desktop-preview-backdrop"
-              aria-label="Fechar prévia" onClick={() => setExecutionPanelOpen(false)}/>
             <aside id="desktop-preview-sheet" className="desktop-preview-sheet" aria-label="Prévia solicitada">
               <header className="desktop-preview-sheet-header">
                 <strong>Prévia e execução</strong>
