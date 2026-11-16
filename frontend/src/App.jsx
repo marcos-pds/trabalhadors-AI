@@ -795,7 +795,7 @@ export default function App() {
         <Sidebar page={page} data={{...data,currentConvo}} me={user}
           onNavigate={desktopMode ? next => { if (next === 'chat') closeDesktopPanel(); else navigateDesktop(next) } : navigate}
           onNewChat={desktopMode ? () => { newChat(); closeDesktopPanel() } : newChat}
-          onSwitch={desktopMode ? id => { openConversation(id).finally(closeDesktopPanel) } : openConversation}
+          onSwitch={desktopMode ? async id => {await openConversation(id);setDesktopComposerOpen(false);setDesktopExpanded(true);setExecutionPanelOpen(false)} : openConversation}
           onLogout={() => logout().catch(e => notify(e.message))}/>
       </div>
     </>}
@@ -875,7 +875,7 @@ export default function App() {
         {page === 'agents' && <Agents data={data} onEdit={item => setModal({kind:'agent',item})} onRestored={loadAll}/>}
         {page === 'projects' && <Projects data={data} onCreate={organizationId => setModal({kind:'project',organizationId})} onChat={id => {newChat();setSelectedProject(id);if(desktopMode)closeDesktopPanel()}} onMemory={id => openMemoryPanel(id)} onRefresh={loadAll}/>}
         {page === 'workflows' && <Workflows data={data} onEdit={item => setModal({kind:'workflow',item})} onUse={workflow => {useWorkflow(workflow);if(desktopMode)closeDesktopPanel()}}/>}
-        {page === 'history' && <History data={data} onOpen={desktopMode ? run => openRun(run).finally(closeDesktopPanel) : openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
+        {page === 'history' && <History data={data} onOpen={desktopMode ? async run => {await openRun(run);setPage('chat');setDesktopComposerOpen(false);setDesktopExpanded(true);setExecutionPanelOpen(false)} : openRun} onResume={resumeRun} onRefresh={() => loadAll().then(refreshStats)}/>}
         {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
         {page === 'git' && <GitConnectPage api={api}/>}
