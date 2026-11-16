@@ -19,6 +19,7 @@ test('desktop preview is opt-in, limited to a sheet and never opened after submi
   const app = read('./App.jsx')
   const css = read('./desktop-liquid-glass.css')
   assert.match(app, /desktop-preview-sheet/)
+  assert.doesNotMatch(app, /desktop-preview-backdrop/)
   assert.match(app, /onTogglePreview=\{\(\) => setExecutionPanelOpen\(open => !open\)\}/)
   assert.match(app, /setInspectedRun\(run\.id\);setExecutionPanelOpen\(!desktopMode\);setSteps/)
   assert.match(app, /setInspectedRun\(run\.id\);setExecutionPanelOpen\(!desktopMode\);try\{/)
