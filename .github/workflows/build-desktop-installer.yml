@@ -1,0 +1,81 @@
+name: Build Central Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/desktop-clean-exe-installer
+    paths:
+      - 'desktop/**'
+      - 'frontend/**'
+      - 'central/**'
+      - 'package*.json'
+      - 'requirements.txt'
+      - '.github/workflows/build-desktop-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  setup-windows:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build real offline installer (Python + React + Electron)
+        shell: pwsh
+        run: ./desktop/build_windows.ps1
+
+      - name: Smoke test packaged Python server on localhost
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $PWD 'dist\backend\central-backend\central-backend.exe'
+          if (-not (Test-Path $exe)) { throw 'Bundled backend was not produced' }
+          $env:CENTRAL_PORT = '18887'
+          $env:CENTRAL_DATA_DIR = Join-Path $env:RUNNER_TEMP 'central-desktop-smoke'
+          $env:CENTRAL_DEPLOYMENT_MODE = 'local'
+          $env:CENTRAL_JOB_MODE = 'embedded'
+          $proc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 50; $i++) {
+              if ($proc.HasExited) { throw "Bundled backend exited with code $($proc.ExitCode)" }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:18887/' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200 -and $response.Content -match '<html') {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 800
+            }
+            if (-not $ready) { throw 'Bundled backend did not serve the built React UI' }
+            Write-Host 'Packaged server returned valid HTML'
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Check installer and SHA256
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'desktop/release/Central-Setup-*.exe')
+          if ($installers.Count -ne 1) { throw "Expected one Setup EXE, found $($installers.Count)" }
+          if ($installers[0].Length -lt 20000000) { throw 'Setup appears incomplete' }
+          Get-FileHash $installers[0].FullName -Algorithm SHA256 | Format-List
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Central-Setup-Windows-x64
+          path: desktop/release/Central-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
