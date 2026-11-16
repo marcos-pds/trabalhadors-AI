@@ -84,7 +84,7 @@ body:has(.central-desktop-mode),
 .desktop-slime-button:focus-visible { outline: 2px solid rgba(205,208,250,.85); outline-offset: 2px; }
 .desktop-slime-canvas { display: block; width: 52px; height: 52px; position: relative; pointer-events:none; }
 .desktop-slime-fallback { position: absolute; inset: 5px 4px 7px; border-radius: 53% 53% 44% 44%;
-  background: radial-gradient(circle at 29% 17%, #555e73, #1a202d 48%, #03040a 90%); box-shadow: inset -3px -4px 9px #0009, inset 2px 2px 6px #aab7d266; }
+  background: radial-gradient(circle at 29% 17%, #ffbad2, #f2577b 48%, #be1e45 90%); box-shadow: inset -3px -4px 9px #8d0f4599, inset 2px 2px 6px #ffe1ea99; }
 .desktop-slime-fallback i { position:absolute; width: 7px;height:10px;border-radius:50%;top:18px;background:#06080f;box-shadow:-1px -2px 2px #c8bde366; }
 .desktop-slime-fallback i:nth-child(1){left:11px}.desktop-slime-fallback i:nth-child(2){right:11px}
 .desktop-slime-fallback b{position:absolute;width:11px;height:5px;left:16px;top:31px;border-bottom:2px solid #07090d;border-radius:50%}
@@ -172,4 +172,43 @@ body:has(.central-desktop-mode),
 }
 @media (prefers-reduced-motion: reduce) {
   .central-desktop-mode .central-main,.desktop-slime-button,.desktop-dock-icon {transition:none !important;animation:none !important}
+}
+
+/* Electron only: eliminate the former white web strip behind the dock.
+   The preload applies central-desktop-shell before React mounts; web stays as-is. */
+html.central-desktop-shell,
+html.central-desktop-shell.light,
+html.central-desktop-shell body,
+html.central-desktop-shell #root {
+  background: transparent !important;
+  color-scheme: dark;
+}
+html.central-desktop-shell body { margin: 0; overflow: hidden; }
+html.central-desktop-shell #root { height: 100vh; overflow: hidden; }
+.central-root.central-desktop-mode,
+.central-root.central-desktop-mode[data-theme="dark"] {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.central-root.central-desktop-mode .central-header,
+.central-root.central-desktop-mode .reference-header-brand,
+.central-root.central-desktop-mode .reference-header-right {
+  display: none !important;
+}
+.central-root.central-desktop-mode[data-theme="dark"] .central-main {
+  background: linear-gradient(142deg, rgba(35,44,62,.94), rgba(12,16,27,.96) 60%) !important;
+}
+.central-root.central-desktop-mode.desktop-panel-collapsed .central-main {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.central-root.central-desktop-mode .desktop-slime-button,
+.central-root.central-desktop-mode .desktop-slime-canvas {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
