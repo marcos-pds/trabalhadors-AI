@@ -8,6 +8,7 @@ on:
       - feat/installer-optional-models
       - fix/desktop-pink-slime-reactions
       - feat/desktop-full-liquid-glass-theme
+      - feat/desktop-github-release-updater
     paths:
       - 'desktop/**'
       - 'frontend/**'
@@ -80,6 +81,17 @@ jobs:
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
           }
 
+      - name: Verify GitHub update manifest
+        shell: pwsh
+        run: |
+          $metadata = 'desktop/release/latest.yml'
+          if (-not (Test-Path $metadata)) { throw 'latest.yml is required for GitHub auto updates' }
+          $text = Get-Content $metadata -Raw
+          if ($text -notmatch 'sha512:' -or $text -notmatch '0\.3\.3') {
+            throw 'latest.yml must describe the exact signed update and SHA512 digest'
+          }
+          Write-Host 'GitHub update manifest generated correctly'
+
       - name: Check installer and SHA256
         shell: pwsh
         run: |
@@ -91,7 +103,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Central-Setup-Windows-x64
-          path: desktop/release/Central-Setup-*.exe
+          path: |
+            desktop/release/Central-Setup-*.exe
+            desktop/release/latest.yml
+            desktop/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
