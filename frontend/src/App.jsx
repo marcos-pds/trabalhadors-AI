@@ -571,7 +571,7 @@ export default function App() {
   const notify=useCallback(message=>{setToast(message);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),5000)},[])
   const loadAll=useCallback(async()=>{const keys=['agents','providers','projects','conversations','workflows','runs'];const results=await Promise.allSettled(keys.map(key=>api(`/${key}`)));setData(old=>Object.fromEntries(keys.map((key,i)=>[key,results[i].status==='fulfilled'?results[i].value:old[key]])))},[])
   const refreshStats=useCallback(async()=>{try{setStats(await api('/dashboard'))}catch(error){notify(error.message)}},[notify])
-  useEffect(()=>{document.documentElement.classList.toggle('light',theme==='light');localStorage.setItem('central-theme',theme);localStorage.setItem('central-theme-design','reference-ice-v1')},[theme])
+  useEffect(()=>{document.documentElement.classList.toggle('light',!desktopMode&&theme==='light');localStorage.setItem('central-theme',theme);localStorage.setItem('central-theme-design','reference-ice-v1')},[theme,desktopMode])
   useEffect(()=>{let cancelled=false;api('/me').then(async me=>{if(cancelled)return;setUser(me);await loadAll()}).catch(()=>{}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[loadAll])
   useEffect(()=>{if(user&&(page==='dashboard'||page==='monitoring'))refreshStats()},[page,user,refreshStats])
   useEffect(()=>{if(!user)return;let active=true;api('/computer-access').then(value=>{if(active)setComputerAccess(value)}).catch(()=>{if(active)setComputerAccess({mode:'blocked',folder:''});setAutonomous(false);setWorkspaceApprovals([])});return()=>{active=false}},[user?.id])
@@ -760,6 +760,7 @@ export default function App() {
   if(!user)return <><Auth onLogin={login} notify={notify}/>{toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] max-w-sm rounded-2xl border border-white/15 bg-card px-4 py-3 text-sm shadow-xl">{toast}</div>}</>
   return <div className={'central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy' + (desktopMode ? ' central-desktop-mode ' + (desktopExpanded ? 'desktop-panel-open' : 'desktop-panel-collapsed') : '')} data-page={page} data-theme={desktopMode ? 'dark' : theme}>
     {desktopMode && <Suspense fallback={null}><DesktopDock active={desktopExpanded} page={page} running={!!currentRun}
+      typing={Boolean(prompt.trim())} failed={Boolean(toast && /erro|falha|indisponível|não foi possível/i.test(toast))}
       onToggleChat={toggleDesktopChat} onNavigate={navigateDesktop}
       onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}
       onOpenMemory={() => openDesktopUtility('memory')} onOpenComputer={() => openDesktopUtility('computer')}/></Suspense>}
