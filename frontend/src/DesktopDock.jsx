@@ -33,8 +33,8 @@ export default function DesktopDock({ active = false, page = 'chat', running = f
             return
           }
           onToggleChat()
-        }} aria-label={active && page === 'chat' ? 'Recolher chat' : 'Abrir chat'}
-        title={active && page === 'chat' ? 'Ocultar chat' : 'Clique no avatar para abrir o chat'}
+        }} aria-label={active && page === 'chat' ? 'Recolher conversa ou campo de mensagem' : 'Mostrar campo de mensagem'}
+        title={active && page === 'chat' ? 'Recolher chat' : 'Clique no avatar para digitar seu pedido'}
         aria-expanded={active && page === 'chat'} aria-controls="desktop-central-panel">
         <DesktopSlime active={active && page === 'chat'} running={running} typing={typing} failed={failed}/>
       </button>

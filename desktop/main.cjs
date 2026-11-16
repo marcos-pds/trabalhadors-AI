@@ -123,11 +123,15 @@ async function restoreBackend() {
   await dockWindow?.loadURL(target.href)
 }
 
-function bounds(expanded = false) {
+function bounds(layout = 'dock') {
   const cursor = screen.getCursorScreenPoint()
   const { workArea } = screen.getDisplayNearestPoint(cursor)
-  const width = expanded ? Math.min(980, workArea.width - 20) : Math.min(SMALL_WIDTH, workArea.width - 20)
-  const height = expanded ? Math.min(780, workArea.height - 26) : Math.min(SMALL_HEIGHT, workArea.height - 12)
+  const width = layout === 'full' ? Math.min(980, workArea.width - 20)
+    : layout === 'compose' ? Math.min(790, workArea.width - 20)
+    : Math.min(SMALL_WIDTH, workArea.width - 20)
+  const height = layout === 'full' ? Math.min(780, workArea.height - 26)
+    : layout === 'compose' ? Math.min(210, workArea.height - 12)
+    : Math.min(SMALL_HEIGHT, workArea.height - 12)
   return {
     x: workArea.x + Math.round((workArea.width - width) / 2),
     y: workArea.y + 6,
@@ -149,7 +153,7 @@ async function waitForCentral(url, attempts = 30) {
 
 function createWindow() {
   dockWindow = new BrowserWindow({
-    ...bounds(false),
+    ...bounds('dock'),
     frame: false,
     transparent: true,
     hasShadow: false,
@@ -232,9 +236,16 @@ app.whenReady().then(async () => {
       }
       return updaterController.action(action)
     })
+    // The compact compose state is a short transparent Electron window.
+    // Only a successfully submitted chat message enlarges it to 'full'.
+    ipcMain.on('central-desktop:set-layout', (event, layout) => {
+      if (!allowedRenderer(event)) return
+      if (!['dock', 'compose', 'full'].includes(layout)) return
+      dockWindow.setBounds(bounds(layout), false)
+    })
     ipcMain.on('central-desktop:set-expanded', (event, expanded) => {
       if (!allowedRenderer(event)) return
-      dockWindow.setBounds(bounds(expanded === true), false)
+      dockWindow.setBounds(bounds(expanded === true ? 'full' : 'dock'), false)
     })
     createWindow()
     updaterController.start()
