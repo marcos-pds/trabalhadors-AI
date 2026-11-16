@@ -1,3 +1,4 @@
+import './desktop-liquid-glass.css'
 import { CommandIcon, LiquidGlassUnderlay } from './LiquidGlassUI.jsx'
 import DesktopSlime from './DesktopSlime.jsx'
 
