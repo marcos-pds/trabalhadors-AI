@@ -18,16 +18,23 @@ const tools = [
 // Always visible even while the conversation is collapsed. The avatar alone
 // toggles CHAT; tool icons open their own workspace, never the chat.
 export default function DesktopDock({ active = false, page = 'chat', running = false,
+  typing = false, failed = false,
   onToggleChat, onNavigate, onClosePanel, onOpenMenu, onOpenMemory, onOpenComputer }) {
   return <header className="desktop-dock" aria-label="Barra de ferramentas desktop da Central IA">
     <LiquidGlassUnderlay className="desktop-dock-refraction" strength={0.09}
       radius={28} glow={0.2} edgeHighlight={0.4}/>
     <div className="desktop-dock-content">
       <button type="button" className={'desktop-slime-button' + (active && page === 'chat' ? ' is-active' : '')}
-        onClick={onToggleChat} aria-label={active && page === 'chat' ? 'Recolher chat' : 'Abrir chat'}
+        onClick={event => {
+          if (event.currentTarget.dataset.slimeDrag === 'true') {
+            event.currentTarget.dataset.slimeDrag = 'false'
+            return
+          }
+          onToggleChat()
+        }} aria-label={active && page === 'chat' ? 'Recolher chat' : 'Abrir chat'}
         title={active && page === 'chat' ? 'Ocultar chat' : 'Clique no avatar para abrir o chat'}
         aria-expanded={active && page === 'chat'} aria-controls="desktop-central-panel">
-        <DesktopSlime active={active && page === 'chat'}/>
+        <DesktopSlime active={active && page === 'chat'} running={running} typing={typing} failed={failed}/>
       </button>
       <span className="desktop-dock-separator" aria-hidden="true"/>
       <nav aria-label="Funções da IA" className="desktop-dock-actions">
