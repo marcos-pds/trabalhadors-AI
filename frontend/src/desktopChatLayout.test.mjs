@@ -33,7 +33,7 @@ test('conversation is revealed only following a successful send', () => {
 test('native Electron window has three height states and rejects unknown IPC layouts', () => {
   const main = file('../../desktop/main.cjs')
   const preload = file('../../desktop/preload.cjs')
-  assert.match(main, /layout === 'compose' \? Math\.min\(184/)
+  assert.match(main, /layout === 'compose' \? Math\.min\(210/)
   assert.match(main, /\['dock', 'compose', 'full'\]\.includes\(layout\)/)
   assert.match(preload, /setLayout\(layout\)/)
   assert.match(preload, /\['dock', 'compose', 'full'\]\.includes\(layout\)/)
