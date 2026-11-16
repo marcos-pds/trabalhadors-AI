@@ -10,6 +10,7 @@ on:
       - feat/desktop-full-liquid-glass-theme
       - feat/desktop-github-release-updater
       - feat/desktop-chat-prompt-first
+      - fix/desktop-chat-glass-preview
     paths:
       - 'desktop/**'
       - 'frontend/**'
