@@ -687,3 +687,28 @@ html.central-desktop-shell .central-desktop-mode .desktop-quick-files {
 @media (prefers-reduced-motion: reduce) {
   html.central-desktop-shell .central-desktop-mode .desktop-prompt-only { animation:none !important; }
 }
+
+html.central-desktop-shell .central-desktop-mode .desktop-quick-worker {
+  display: flex;
+  width: max-content;
+  max-width: 94%;
+  align-items: center;
+  gap: 8px;
+  margin: 6px auto 0;
+  padding: 3px 9px;
+  border: 1px solid rgba(239,245,255,.19);
+  border-radius: 12px;
+  background: rgba(24,35,54,.86);
+  font-size: 11px;
+  color: #dbe6f8;
+  backdrop-filter: blur(16px);
+}
+html.central-desktop-shell .central-desktop-mode .desktop-quick-worker select {
+  max-width: 225px;
+  min-width: 120px;
+  padding: 3px;
+  border: 0 !important;
+  border-radius: 7px;
+  background: transparent !important;
+  color: #f1f6ff !important;
+}
