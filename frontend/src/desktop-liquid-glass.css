@@ -1091,14 +1091,6 @@ html.central-desktop-shell .central-desktop-mode .desktop-conversation-hint {
 
 /* Only on request. Preview is a side sheet inside the main workspace, not a
    flex column or fullscreen iframe that breaks transcript dimensions. */
-html.central-desktop-shell .central-desktop-mode .desktop-preview-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(2,6,15,.17);
-  z-index: 36;
-  border: 0;
-  cursor: default;
-}
 html.central-desktop-shell .central-desktop-mode .desktop-preview-sheet {
   position: absolute;
   z-index: 37;
