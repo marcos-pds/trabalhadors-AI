@@ -19,6 +19,7 @@ import PauseLimitPrompt from './PauseLimitPrompt.jsx'
 import { parseResourceCommand, matchingResources, setChatResourceState } from './chatResources.mjs'
 import TokenUsagePanel from './TokenUsagePanel'
 const DesktopDock = lazy(() => import('./DesktopDock.jsx'))
+const DesktopGlassSurface = lazy(() => import('./DesktopGlassSurface.jsx'))
 import './desktop.css'
 import { isCentralDesktop } from './desktopMode.mjs'
 import { providerCategory } from './providerFilters'
@@ -778,8 +779,9 @@ export default function App() {
       </div>
     </>}
     <main className="central-main relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {desktopMode && desktopExpanded && <LiquidGlassUnderlay className="desktop-workspace-refraction"
-        strength={0.045} radius={26} glow={0.16} edgeHighlight={0.30}/>} 
+      {desktopMode && desktopExpanded && <Suspense fallback={null}>
+        <DesktopGlassSurface className="desktop-workspace-refraction"/>
+      </Suspense>}
       {!desktopMode && <header className="central-header flex h-[64px] shrink-0 items-center justify-between px-5 max-sm:px-3">
         <div className="reference-header-left flex items-center gap-4">
           <button type="button" aria-label="Abrir menu" title="Menu"
