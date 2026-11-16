@@ -106,7 +106,7 @@ export default function DesktopChatPrompt({
     catch { onError('Não foi possível iniciar o microfone.') }
   }
 
-  return <section className={'desktop-prompt-only' + (embedded ? ' is-embedded' : '')} aria-label="Nova mensagem para a Central">
+  return <section ref={modePickerRef} className={'desktop-prompt-only' + (embedded ? ' is-embedded' : '')} aria-label="Nova mensagem para a Central">
     <div className="desktop-quick-composer">
       <DesktopGlassSurface className="desktop-quick-rdev-glass"/>
       <form className="desktop-quick-input-row" onSubmit={event => { event.preventDefault(); submit() }}>
@@ -128,7 +128,7 @@ export default function DesktopChatPrompt({
               submit()
             }
           }}/>
-        <div ref={modePickerRef} className="desktop-quick-mode-picker">
+        <div className="desktop-quick-mode-picker">
           <button type="button" className={'desktop-quick-mode-trigger' + (mode !== 'auto' ? ' has-selection' : '')}
             aria-label={mode === 'auto' ? 'Escolher modo de execução (automático)' : 'Modo de execução: ' + (mode === 'team' ? 'Equipe' : 'Individual')}
             title="Modo de execução"
@@ -140,14 +140,6 @@ export default function DesktopChatPrompt({
             </svg>
             {mode !== 'auto' && <span className="desktop-quick-mode-active">{mode === 'team' ? 'Equipe' : 'Individual'}</span>}
           </button>
-          {showModes && <div id="desktop-quick-mode-options" className="desktop-quick-mode-options"
-            role="group" aria-label="Escolher modo de execução">
-            {[['auto','Auto'], ['team','Equipe'], ['manual','Individual']].map(([value,label]) =>
-              <button key={value} type="button" aria-pressed={mode === value}
-                onClick={() => { setMode(value); setShowModes(false); fieldRef.current?.focus() }}>
-                {label}
-              </button>)}
-          </div>}
         </div>
         <button type="button" className={'desktop-quick-microphone' + (listening ? ' is-listening' : '')}
           onClick={dictate} disabled={!recognitionAvailable || sending}
@@ -165,6 +157,14 @@ export default function DesktopChatPrompt({
         </button>
       </form>
     </div>
+    {showModes && <div id="desktop-quick-mode-options" className="desktop-quick-mode-options"
+      role="group" aria-label="Escolher modo de execução">
+      {[['auto','Auto'], ['team','Equipe'], ['manual','Individual']].map(([value,label]) =>
+        <button key={value} type="button" aria-pressed={mode === value}
+          onClick={() => { setMode(value); setShowModes(false); fieldRef.current?.focus() }}>
+          {label}
+        </button>)}
+    </div>}
     {mode === 'manual' && <label className="desktop-quick-worker">
       Trabalhador
       <select aria-label="Trabalhador preferido" value={selectedAgent || ''}
