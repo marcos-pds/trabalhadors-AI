@@ -22,4 +22,19 @@ contextBridge.exposeInMainWorld('centralDesktop', Object.freeze({
   setExpanded(open) {
     ipcRenderer.send('central-desktop:set-expanded', open === true)
   },
+  // Fixed capability list. No URLs, paths, release assets or arbitrary IPC can
+  // be passed from the web-rendered content to the privileged Electron process.
+  getUpdateState() {
+    return ipcRenderer.invoke('central-desktop:update-state')
+  },
+  updateAction(action) {
+    if (!['check', 'download', 'install'].includes(action)) return Promise.reject(new Error('Invalid update action'))
+    return ipcRenderer.invoke('central-desktop:update-action', action)
+  },
+  onUpdateState(callback) {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('central-desktop:update-state', listener)
+    return () => ipcRenderer.removeListener('central-desktop:update-state', listener)
+  },
 }))
