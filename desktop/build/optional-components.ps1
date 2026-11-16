@@ -101,6 +101,17 @@ function Has-RegistryApp([string]$prefix) {
   }
   return $false
 }
+function VoiceCLI {
+  $cli=CommandPath 'voicestudio' (Join-Path $env:LOCALAPPDATA 'Programs\VoiceStudio\voicestudio.exe')
+  if($cli){return $cli}
+  foreach($root in @((Join-Path $env:LOCALAPPDATA 'Programs\VoiceStudio'),(Join-Path $env:ProgramFiles 'VoiceStudio'))) {
+    if(Test-Path $root){
+      $found=Get-ChildItem -Path $root -Filter 'voicestudio.exe' -File -Recurse -ErrorAction SilentlyContinue|Select-Object -First 1
+      if($found){return $found.FullName}
+    }
+  }
+  return $null
+}
 function OllamaExe {
   return CommandPath 'ollama' (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe')
 }
@@ -135,7 +146,7 @@ function PullModel([string]$model) {
   if($p.ExitCode -ne 0){throw ('Erro no download de '+$model+': '+(Get-Content $err -Tail 4|Out-String))}
 }
 function EnsureVoice {
-  $existing=CommandPath 'voicestudio' (Join-Path $env:LOCALAPPDATA 'Programs\VoiceStudio\voicestudio.exe')
+  $existing=VoiceCLI
   if(-not $existing -and -not (Has-RegistryApp 'VoiceStudio')) {
     $release=Invoke-RestMethod 'https://api.github.com/repos/debpalash/VoiceStudio/releases/latest' -Headers @{'User-Agent'='Central-Setup'}
     $asset=$release.assets|Where-Object {$_.name -match '^VoiceStudio-.*-win-x64\.exe$'}|Select-Object -First 1
@@ -151,7 +162,7 @@ function EnsureVoice {
     if(((Get-FileHash $exe -Algorithm SHA256).Hash) -ine (($line -split '\s+')[0])){throw 'SHA256 nao confere.'}
     Run-Setup $exe @('/S')
   }else{Log 'Reutilizando VoiceStudio existente'}
-  $cli=CommandPath 'voicestudio' (Join-Path $env:LOCALAPPDATA 'Programs\VoiceStudio\voicestudio.exe')
+  $cli=VoiceCLI
   if(-not $cli){throw 'VoiceStudio instalado; abra-o para configurar o OmniVoice.'}
   # Model licences (OmniVoice and Higgs tokenizer) must be accepted inside VoiceStudio.
   $reply=(& $cli models install 'k2-fsa/OmniVoice' 2>&1|Out-String)
