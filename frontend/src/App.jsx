@@ -780,7 +780,9 @@ export default function App() {
       onOpenMemory={() => openDesktopUtility('memory')} onOpenComputer={() => openDesktopUtility('computer')}/></Suspense>}
     {desktopMode && desktopComposerOpen && page === 'chat' && !desktopExpanded && <Suspense fallback={null}>
       <DesktopChatPrompt prompt={prompt} setPrompt={setPrompt} files={files} setFiles={setFiles}
-        mode={mode} setMode={setMode} onSend={sendMessage} onCommand={runCommand} onError={notify}/>
+        mode={mode} setMode={setMode} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent}
+        agents={data.agents} onSend={sendMessage} onCommand={runCommand} onError={notify}
+        onClose={closeDesktopPanel}/>
     </Suspense>}
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
