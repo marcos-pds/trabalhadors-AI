@@ -641,6 +641,12 @@ export default function App() {
   }
   const navigateDesktop = next => { if (next === 'chat') return; navigate(next); setDesktopExpanded(true) }
   const openDesktopMenu = () => { if (page === 'chat') setPage('dashboard'); setDesktopExpanded(true); setMenuOpen(true) }
+  const openDesktopUtility = utility => {
+    if (page === 'chat') setPage('dashboard')
+    setDesktopExpanded(true)
+    if (utility === 'memory') openMemoryPanel()
+    if (utility === 'computer') setComputerOpen(true)
+  }
   const closeDesktopPanel = () => { setDesktopExpanded(false); setMenuOpen(false) }
   function newChat(){sourceRef.current?.close();setInspectedRun(null);setExecutionPanelOpen(false);setCurrentRun(null);setCurrentConvo(null);setSelectedProject(null);setSteps([]);setMessages([]);setFiles([]);setPrompt('');setPage('chat');setMenuOpen(false)}
   async function openConversation(id){
@@ -755,7 +761,8 @@ export default function App() {
   return <div className={'central-root relative flex h-screen min-h-[560px] overflow-hidden bg-ink text-copy' + (desktopMode ? ' central-desktop-mode ' + (desktopExpanded ? 'desktop-panel-open' : 'desktop-panel-collapsed') : '')} data-page={page} data-theme={desktopMode ? 'dark' : theme}>
     {desktopMode && <Suspense fallback={null}><DesktopDock active={desktopExpanded} page={page} running={!!currentRun}
       onToggleChat={toggleDesktopChat} onNavigate={navigateDesktop}
-      onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}/></Suspense>}
+      onClosePanel={closeDesktopPanel} onOpenMenu={openDesktopMenu}
+      onOpenMemory={() => openDesktopUtility('memory')} onOpenComputer={() => openDesktopUtility('computer')}/></Suspense>}
     {page === 'chat' && (currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id) && <PauseLimitPrompt key={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} api={api} runId={currentRun || inspectedRun || data.runs.find(run => run.conversation_id === currentConvo)?.id} onResume={id => resumeRun(id,true)}/>}
     {chatResourceCommand && <ChatResourcesPanel key={JSON.stringify(chatResourceCommand)} api={api} command={chatResourceCommand} scopes={resourceScopes} onClose={() => setChatResourceCommand(null)} onResult={resourceResult} onManage={() => {setChatResourceCommand(null);navigate('resources')}}/>}
     {menuOpen && <>
