@@ -22,15 +22,19 @@ O atualizador NÃO usa automaticamente resultados temporários do GitHub Actions
 - latest.yml (versão e hash SHA-512)
 - *.blockmap, quando produzido
 
-Etapas:
+### Publicação automática de todas as versões estáveis aprovadas
 
-1. Revise e faça merge da implementação, com testes concluídos.
-2. Configure secrets do repositório CENTRAL_WINDOWS_SIGNING_PFX_BASE64 (PFX de assinatura Windows, em Base64) e CENTRAL_WINDOWS_SIGNING_PASSWORD. O workflow de release falha se esses secrets estiverem ausentes ou se a assinatura Authenticode do instalador for inválida.
-3. Garanta que a versão no desktop/package.json corresponda exatamente à tag estável.
-4. Crie a tag vX.Y.Z no commit aprovado. A workflow .github/workflows/release-desktop.yml compila, assina, verifica o manifest e cria o GitHub Release.
-5. Teste a atualização entre duas versões assinadas do aplicativo no Windows, inclusive com tarefas ativas e banco SQLite WAL.
+1. Uma mudança de Desktop só é elegível após aprovação, merge na `main` e atualização explícita do número em `desktop/package.json` (SemVer `X.Y.Z`). Builds de PR e branches de desenvolvimento **não são publicadas**.
+2. A conclusão **bem-sucedida** do workflow `Central IA checks` em um **push confiável para `main`** inicia `.github/workflows/release-desktop.yml`. Ele não aceita a conclusão de CI de pull requests ou branches.
+3. O workflow compara a versão com as publicadas: se já existe `vX.Y.Z`, não cria duplicata; se é menor ou igual à última estável, não publica downgrade. Detecta tags remotas existentes e não as sobrescreve.
+4. A assinatura digital Windows é obrigatória. Configure os GitHub Actions secrets **`CENTRAL_WINDOWS_SIGNING_PFX_BASE64`** (certificado PFX em Base64) e **`CENTRAL_WINDOWS_SIGNING_PASSWORD`**. Se estiverem ausentes, a publicação **falha sem enviar um EXE**. O workflow verifica `Get-AuthenticodeSignature` do executável.
+5. Compila o instalador e executa um smoke test do backend empacotado; verifica versão, nome e SHA-512 do instalador contra o `latest.yml` antes de publicar.
+6. Só então cria uma tag `vX.Y.Z` no commit da `main` que passou nos testes, publica o **GitHub Release estável marcado como Latest** com EXE, `latest.yml` e `*.blockmap` (quando presente), e verifica se o Release contém os ativos essenciais.
+7. Teste a atualização entre duas versões assinadas no Windows, incluindo tarefas ativas e dados SQLite WAL. O download e a instalação no desktop instalado continuam exigindo confirmação do usuário, com backup local.
 
-A workflow build-desktop-installer.yml gera **artefatos de teste**, não lança versões públicas.
+**Importante:** este workflow precisa estar presente na **branch padrão `main`** para responder ao evento `workflow_run`; enquanto estiver apenas em PR ou branch de recurso, não publica nada. A suíte completa, inclusive os testes gerais do navegador, deve passar. Se a CI falhar ou não houver certificado de assinatura, não há Release — por segurança.
+
+A workflow `build-desktop-installer.yml` gera somente **artefatos temporários de teste**, nunca uma versão pública.
 
 ## Versões antigas e restauração
 
