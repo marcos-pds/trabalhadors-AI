@@ -1,3 +1,50 @@
+## All Black Premium — Central Desktop 0.3.8
+
+A revisão foi feita **sobre o frontend existente**, sem reconstruir telas ou modificar rotas, integrações, APIs, histórico, modelos, backup ou lógica dos agentes.
+
+### Escopo e breakpoint
+
+- Aplicação: **somente Electron/Windows**, identificada exclusivamente pelo preload `centralDesktop.isDesktop`.
+- Exibição: somente quando o **monitor tem largura de 1024 px ou mais**. A barra compacta do Electron mede menos de 1024 px mesmo em monitores desktop; por isso o breakpoint é calculado com `window.screen.width`, não `window.innerWidth`.
+- O React aplica/removerá a classe `central-desktop-all-black` ao detectar mudanças de janela/orientação. Em telas menores, a folha de estilos não tem efeito e o tema anterior fica intacto.
+- **Web, PWA, mobile e tablet não são alterados**. Nenhum seletor do novo tema é global, e o CSS é carregado apenas pelo Electron. As preferências `localStorage` da web são preservadas.
+
+### Tokens de design
+
+| Função | Token | Valor |
+| --- | --- | --- |
+| Fundo principal | `--desktop-black-bg` | `#000000` |
+| Sidebar | `--desktop-black-sidebar` | `#050505` |
+| Cards e painéis | `--desktop-black-panel` | `#0D0D0D` |
+| Superfícies elevadas | `--desktop-black-raised` | `#141414` |
+| Inputs | `--desktop-black-input` | `#101010` |
+| Bordas | `--desktop-black-border` | `#242424` |
+| Texto principal | `--desktop-black-copy` | `#F5F5F5` |
+| Texto secundário | `--desktop-black-secondary` | `#A3A3A3` |
+| Desabilitado | `--desktop-black-disabled` | `#666666` |
+| Destaque | `--desktop-black-accent` | `#D7B4FA` (cor lilás original da Central) |
+
+O novo `frontend/src/desktop-noir.css` **substitui integralmente** a antiga camada de overrides, evitando adicionar regras duplicadas. Mantemos `!important` apenas nos pontos em que as folhas existentes já impunham estilos com essa prioridade. A animação Slime rosa **não é estilizada** pela nova camada.
+
+### Cobertura
+
+Dock, navegação, dashboard, chat compacto e conversa, sidebar/histórico, formulários, modos Auto/Equipe/Individual, cartões, provedores, configurações, projetos, fluxos, tabelas e relatórios, prévia lateral sob demanda, menus, tooltips, notificações, login e animação de abertura.
+
+- Tipografia de alto contraste, diferenciação por cinzas escuros, bordas discretas, ícones alinhados, scrollbars escuras e destaque lilás apenas em controles ativos.
+- Hover e transições de **180 ms**, foco de teclado visível e fallback para movimento reduzido / alto contraste.
+- Preservados a prévia sob demanda, o chat em três estados e o atualizador por GitHub Releases com consentimento do usuário.
+
+### Validação
+
+- `node --test frontend/src/desktopAllBlack.test.mjs` (1023/1024 px, dock compacto, web/PWA, paleta exata, cobertura, avatar e acessibilidade).
+- `npm run build` e CI de frontend no Windows e Linux.
+- `desktop/build_windows.ps1` para a versão **0.3.8**.
+- Checklist de homologação visual no Windows: monitor de 800, 1024, 1366 e 1920 px; janela compacta e expandida; login, menus, dashboard, chat, prévia e configurações; escala de DPI 100%, 125% e 150%; teclado e movimento reduzido.
+
+**Os testes estáticos não substituem a confirmação visual em um monitor real.** Não mesclar na `main` nem distribuir a versão 0.3.8 por GitHub Releases enquanto a revisão não estiver concluída.
+
+---
+
 ## Tema Noir #000 — Central Desktop 0.3.7
 
 Esta versão de teste aplica a identidade visual **preto verdadeiro** ao aplicativo **Electron/Windows somente**. A versão web/PWA não importa este tema e continua com a aparência anterior.

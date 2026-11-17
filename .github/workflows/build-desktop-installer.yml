@@ -13,6 +13,7 @@ on:
       - fix/desktop-chat-glass-preview
       - fix/desktop-borderless-clean-chat
       - feat/desktop-true-black-noir
+      - feat/desktop-all-black-premium-1024
     paths:
       - 'desktop/**'
       - 'frontend/**'

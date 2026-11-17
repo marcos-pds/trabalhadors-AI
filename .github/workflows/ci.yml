@@ -50,8 +50,8 @@ jobs:
         run: node --test frontend/src/desktopLiquidGlass.test.mjs
       - name: Verify safe automatic GitHub Release policy
         run: node --test desktop/tests/releasePolicy.test.mjs
-      - name: Verify desktop true-black Noir theme isolation and coverage
-        run: node --test frontend/src/desktopNoir.test.mjs
+      - name: Verify Premium All Black screen breakpoint and web/mobile isolation
+        run: node --test frontend/src/desktopAllBlack.test.mjs
       - name: Verify borderless native chat and hidden Auto mode
         run: node --test frontend/src/desktopMinimalFrame.test.mjs
       - name: Verify readable desktop chat and opt-in contained preview
