@@ -20,7 +20,7 @@ test('only approved main CI completion publishes stable releases', () => {
 
 test('publishing requires a new stable SemVer; existing tags and releases are protected', () => {
   assert.match(desktopPackage.version, /^\d+\.\d+\.\d+$/)
-  assert.match(workflow, /'\\^\\d\+\\\.\\d\+\\\.\\d\+\\$'/)
+  assert.match(workflow, /Only stable SemVer versions are released/)
   assert.match(workflow, /gh release list --limit 200/)
   assert.match(workflow, /tagName -eq \$tag/)
   assert.match(workflow, /Version\]::Parse\(\$version\) -le \$previous/)
