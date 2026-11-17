@@ -101,9 +101,11 @@ html.central-desktop-shell.central-desktop-all-black .central-desktop-mode .desk
   -webkit-backdrop-filter: blur(22px) saturate(110%);
   backdrop-filter: blur(22px) saturate(110%);
 }
-html.central-desktop-shell.central-desktop-all-black .central-desktop-mode
-  :is(.desktop-dock::before, .desktop-quick-composer::before,
-      .desktop-quick-composer::after) { content: none !important; }
+html.central-desktop-shell.central-desktop-all-black .central-desktop-mode .desktop-dock::before,
+html.central-desktop-shell.central-desktop-all-black .central-desktop-mode .desktop-quick-composer::before,
+html.central-desktop-shell.central-desktop-all-black .central-desktop-mode .desktop-quick-composer::after {
+  content: none !important;
+}
 html.central-desktop-shell.central-desktop-all-black .central-desktop-mode
   :is(.desktop-dock-refraction, .desktop-workspace-refraction, .desktop-rdev-glass) {
   opacity: .08;
