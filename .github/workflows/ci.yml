@@ -48,6 +48,8 @@ jobs:
         run: node --test frontend/src/originalPinkSlime.test.mjs
       - name: Verify desktop Liquid Glass isolation and surface coverage
         run: node --test frontend/src/desktopLiquidGlass.test.mjs
+      - name: Verify safe automatic GitHub Release policy
+        run: node --test desktop/tests/releasePolicy.test.mjs
       - name: Verify desktop true-black Noir theme isolation and coverage
         run: node --test frontend/src/desktopNoir.test.mjs
       - name: Verify borderless native chat and hidden Auto mode
