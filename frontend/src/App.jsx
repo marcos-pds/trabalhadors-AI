@@ -24,6 +24,7 @@ const DesktopChatPrompt = lazy(() => import('./DesktopChatPrompt.jsx'))
 const DesktopConversation = lazy(() => import('./DesktopConversation.jsx'))
 import './desktop.css'
 import { isCentralDesktop } from './desktopMode.mjs'
+import { getDesktopAllBlackState, applyDesktopAllBlack } from './desktopAllBlack.mjs'
 import { desktopChatLayout, nextAvatarChat, afterSuccessfulSend } from './desktopChatLayout.mjs'
 import { providerCategory } from './providerFilters'
 
@@ -532,8 +533,8 @@ function History({ data, onOpen, onResume, onRefresh }) {
   return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="REGISTROS" title="Histórico de execuções" description="Consulte resultados, erros e horários das tarefas persistidas." action={<Button onClick={onRefresh}>↻ Atualizar</Button>} /><div className="overflow-x-auto rounded-2xl border border-white/[.09] bg-panel"><table className="w-full min-w-[740px] text-left text-xs"><thead className="bg-white/[.035] text-[10px] uppercase tracking-wider text-muted"><tr>{['Tarefa','Data','Status','Custo estimado*','Ações'].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{data.runs.map(run=><tr key={run.id} className="border-t border-white/[.07]"><td className="max-w-sm px-4 py-4"><strong className="block truncate">{run.prompt.slice(0,85)}</strong><small className="text-muted">ID {run.id.slice(0,8)}</small></td><td className="px-4 py-4">{dateLabel(run.created_at,true)}</td><td className="px-4 py-4"><Status value={run.status}>{run.status==='completed' && run.delivery_verified ? 'Concluído com testes' : undefined}</Status></td><td className="px-4 py-4">US$ {Number(run.total_cost).toFixed(5)}</td><td className="px-4 py-4"><div className="flex justify-end gap-2">{['failed','cancelled','paused_limit'].includes(run.status)&&<Button small primary onClick={()=>onResume(run.id)}>↻ Continuar execução</Button>}<Button small onClick={()=>onOpen(run)}>Abrir chat →</Button></div></td></tr>)}</tbody></table>{!data.runs.length&&<Empty icon="◷" title="Nenhuma tarefa registrada">As execuções concluídas aparecem aqui.</Empty>}</div><p className="mt-3 text-[11px] text-muted">* Estimativas locais quando um preço por token é informado.</p></div>
 }
 
-function Settings({ theme, onTheme, me, onLogout, desktopMode = false }) {
-  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="PREFERÊNCIAS" title="Configurações" description="Personalize a aparência e gerencie sua sessão." /><div className="grid gap-4 lg:grid-cols-2"><Panel title="Aparência"><div className="px-5 pb-5"><p className="mb-4 text-sm text-muted">{desktopMode ? 'A versão desktop utiliza preto #000 e Liquid Glass discreto. O tema web permanece independente.' : 'Alterne entre os temas da interface.'}</p>{desktopMode ? <span className="inline-flex rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold">Noir · Preto #000</span> : <Button onClick={onTheme}>◐ Mudar para tema {theme==='dark'?'claro':'escuro'}</Button>}</div></Panel><Panel title="Sua conta"><div className="px-5 pb-5"><p className="text-sm">{me.email}</p><p className="my-3 text-xs leading-5 text-muted">Os dados ficam nesta instalação. Faça backup de data/, incluindo a chave de criptografia.</p><Button danger onClick={onLogout}>Sair da conta</Button></div></Panel></div></div>
+function Settings({ theme, onTheme, me, onLogout, desktopMode = false, allBlackDesktop = false }) {
+  return <div className="mx-auto w-full max-w-[1440px] px-8 py-8 max-sm:px-4"><Heading eyebrow="PREFERÊNCIAS" title="Configurações" description="Personalize a aparência e gerencie sua sessão." /><div className="grid gap-4 lg:grid-cols-2"><Panel title="Aparência"><div className="px-5 pb-5"><p className="mb-4 text-sm text-muted">{desktopMode ? (allBlackDesktop ? 'Tema All Black Premium ativo nesta tela desktop. As preferências da web são independentes.' : 'O tema All Black é aplicado em telas desktop com 1024 px ou mais.') : 'Alterne entre os temas da interface.'}</p>{desktopMode ? <span className="inline-flex rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold">{allBlackDesktop ? 'Noir · Preto #000' : 'Tema desktop padrão'}</span> : <Button onClick={onTheme}>◐ Mudar para tema {theme==='dark'?'claro':'escuro'}</Button>}</div></Panel><Panel title="Sua conta"><div className="px-5 pb-5"><p className="text-sm">{me.email}</p><p className="my-3 text-xs leading-5 text-muted">Os dados ficam nesta instalação. Faça backup de data/, incluindo a chave de criptografia.</p><Button danger onClick={onLogout}>Sair da conta</Button></div></Panel></div></div>
 }
 
 function EditorDialog({ modal, data, onClose, onSave }) {
@@ -569,6 +570,19 @@ function EditorDialog({ modal, data, onClose, onSave }) {
 export default function App() {
   // Electron preload is the desktop authority. Web/PWA never receives this API.
   const desktopMode = isCentralDesktop(window)
+  const [desktopAllBlack, setDesktopAllBlack] = useState(() => getDesktopAllBlackState(window, desktopMode))
+  useEffect(() => {
+    const sync = () => setDesktopAllBlack(applyDesktopAllBlack(document.documentElement, getDesktopAllBlackState(window, desktopMode)))
+    sync()
+    if (!desktopMode) return () => applyDesktopAllBlack(document.documentElement, false)
+    window.addEventListener('resize', sync)
+    window.screen?.orientation?.addEventListener?.('change', sync)
+    return () => {
+      window.removeEventListener('resize', sync)
+      window.screen?.orientation?.removeEventListener?.('change', sync)
+      applyDesktopAllBlack(document.documentElement, false)
+    }
+  }, [desktopMode])
   // Also load the desktop-only stylesheet before authentication, when the
   // dock has not yet mounted. No Noir CSS is downloaded by the web/PWA.
   useEffect(() => {
@@ -882,7 +896,7 @@ export default function App() {
         {page === 'tokens' && <TokenUsagePanel api={api} onOpenRun={id=>api(`/runs/${id}`).then(openRun).catch(error=>notify(error.message))}/>}
         {page === 'resources' && <ResourcesPanel api={api} data={data} me={user}/>}
         {page === 'git' && <GitConnectPage api={api}/>}
-        {page === 'settings' && <Settings theme={desktopMode ? 'dark' : theme} desktopMode={desktopMode} onTheme={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} me={user} onLogout={() => logout().catch(e => notify(e.message))}/>}
+        {page === 'settings' && <Settings theme={desktopMode ? 'dark' : theme} desktopMode={desktopMode} allBlackDesktop={desktopAllBlack} onTheme={() => setTheme(old => old === 'dark' ? 'light' : 'dark')} me={user} onLogout={() => logout().catch(e => notify(e.message))}/>}
       </section>
     </main>
     {computerOpen && <ComputerAccessPanel api={api} onClose={() => setComputerOpen(false)}
