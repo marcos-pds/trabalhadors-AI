@@ -1,71 +1,299 @@
-name: Publish signed Central Desktop update
+name: Publish approved Central Desktop release
 
+# Each new stable desktop/package.json version on main is published only
+# after the main CI succeeds. PR builds never become updater releases.
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: ["Central IA checks"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
+concurrency:
+  group: central-desktop-stable-release
+  cancel-in-progress: false
+
 jobs:
-  signed-release:
-    if: github.repository == 'marcos-pds/trabalhadors-AI'
+  publish-desktop:
+    if: >-
+      github.repository == 'marcos-pds/trabalhadors-AI' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exactly the approved main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
 
-      - name: Require code signing and matching stable tag
+      - name: Gate on a newer stable desktop version and existing releases
+        id: gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path 'desktop/package.json') -or -not (Test-Path 'desktop/build_windows.ps1')) {
+            Write-Host 'Desktop not yet present on main. Skip.'
+            "publish=false" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $version = (Get-Content 'desktop/package.json' -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Only stable SemVer versions are released: $version" }
+          $tag = "v$version"
+          $releases = gh release list --limit 200 --json tagName,isDraft,isPrerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read existing GitHub Releases.' }
+          $published = @($releases | ConvertFrom-Json)
+          if ($published | Where-Object { $_.tagName -eq $tag }) {
+            Write-Host "GitHub Release $tag already exists. Nothing to publish."
+            "publish=false" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $stable = @($published | Where-Object {
+            -not $_.isDraft -and -not $_.isPrerelease -and $_.tagName -match '^v\d+\.\d+\.\d+
+          foreach ($item in $stable) {
+            $previous = [Version]::Parse($item.tagName.Substring(1))
+            if ([Version]::Parse($version) -le $previous) {
+              throw "Refusing to publish $tag: a same or newer stable version ($($item.tagName)) exists."
+            }
+          }
+          $existingTag = git ls-remote --tags origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify remote tags.' }
+          if ($existingTag) {
+            throw "Tag $tag exists but does not have a release. Resolve it manually, never overwrite an existing tag."
+          }
+          "publish=true" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "version=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "tag=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          Write-Host "Approved main SHA $env:APPROVED_SHA is eligible for $tag"
+
+      - name: Require Windows code signing secrets before packaging
+        if: steps.gate.outputs.publish == 'true'
         shell: pwsh
         env:
           CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
         run: |
           if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
-            throw 'Configure signing secrets. Never publish unsigned auto-updates.'
+            throw 'Configure signing secrets CENTRAL_WINDOWS_SIGNING_PFX_BASE64 and CENTRAL_WINDOWS_SIGNING_PASSWORD. Unsigned auto-updates are not published.'
           }
-          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
-          if ("v$version" -cne $env:GITHUB_REF_NAME) {
-            throw "Release tag $env:GITHUB_REF_NAME does not match desktop version v$version."
-          }
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Only stable semantic versions can be published.' }
 
-      - name: Build signed NSIS app and latest.yml
+      - name: Build Windows installer with official signed release metadata
+        if: steps.gate.outputs.publish == 'true'
         shell: pwsh
         env:
           CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
         run: ./desktop/build_windows.ps1
 
-      - name: Verify signed updater output
+      - name: Smoke-test packaged backend
+        if: steps.gate.outputs.publish == 'true'
         shell: pwsh
         run: |
-          $exe = @(Get-ChildItem desktop/release/Central-Setup-*.exe)
-          if ($exe.Count -ne 1) { throw 'Expected one setup executable.' }
-          $signature = Get-AuthenticodeSignature $exe[0].FullName
-          if ($signature.Status -ne 'Valid') { throw 'EXE is not Authenticode signed correctly.' }
-          if (-not (Test-Path 'desktop/release/latest.yml')) { throw 'latest.yml missing' }
-          $metadata = Get-Content desktop/release/latest.yml -Raw
-          if ($metadata -notmatch 'sha512:' -or $metadata -notmatch [regex]::Escape($env:GITHUB_REF_NAME.Substring(1))) {
-            throw 'Release metadata does not match the signed executable.'
+          $ErrorActionPreference = 'Stop'
+          $backend = 'dist/backend/central-backend/central-backend.exe'
+          if (-not (Test-Path $backend)) { throw 'Backend not found in packaged build.' }
+          $env:CENTRAL_PORT = '18889'
+          $env:CENTRAL_DATA_DIR = Join-Path $env:RUNNER_TEMP 'central-desktop-release-smoke'
+          $env:CENTRAL_DEPLOYMENT_MODE = 'local'
+          $env:CENTRAL_JOB_MODE = 'embedded'
+          $proc = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 50; $i++) {
+              if ($proc.HasExited) { throw "Bundled backend exited: $($proc.ExitCode)" }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:18889/' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200 -and $response.Content -match '<html') { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Milliseconds 800
+            }
+            if (-not $ready) { throw 'Packaged backend failed localhost smoke test.' }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
           }
-          Write-Host 'Signed installer and SHA512 manifest verified.'
 
-      - name: Publish stable release with updater manifest
+      - name: Verify Authenticode signature, version and actual SHA512
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem 'desktop/release/Central-Setup-*.exe')
+          if ($files.Count -ne 1) { throw 'Expected one NSIS installer.' }
+          $exe = $files[0]
+          $auth = Get-AuthenticodeSignature $exe.FullName
+          if ($auth.Status -ne 'Valid' -or -not $auth.SignerCertificate) {
+            throw 'Installer is not Authenticode signed by a trusted publisher.'
+          }
+          $manifestPath = 'desktop/release/latest.yml'
+          if (-not (Test-Path $manifestPath)) { throw 'Missing latest.yml for electron-updater.' }
+          $manifest = Get-Content $manifestPath -Raw
+          $versionPattern = '(?m)^version:\s*' + [regex]::Escape($env:RELEASE_VERSION) + '\s*$'
+          if ($manifest -notmatch $versionPattern) { throw 'latest.yml version mismatch.' }
+          if (-not $manifest.Contains($exe.Name)) { throw 'latest.yml installer filename mismatch.' }
+          $hashPattern = '(?m)^\s*sha512:\s*([A-Za-z0-9+/=]+)\s*$'
+          $matches = [regex]::Matches($manifest, $hashPattern)
+          if ($matches.Count -lt 1) { throw 'No SHA512 in latest.yml.' }
+          $expected = [Convert]::ToBase64String([Convert]::FromHexString((Get-FileHash $exe.FullName -Algorithm SHA512).Hash))
+          if (-not ($matches | Where-Object { $_.Groups[1].Value -eq $expected })) {
+            throw 'Signed installer SHA512 does not match latest.yml.'
+          }
+          Write-Host "Signed Central $env:RELEASE_VERSION passed Authenticode and SHA512 validation."
+
+      - name: Publish stable version to GitHub Releases
+        if: steps.gate.outputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.gate.outputs.tag }}
+          APPROVED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $assets = @((Get-ChildItem 'desktop/release/Central-Setup-*.exe').FullName)
           $assets += (Resolve-Path 'desktop/release/latest.yml').Path
-          $assets += @(Get-ChildItem 'desktop/release/*.blockmap' -ErrorAction SilentlyContinue |
-            ForEach-Object { $_.FullName })
-          gh release create $env:GITHUB_REF_NAME @assets --verify-tag --title "Central Desktop $($env:GITHUB_REF_NAME)" --generate-notes --latest
+          $assets += @(Get-ChildItem 'desktop/release/*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          gh release create $env:RELEASE_TAG @assets --target $env:APPROVED_SHA --title "Central Desktop $env:RELEASE_TAG" --generate-notes --latest
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }
+          $published = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.isDraft -or $published.isPrerelease) {
+            throw 'GitHub Release was not published as stable.'
+          }
+          $names = @($published.assets | ForEach-Object { $_.name })
+          if ('latest.yml' -notin $names -or -not ($names | Where-Object { $_ -match '^Central-Setup-.*\.exe$' })) {
+            throw 'Published GitHub Release lacks the updater manifest or installer.'
+          }
+          Write-Host "Published and verified stable $env:RELEASE_TAG"
+
+          })
+          foreach ($item in $stable) {
+            $previous = [Version]::Parse($item.tagName.Substring(1))
+            if ([Version]::Parse($version) -le $previous) {
+              throw "Refusing to publish $tag: a same or newer stable version ($($item.tagName)) exists."
+            }
+          }
+          $existingTag = git ls-remote --tags origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify remote tags.' }
+          if ($existingTag) {
+            throw "Tag $tag exists but does not have a release. Resolve it manually, never overwrite an existing tag."
+          }
+          "publish=true" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "version=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "tag=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          Write-Host "Approved main SHA $env:APPROVED_SHA is eligible for $tag"
+
+      - name: Require Windows code signing secrets before packaging
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
+            throw 'Configure signing secrets CENTRAL_WINDOWS_SIGNING_PFX_BASE64 and CENTRAL_WINDOWS_SIGNING_PASSWORD. Unsigned auto-updates are not published.'
+          }
+
+      - name: Build Windows installer with official signed release metadata
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.CENTRAL_WINDOWS_SIGNING_PASSWORD }}
+        run: ./desktop/build_windows.ps1
+
+      - name: Smoke-test packaged backend
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $backend = 'dist/backend/central-backend/central-backend.exe'
+          if (-not (Test-Path $backend)) { throw 'Backend not found in packaged build.' }
+          $env:CENTRAL_PORT = '18889'
+          $env:CENTRAL_DATA_DIR = Join-Path $env:RUNNER_TEMP 'central-desktop-release-smoke'
+          $env:CENTRAL_DEPLOYMENT_MODE = 'local'
+          $env:CENTRAL_JOB_MODE = 'embedded'
+          $proc = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 50; $i++) {
+              if ($proc.HasExited) { throw "Bundled backend exited: $($proc.ExitCode)" }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:18889/' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200 -and $response.Content -match '<html') { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Milliseconds 800
+            }
+            if (-not $ready) { throw 'Packaged backend failed localhost smoke test.' }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Verify Authenticode signature, version and actual SHA512
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem 'desktop/release/Central-Setup-*.exe')
+          if ($files.Count -ne 1) { throw 'Expected one NSIS installer.' }
+          $exe = $files[0]
+          $auth = Get-AuthenticodeSignature $exe.FullName
+          if ($auth.Status -ne 'Valid' -or -not $auth.SignerCertificate) {
+            throw 'Installer is not Authenticode signed by a trusted publisher.'
+          }
+          $manifestPath = 'desktop/release/latest.yml'
+          if (-not (Test-Path $manifestPath)) { throw 'Missing latest.yml for electron-updater.' }
+          $manifest = Get-Content $manifestPath -Raw
+          $versionPattern = '(?m)^version:\s*' + [regex]::Escape($env:RELEASE_VERSION) + '\s*$'
+          if ($manifest -notmatch $versionPattern) { throw 'latest.yml version mismatch.' }
+          if (-not $manifest.Contains($exe.Name)) { throw 'latest.yml installer filename mismatch.' }
+          $hashPattern = '(?m)^\s*sha512:\s*([A-Za-z0-9+/=]+)\s*$'
+          $matches = [regex]::Matches($manifest, $hashPattern)
+          if ($matches.Count -lt 1) { throw 'No SHA512 in latest.yml.' }
+          $expected = [Convert]::ToBase64String([Convert]::FromHexString((Get-FileHash $exe.FullName -Algorithm SHA512).Hash))
+          if (-not ($matches | Where-Object { $_.Groups[1].Value -eq $expected })) {
+            throw 'Signed installer SHA512 does not match latest.yml.'
+          }
+          Write-Host "Signed Central $env:RELEASE_VERSION passed Authenticode and SHA512 validation."
+
+      - name: Publish stable version to GitHub Releases
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.gate.outputs.tag }}
+          APPROVED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @((Get-ChildItem 'desktop/release/Central-Setup-*.exe').FullName)
+          $assets += (Resolve-Path 'desktop/release/latest.yml').Path
+          $assets += @(Get-ChildItem 'desktop/release/*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          gh release create $env:RELEASE_TAG @assets --target $env:APPROVED_SHA --title "Central Desktop $env:RELEASE_TAG" --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }
+          $published = gh release view $env:RELEASE_TAG --json isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.isDraft -or $published.isPrerelease) {
+            throw 'GitHub Release was not published as stable.'
+          }
+          $names = @($published.assets | ForEach-Object { $_.name })
+          if ('latest.yml' -notin $names -or -not ($names | Where-Object { $_ -match '^Central-Setup-.*\.exe$' })) {
+            throw 'Published GitHub Release lacks the updater manifest or installer.'
+          }
+          Write-Host "Published and verified stable $env:RELEASE_TAG"
